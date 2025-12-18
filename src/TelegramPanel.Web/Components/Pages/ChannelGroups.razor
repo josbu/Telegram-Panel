@@ -1,0 +1,100 @@
+@page "/channels/groups"
+@inject ISnackbar Snackbar
+
+<PageTitle>频道分组 - Telegram Panel</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">频道分组管理</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="4">
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">添加分组</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField @bind-Value="newGroupName" Label="分组名称" Variant="Variant.Outlined" />
+                <MudTextField @bind-Value="newGroupDesc" Label="描述" Variant="Variant.Outlined" Lines="3" Class="mt-3" />
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                           Disabled="@string.IsNullOrEmpty(newGroupName)" OnClick="AddGroup">
+                    添加分组
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+    </MudItem>
+
+    <MudItem xs="12" md="8">
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">分组列表</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTable Items="@groups" Hover="true">
+                    <HeaderContent>
+                        <MudTh>分组名称</MudTh>
+                        <MudTh>描述</MudTh>
+                        <MudTh>频道数量</MudTh>
+                        <MudTh>操作</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="分组名称">@context.Name</MudTd>
+                        <MudTd DataLabel="描述">@context.Description</MudTd>
+                        <MudTd DataLabel="频道数量">@context.ChannelCount</MudTd>
+                        <MudTd DataLabel="操作">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Info" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                           OnClick="@(() => DeleteGroup(context.Id))" />
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string newGroupName = "";
+    private string newGroupDesc = "";
+
+    private List<GroupModel> groups = new()
+    {
+        new GroupModel { Id = 1, Name = "推广频道", Description = "用于推广的频道", ChannelCount = 5 },
+        new GroupModel { Id = 2, Name = "资讯频道", Description = "资讯类频道", ChannelCount = 3 }
+    };
+
+    private void AddGroup()
+    {
+        var newGroup = new GroupModel
+        {
+            Id = groups.Max(g => g.Id) + 1,
+            Name = newGroupName,
+            Description = newGroupDesc,
+            ChannelCount = 0
+        };
+
+        groups.Add(newGroup);
+        Snackbar.Add($"分组 \"{newGroupName}\" 添加成功", Severity.Success);
+
+        newGroupName = "";
+        newGroupDesc = "";
+    }
+
+    private void DeleteGroup(int id)
+    {
+        var group = groups.FirstOrDefault(g => g.Id == id);
+        if (group != null)
+        {
+            groups.Remove(group);
+            Snackbar.Add("分组已删除", Severity.Success);
+        }
+    }
+
+    private class GroupModel
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Description { get; set; } = "";
+        public int ChannelCount { get; set; }
+    }
+}

@@ -1,0 +1,147 @@
+@page "/settings"
+@inject ISnackbar Snackbar
+
+<PageTitle>系统设置 - Telegram Panel</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">系统设置</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="6">
+        <MudCard Class="mb-4">
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">Telegram API 配置</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField @bind-Value="apiId" Label="默认 API ID" Variant="Variant.Outlined"
+                              HelperText="从 https://my.telegram.org 获取" />
+                <MudTextField @bind-Value="apiHash" Label="默认 API Hash" Variant="Variant.Outlined" Class="mt-3"
+                              HelperText="用于新账号登录和导入" />
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveApiConfig">
+                    保存配置
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">批量操作设置</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudNumericField @bind-Value="defaultDelay" Label="默认操作间隔 (毫秒)" Variant="Variant.Outlined"
+                                 Min="1000" Max="10000" HelperText="建议2000-5000ms" />
+                <MudNumericField @bind-Value="maxConcurrent" Label="最大并发任务数" Variant="Variant.Outlined" Class="mt-3"
+                                 Min="1" Max="10" HelperText="同时执行的任务数量" />
+                <MudSwitch @bind-Value="autoRetry" Label="失败自动重试" Color="Color.Primary" Class="mt-3" />
+                @if (autoRetry)
+                {
+                    <MudNumericField @bind-Value="maxRetries" Label="最大重试次数" Variant="Variant.Outlined" Class="mt-3"
+                                     Min="1" Max="5" />
+                }
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveBatchConfig">
+                    保存配置
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudCard Class="mb-4">
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">数据同步</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSwitch @bind-Value="autoSync" Label="自动同步频道/群组信息" Color="Color.Primary" />
+                @if (autoSync)
+                {
+                    <MudNumericField @bind-Value="syncInterval" Label="同步间隔 (小时)" Variant="Variant.Outlined" Class="mt-3"
+                                     Min="1" Max="24" />
+                }
+                <MudButton Variant="Variant.Outlined" Color="Color.Info" FullWidth="true" Class="mt-4"
+                           OnClick="SyncNow">
+                    立即同步
+                </MudButton>
+            </MudCardContent>
+        </MudCard>
+
+        <MudCard Class="mb-4">
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">日志设置</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSelect @bind-Value="logLevel" Label="日志级别" Variant="Variant.Outlined">
+                    <MudSelectItem Value="Debug">Debug</MudSelectItem>
+                    <MudSelectItem Value="Information">Information</MudSelectItem>
+                    <MudSelectItem Value="Warning">Warning</MudSelectItem>
+                    <MudSelectItem Value="Error">Error</MudSelectItem>
+                </MudSelect>
+                <MudNumericField @bind-Value="logRetentionDays" Label="日志保留天数" Variant="Variant.Outlined" Class="mt-3"
+                                 Min="1" Max="90" />
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveLogConfig">
+                    保存配置
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">系统信息</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudText Typo="Typo.body2"><strong>版本：</strong> 1.0.0</MudText>
+                <MudText Typo="Typo.body2" Class="mt-2"><strong>运行时：</strong> .NET 8.0</MudText>
+                <MudText Typo="Typo.body2" Class="mt-2"><strong>数据库：</strong> SQLite</MudText>
+                <MudDivider Class="my-3" />
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.Delete" OnClick="ClearCache">
+                    清除缓存
+                </MudButton>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string apiId = "";
+    private string apiHash = "";
+    private int defaultDelay = 2000;
+    private int maxConcurrent = 3;
+    private bool autoRetry = true;
+    private int maxRetries = 3;
+    private bool autoSync = true;
+    private int syncInterval = 6;
+    private string logLevel = "Information";
+    private int logRetentionDays = 30;
+
+    private void SaveApiConfig()
+    {
+        Snackbar.Add("API 配置已保存", Severity.Success);
+    }
+
+    private void SaveBatchConfig()
+    {
+        Snackbar.Add("批量操作配置已保存", Severity.Success);
+    }
+
+    private void SaveLogConfig()
+    {
+        Snackbar.Add("日志配置已保存", Severity.Success);
+    }
+
+    private async Task SyncNow()
+    {
+        Snackbar.Add("开始同步...", Severity.Info);
+        await Task.Delay(2000);
+        Snackbar.Add("同步完成", Severity.Success);
+    }
+
+    private void ClearCache()
+    {
+        Snackbar.Add("缓存已清除", Severity.Success);
+    }
+}

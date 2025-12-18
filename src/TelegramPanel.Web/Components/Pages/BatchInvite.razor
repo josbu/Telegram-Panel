@@ -1,0 +1,130 @@
+@page "/batch/invite"
+@inject IChannelService ChannelService
+@inject ISnackbar Snackbar
+
+<PageTitle>批量邀请 - Telegram Panel</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">批量邀请用户</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="6">
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">配置邀请</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSelect @bind-Value="selectedAccountId" Label="执行账号" Variant="Variant.Outlined" Required="true">
+                    <MudSelectItem Value="0">-- 请选择账号 --</MudSelectItem>
+                    <MudSelectItem Value="1">账号1 (+86xxxxxxxx)</MudSelectItem>
+                    <MudSelectItem Value="2">账号2 (+86yyyyyyyy)</MudSelectItem>
+                </MudSelect>
+
+                <MudSelect @bind-Value="selectedChannelId" Label="目标频道" Variant="Variant.Outlined" Required="true" Class="mt-4">
+                    <MudSelectItem Value="0L">-- 请选择频道 --</MudSelectItem>
+                    <MudSelectItem Value="1L">频道1</MudSelectItem>
+                    <MudSelectItem Value="2L">频道2</MudSelectItem>
+                </MudSelect>
+
+                <MudTextField @bind-Value="usernames" Label="用户名列表" Variant="Variant.Outlined" Lines="10" Class="mt-4"
+                              HelperText="每行一个用户名，支持 @username 或直接 username 格式"
+                              Placeholder="@user1&#10;user2&#10;@user3" />
+
+                <MudNumericField @bind-Value="delayMs" Label="邀请间隔 (毫秒)" Variant="Variant.Outlined" Min="1000" Max="10000" Class="mt-4"
+                                 HelperText="建议设置2000-5000ms，避免触发风控" />
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="ClearForm">清空</MudButton>
+                <MudSpacer />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@(selectedAccountId == 0 || selectedChannelId == 0 || string.IsNullOrEmpty(usernames) || inviting)"
+                           OnClick="StartInvite">
+                    @if (inviting)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        <span>邀请中...</span>
+                    }
+                    else
+                    {
+                        <span>开始邀请</span>
+                    }
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">邀请结果</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudList Dense="true">
+                    @foreach (var result in inviteResults)
+                    {
+                        <MudListItem Icon="@(result.Success ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                                     IconColor="@(result.Success ? Color.Success : Color.Error)">
+                            <div>
+                                <MudText Typo="Typo.body2">@("@" + result.Username)</MudText>
+                                @if (!result.Success)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error">@result.ErrorMessage</MudText>
+                                }
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+                @if (inviteResults.Any())
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.body2">
+                        成功：@inviteResults.Count(r => r.Success) / 总计：@inviteResults.Count
+                    </MudText>
+                }
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private int selectedAccountId = 0;
+    private long selectedChannelId = 0;
+    private string usernames = "";
+    private int delayMs = 2000;
+    private bool inviting = false;
+
+    private List<InviteResult> inviteResults = new();
+
+    private async Task StartInvite()
+    {
+        inviting = true;
+        inviteResults.Clear();
+
+        try
+        {
+            var usernameList = usernames.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(u => u.Trim().TrimStart('@'))
+                .Where(u => !string.IsNullOrEmpty(u))
+                .ToList();
+
+            var results = await ChannelService.BatchInviteUsersAsync(selectedAccountId, selectedChannelId, usernameList, delayMs);
+            inviteResults.AddRange(results);
+
+            var successCount = results.Count(r => r.Success);
+            Snackbar.Add($"邀请完成：{successCount}/{results.Count} 成功", successCount == results.Count ? Severity.Success : Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"邀请失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            inviting = false;
+        }
+    }
+
+    private void ClearForm()
+    {
+        usernames = "";
+        inviteResults.Clear();
+    }
+}

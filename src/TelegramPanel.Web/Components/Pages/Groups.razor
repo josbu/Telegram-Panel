@@ -1,0 +1,94 @@
+@page "/groups"
+@inject IGroupService GroupService
+@inject ISnackbar Snackbar
+
+<PageTitle>群组列表 - Telegram Panel</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">群组列表</MudText>
+
+<MudCard>
+    <MudCardContent>
+        <MudTable Items="@groups" Hover="true" Breakpoint="Breakpoint.Sm" Loading="@loading">
+            <ToolBarContent>
+                <MudText Typo="Typo.h6">我的群组</MudText>
+                <MudSpacer />
+                <MudTextField @bind-Value="searchString" Placeholder="搜索群组..." Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" />
+            </ToolBarContent>
+            <HeaderContent>
+                <MudTh>群组名称</MudTh>
+                <MudTh>用户名</MudTh>
+                <MudTh>成员数</MudTh>
+                <MudTh>创建账号</MudTh>
+                <MudTh>最后同步</MudTh>
+                <MudTh>操作</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="群组名称">
+                    <div class="d-flex align-center">
+                        <MudAvatar Color="Color.Secondary" Size="Size.Small" Class="mr-2">@context.Title[0]</MudAvatar>
+                        <MudText Typo="Typo.body2"><strong>@context.Title</strong></MudText>
+                    </div>
+                </MudTd>
+                <MudTd DataLabel="用户名">
+                    @if (!string.IsNullOrEmpty(context.Username))
+                    {
+                        <MudChip Size="Size.Small" Icon="@Icons.Material.Filled.AlternateEmail">@context.Username</MudChip>
+                    }
+                    else
+                    {
+                        <span>-</span>
+                    }
+                </MudTd>
+                <MudTd DataLabel="成员数">@context.MemberCount</MudTd>
+                <MudTd DataLabel="创建账号">账号 @context.CreatorAccountId</MudTd>
+                <MudTd DataLabel="最后同步">@context.SyncedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                <MudTd DataLabel="操作">
+                    <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small">
+                        <MudMenuItem Icon="@Icons.Material.Filled.Info">查看详情</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.PersonAdd">邀请成员</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Link">复制链接</MudMenuItem>
+                        <MudDivider />
+                        <MudMenuItem Icon="@Icons.Material.Filled.Delete" IconColor="Color.Error">删除群组</MudMenuItem>
+                    </MudMenu>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText>暂无群组数据</MudText>
+            </NoRecordsContent>
+            <LoadingContent>
+                <MudProgressCircular Indeterminate="true" />
+            </LoadingContent>
+        </MudTable>
+    </MudCardContent>
+</MudCard>
+
+@code {
+    private List<GroupInfo> groups = new();
+    private bool loading = true;
+    private string searchString = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadGroups();
+    }
+
+    private async Task LoadGroups()
+    {
+        loading = true;
+        try
+        {
+            // TODO: 从数据库加载群组列表
+            groups = new List<GroupInfo>();
+            Snackbar.Add("群组列表加载成功", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+}

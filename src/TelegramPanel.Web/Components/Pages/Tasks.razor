@@ -1,0 +1,107 @@
+@page "/tasks"
+@inject ISnackbar Snackbar
+
+<PageTitle>任务中心 - Telegram Panel</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">任务中心</MudText>
+
+<MudCard>
+    <MudCardContent>
+        <MudTable Items="@tasks" Hover="true" Breakpoint="Breakpoint.Sm">
+            <ToolBarContent>
+                <MudText Typo="Typo.h6">任务列表</MudText>
+                <MudSpacer />
+                <MudSelect @bind-Value="filterStatus" Label="状态筛选" Variant="Variant.Outlined" Dense="true" Style="min-width: 120px;">
+                    <MudSelectItem Value="all">全部</MudSelectItem>
+                    <MudSelectItem Value="pending">待执行</MudSelectItem>
+                    <MudSelectItem Value="running">执行中</MudSelectItem>
+                    <MudSelectItem Value="completed">已完成</MudSelectItem>
+                    <MudSelectItem Value="failed">失败</MudSelectItem>
+                </MudSelect>
+            </ToolBarContent>
+            <HeaderContent>
+                <MudTh>任务ID</MudTh>
+                <MudTh>任务类型</MudTh>
+                <MudTh>目标</MudTh>
+                <MudTh>状态</MudTh>
+                <MudTh>进度</MudTh>
+                <MudTh>创建时间</MudTh>
+                <MudTh>操作</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="任务ID">@context.Id</MudTd>
+                <MudTd DataLabel="任务类型">
+                    <MudChip Size="Size.Small" Icon="@GetTaskIcon(context.Type)">@context.Type</MudChip>
+                </MudTd>
+                <MudTd DataLabel="目标">@context.Target</MudTd>
+                <MudTd DataLabel="状态">
+                    <MudChip Size="Size.Small" Color="@GetStatusColor(context.Status)">@context.Status</MudChip>
+                </MudTd>
+                <MudTd DataLabel="进度">
+                    <MudProgressLinear Value="@context.Progress" Color="Color.Primary" />
+                    <MudText Typo="Typo.caption">@context.Progress%</MudText>
+                </MudTd>
+                <MudTd DataLabel="创建时间">@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                <MudTd DataLabel="操作">
+                    <MudIconButton Icon="@Icons.Material.Filled.Info" Size="Size.Small" Color="Color.Info"
+                                   OnClick="@(() => ShowTaskDetails(context))" />
+                    @if (context.Status == "待执行" || context.Status == "执行中")
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Cancel" Size="Size.Small" Color="Color.Warning"
+                                       OnClick="@(() => CancelTask(context.Id))" />
+                    }
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText>暂无任务</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudCardContent>
+</MudCard>
+
+@code {
+    private string filterStatus = "all";
+
+    private List<TaskModel> tasks = new()
+    {
+        new TaskModel { Id = 1, Type = "批量邀请", Target = "频道1", Status = "已完成", Progress = 100, CreatedAt = DateTime.Now.AddHours(-2) },
+        new TaskModel { Id = 2, Type = "设置管理", Target = "频道2", Status = "执行中", Progress = 60, CreatedAt = DateTime.Now.AddMinutes(-30) },
+        new TaskModel { Id = 3, Type = "批量邀请", Target = "频道3", Status = "待执行", Progress = 0, CreatedAt = DateTime.Now.AddMinutes(-5) }
+    };
+
+    private string GetTaskIcon(string type) => type switch
+    {
+        "批量邀请" => Icons.Material.Filled.PersonAdd,
+        "设置管理" => Icons.Material.Filled.AdminPanelSettings,
+        _ => Icons.Material.Filled.Task
+    };
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "已完成" => Color.Success,
+        "执行中" => Color.Info,
+        "待执行" => Color.Default,
+        "失败" => Color.Error,
+        _ => Color.Default
+    };
+
+    private void ShowTaskDetails(TaskModel task)
+    {
+        Snackbar.Add($"查看任务详情：{task.Type} - {task.Target}", Severity.Info);
+    }
+
+    private void CancelTask(int id)
+    {
+        Snackbar.Add($"取消任务 #{id}", Severity.Warning);
+    }
+
+    private class TaskModel
+    {
+        public int Id { get; set; }
+        public string Type { get; set; } = "";
+        public string Target { get; set; } = "";
+        public string Status { get; set; } = "";
+        public int Progress { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+}

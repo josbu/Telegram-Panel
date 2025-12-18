@@ -1,0 +1,151 @@
+@page "/batch/admins"
+@inject IChannelService ChannelService
+@inject ISnackbar Snackbar
+
+<PageTitle>批量设管理 - Telegram Panel</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">批量设置管理员</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="6">
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">配置管理员</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSelect @bind-Value="selectedAccountId" Label="执行账号" Variant="Variant.Outlined" Required="true">
+                    <MudSelectItem Value="0">-- 请选择账号 --</MudSelectItem>
+                    <MudSelectItem Value="1">账号1 (+86xxxxxxxx)</MudSelectItem>
+                    <MudSelectItem Value="2">账号2 (+86yyyyyyyy)</MudSelectItem>
+                </MudSelect>
+
+                <MudSelect @bind-Value="selectedChannelId" Label="目标频道" Variant="Variant.Outlined" Required="true" Class="mt-4">
+                    <MudSelectItem Value="0L">-- 请选择频道 --</MudSelectItem>
+                    <MudSelectItem Value="1L">频道1</MudSelectItem>
+                    <MudSelectItem Value="2L">频道2</MudSelectItem>
+                </MudSelect>
+
+                <MudTextField @bind-Value="adminTitle" Label="管理员头衔" Variant="Variant.Outlined" Class="mt-4"
+                              HelperText="可选，为管理员设置自定义头衔" />
+
+                <MudText Typo="Typo.h6" Class="mt-4 mb-2">管理员权限</MudText>
+
+                <MudCheckBox @bind-Value="permissions.ChangeInfo" Label="修改频道信息" />
+                <MudCheckBox @bind-Value="permissions.PostMessages" Label="发布消息" />
+                <MudCheckBox @bind-Value="permissions.EditMessages" Label="编辑消息" />
+                <MudCheckBox @bind-Value="permissions.DeleteMessages" Label="删除消息" />
+                <MudCheckBox @bind-Value="permissions.BanUsers" Label="封禁用户" />
+                <MudCheckBox @bind-Value="permissions.InviteUsers" Label="邀请用户" />
+                <MudCheckBox @bind-Value="permissions.PinMessages" Label="置顶消息" />
+                <MudCheckBox @bind-Value="permissions.AddAdmins" Label="添加管理员" />
+
+                <MudTextField @bind-Value="usernames" Label="用户名列表" Variant="Variant.Outlined" Lines="8" Class="mt-4"
+                              HelperText="每行一个用户名"
+                              Placeholder="@user1&#10;user2&#10;@user3" />
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="ClearForm">清空</MudButton>
+                <MudSpacer />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@(selectedAccountId == 0 || selectedChannelId == 0 || string.IsNullOrEmpty(usernames) || processing)"
+                           OnClick="StartSetAdmins">
+                    @if (processing)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        <span>设置中...</span>
+                    }
+                    else
+                    {
+                        <span>开始设置</span>
+                    }
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudCard>
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">设置结果</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudList Dense="true">
+                    @foreach (var result in results)
+                    {
+                        <MudListItem Icon="@(result.Success ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                                     IconColor="@(result.Success ? Color.Success : Color.Error)">
+                            <div>
+                                <MudText Typo="Typo.body2">@("@" + result.Username)</MudText>
+                                @if (!result.Success)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error">@result.ErrorMessage</MudText>
+                                }
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+                @if (results.Any())
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.body2">
+                        成功：@results.Count(r => r.Success) / 总计：@results.Count
+                    </MudText>
+                }
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private int selectedAccountId = 0;
+    private long selectedChannelId = 0;
+    private string adminTitle = "Admin";
+    private string usernames = "";
+    private bool processing = false;
+
+    private AdminPermissions permissions = new();
+    private List<SetAdminResult> results = new();
+
+    private async Task StartSetAdmins()
+    {
+        processing = true;
+        results.Clear();
+
+        try
+        {
+            var usernameList = usernames.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(u => u.Trim().TrimStart('@'))
+                .Where(u => !string.IsNullOrEmpty(u))
+                .ToList();
+
+            // TODO: 转换权限并调用 API
+            Snackbar.Add("批量设置管理员功能开发中", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"设置失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            processing = false;
+        }
+    }
+
+    private void ClearForm()
+    {
+        usernames = "";
+        results.Clear();
+    }
+
+    private class AdminPermissions
+    {
+        public bool ChangeInfo { get; set; } = true;
+        public bool PostMessages { get; set; } = true;
+        public bool EditMessages { get; set; } = true;
+        public bool DeleteMessages { get; set; } = true;
+        public bool BanUsers { get; set; }
+        public bool InviteUsers { get; set; } = true;
+        public bool PinMessages { get; set; } = true;
+        public bool AddAdmins { get; set; }
+    }
+}
