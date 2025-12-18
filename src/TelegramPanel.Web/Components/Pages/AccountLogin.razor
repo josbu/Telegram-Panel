@@ -1,0 +1,164 @@
+@page "/accounts/login"
+@inject IAccountService AccountService
+@inject ISnackbar Snackbar
+
+<PageTitle>手机号登录 - Telegram Panel</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">手机号登录</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="6" Class="mx-auto">
+        <MudCard>
+            <MudCardContent>
+                <MudStepper @ref="stepper" Color="Color.Primary">
+                    <MudStep Title="API 配置">
+                        <MudTextField @bind-Value="apiId" Label="API ID" Variant="Variant.Outlined" Required="true" />
+                        <MudTextField @bind-Value="apiHash" Label="API Hash" Variant="Variant.Outlined" Required="true" Class="mt-3" />
+                        <MudTextField @bind-Value="phoneNumber" Label="手机号" Variant="Variant.Outlined" Required="true"
+                                      Placeholder="+86xxxxxxxxxx" Class="mt-3" />
+                    </MudStep>
+
+                    <MudStep Title="验证码" IsResultStep="false">
+                        <MudText Typo="Typo.body1" Class="mb-3">
+                            验证码已发送到 <strong>@phoneNumber</strong>
+                        </MudText>
+                        <MudTextField @bind-Value="verificationCode" Label="验证码" Variant="Variant.Outlined" Required="true"
+                                      Placeholder="12345" />
+                    </MudStep>
+
+                    <MudStep Title="密码验证" Optional="true">
+                        <MudText Typo="Typo.body1" Class="mb-3">
+                            此账号启用了两步验证，请输入密码
+                        </MudText>
+                        <MudTextField @bind-Value="password" Label="两步验证密码" Variant="Variant.Outlined"
+                                      InputType="InputType.Password" Required="true" />
+                    </MudStep>
+
+                    <MudStep Title="完成" IsResultStep="true">
+                        <MudAlert Severity="Severity.Success" Class="mb-3">
+                            <MudText Typo="Typo.body1">登录成功！</MudText>
+                        </MudAlert>
+                        <MudText Typo="Typo.body2">用户名：@username</MudText>
+                        <MudText Typo="Typo.body2">用户ID：@userId</MudText>
+                    </MudStep>
+                </MudStepper>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => stepper.Reset())">
+                    重置
+                </MudButton>
+                <MudSpacer />
+                @if (stepper.GetActiveIndex() > 0)
+                {
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => stepper.Previous())">
+                        上一步
+                    </MudButton>
+                }
+                @if (!stepper.IsAllStepsCompleted())
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               Disabled="@logging" OnClick="NextStep">
+                        @if (logging)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            <span>处理中...</span>
+                        }
+                        else
+                        {
+                            <span>@(stepper.GetActiveIndex() == stepper.Steps.Count - 2 ? "登录" : "下一步")</span>
+                        }
+                    </MudButton>
+                }
+            </MudCardActions>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private MudStepper stepper;
+    private bool logging = false;
+
+    private string apiId = "";
+    private string apiHash = "";
+    private string phoneNumber = "";
+    private string verificationCode = "";
+    private string password = "";
+
+    private string username = "";
+    private long userId = 0;
+
+    private async Task NextStep()
+    {
+        var currentStep = stepper.GetActiveIndex();
+
+        logging = true;
+
+        try
+        {
+            if (currentStep == 0)
+            {
+                // 验证 API 配置并发送验证码
+                if (!int.TryParse(apiId, out _))
+                {
+                    Snackbar.Add("API ID 格式错误", Severity.Error);
+                    return;
+                }
+
+                // TODO: 调用 API 发送验证码
+                Snackbar.Add($"验证码已发送到 {phoneNumber}", Severity.Info);
+                stepper.Next();
+            }
+            else if (currentStep == 1)
+            {
+                // 验证验证码
+                if (string.IsNullOrEmpty(verificationCode))
+                {
+                    Snackbar.Add("请输入验证码", Severity.Error);
+                    return;
+                }
+
+                // TODO: 验证验证码，检查是否需要密码
+                bool needsPassword = false; // 模拟
+
+                if (needsPassword)
+                {
+                    stepper.Next();
+                }
+                else
+                {
+                    // 直接完成登录
+                    await CompleteLogin();
+                }
+            }
+            else if (currentStep == 2)
+            {
+                // 验证密码并完成登录
+                if (string.IsNullOrEmpty(password))
+                {
+                    Snackbar.Add("请输入密码", Severity.Error);
+                    return;
+                }
+
+                await CompleteLogin();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"操作失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            logging = false;
+        }
+    }
+
+    private async Task CompleteLogin()
+    {
+        // TODO: 完成登录并保存 session
+        username = "TestUser";
+        userId = 123456789;
+
+        Snackbar.Add("登录成功！", Severity.Success);
+        stepper.Next();
+    }
+}
