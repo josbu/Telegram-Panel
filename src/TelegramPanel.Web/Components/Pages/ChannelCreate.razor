@@ -1,7 +1,10 @@
 @page "/channels/create"
 @inject IChannelService ChannelService
+@inject AccountManagementService AccountManagement
+@inject ChannelManagementService ChannelManagement
 @inject ISnackbar Snackbar
 @inject NavigationManager Navigation
+@using TelegramPanel.Data.Entities
 
 <PageTitle>创建频道 - Telegram Panel</PageTitle>
 
@@ -13,8 +16,10 @@
             <MudCardContent>
                 <MudSelect @bind-Value="selectedAccountId" Label="选择账号" Variant="Variant.Outlined" Required="true">
                     <MudSelectItem Value="0">-- 请选择账号 --</MudSelectItem>
-                    <MudSelectItem Value="1">账号1 (+86xxxxxxxx)</MudSelectItem>
-                    <MudSelectItem Value="2">账号2 (+86yyyyyyyy)</MudSelectItem>
+                    @foreach (var account in accounts)
+                    {
+                        <MudSelectItem Value="@account.Id">@account.Phone (@account.Username)</MudSelectItem>
+                    }
                 </MudSelect>
 
                 <MudTextField @bind-Value="channelTitle" Label="频道名称" Variant="Variant.Outlined" Required="true" Class="mt-4"
@@ -28,8 +33,8 @@
                 @if (isPublic)
                 {
                     <MudTextField @bind-Value="username" Label="频道用户名" Variant="Variant.Outlined" Class="mt-3"
-                                  Adornment="Adornment.Start" AdornmentText="@" Required="true"
-                                  HelperText="5-32个字符，只能包含a-z、0-9和下划线" />
+                                  Adornment="Adornment.Start" AdornmentText='@("@")' Required
+                                  HelperText="5-32个字符,只能包含a-z、0-9和下划线" />
                 }
 
                 <MudDivider Class="my-4" />
@@ -63,6 +68,7 @@
 </MudGrid>
 
 @code {
+    private List<Account> accounts = new();
     private int selectedAccountId = 0;
     private string channelTitle = "";
     private string channelAbout = "";
@@ -72,6 +78,24 @@
     private bool enableReactions = true;
     private bool signMessages = false;
     private bool creating = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAccounts();
+    }
+
+    private async Task LoadAccounts()
+    {
+        try
+        {
+            var accountList = await AccountManagement.GetActiveAccountsAsync();
+            accounts = accountList.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载账号列表失败：{ex.Message}", Severity.Error);
+        }
+    }
 
     private async Task CreateChannel()
     {
@@ -97,12 +121,31 @@
 
         try
         {
+            // 调用 Telegram API 创建频道
             var channelInfo = await ChannelService.CreateChannelAsync(selectedAccountId, channelTitle, channelAbout, isPublic);
 
+            // 如果是公开频道，设置用户名
             if (isPublic && !string.IsNullOrEmpty(username))
             {
                 await ChannelService.SetChannelVisibilityAsync(selectedAccountId, channelInfo.TelegramId, true, username);
             }
+
+            // 保存到数据库
+            var channel = new Channel
+            {
+                TelegramId = channelInfo.TelegramId,
+                AccessHash = channelInfo.AccessHash,
+                Title = channelTitle,
+                Username = isPublic ? username : null,
+                IsBroadcast = channelInfo.IsBroadcast,
+                MemberCount = channelInfo.MemberCount,
+                About = channelAbout,
+                CreatorAccountId = selectedAccountId,
+                CreatedAt = DateTime.UtcNow,
+                SyncedAt = DateTime.UtcNow
+            };
+
+            await ChannelManagement.CreateOrUpdateChannelAsync(channel);
 
             Snackbar.Add($"频道 \"{channelTitle}\" 创建成功", Severity.Success);
             Navigation.NavigateTo("/channels");

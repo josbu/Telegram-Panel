@@ -1,6 +1,7 @@
 @page "/accounts/login"
 @inject IAccountService AccountService
 @inject AccountManagementService AccountManagement
+@inject IConfiguration Configuration
 @inject ISnackbar Snackbar
 @inject NavigationManager Navigation
 @using TelegramPanel.Data.Entities
@@ -15,8 +16,21 @@
             <MudCardContent>
                 <MudStepper @ref="stepper" Color="Color.Primary">
                     <MudStep Title="API 配置">
-                        <MudTextField @bind-Value="apiId" Label="API ID" Variant="Variant.Outlined" Required="true" />
-                        <MudTextField @bind-Value="apiHash" Label="API Hash" Variant="Variant.Outlined" Required="true" Class="mt-3" />
+                        @if (!IsApiConfigured)
+                        {
+                            <MudAlert Severity="Severity.Warning" Class="mb-3">
+                                <MudText Typo="Typo.body2">未配置全局 Telegram API（ApiId/ApiHash），无法登录。</MudText>
+                            </MudAlert>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Href="/settings">
+                                去系统设置配置
+                            </MudButton>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Info" Class="mb-3">
+                                <MudText Typo="Typo.body2">使用全局 Telegram API：ApiId=@(Configuration["Telegram:ApiId"] ?? "（未配置）")</MudText>
+                            </MudAlert>
+                        }
                         <MudTextField @bind-Value="phoneNumber" Label="手机号" Variant="Variant.Outlined" Required="true"
                                       Placeholder="+86xxxxxxxxxx" Class="mt-3" />
                         <MudText Typo="Typo.caption" Class="mt-2" Color="Color.Info">
@@ -57,20 +71,23 @@
                 </MudStepper>
             </MudCardContent>
             <MudCardActions>
-                <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => stepper.Reset())">
+                <MudButton Variant="Variant.Text" Color="Color.Primary"
+                           OnClick="@(async (MouseEventArgs _) => await ResetStepperAsync())">
                     重置
                 </MudButton>
                 <MudSpacer />
-                @if (stepper.GetActiveIndex() > 0 && !stepper.IsAllStepsCompleted())
+                @if ((stepper?.ActiveIndex ?? 0) > 0 && !IsFinished)
                 {
-                    <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => stepper.Previous())">
+                    <MudButton Variant="Variant.Text" Color="Color.Primary"
+                               OnClick="@(async (MouseEventArgs _) => await PreviousStepAsync())">
                         上一步
                     </MudButton>
                 }
-                @if (!stepper.IsAllStepsCompleted())
+                @if (!IsFinished)
                 {
                     <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                               Disabled="@logging" OnClick="NextStep">
+                               Disabled="@logging"
+                               OnClick="@(async (MouseEventArgs _) => await NextStep())">
                         @if (logging)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
@@ -78,7 +95,7 @@
                         }
                         else
                         {
-                            <span>@(stepper.GetActiveIndex() == stepper.Steps.Count - 2 ? "登录" : "下一步")</span>
+                            <span>@(IsLoginActionStep ? "登录" : "下一步")</span>
                         }
                     </MudButton>
                 }
@@ -88,11 +105,12 @@
 </MudGrid>
 
 @code {
-    private MudStepper stepper;
+    private MudStepper? stepper;
     private bool logging = false;
 
-    private string apiId = "";
-    private string apiHash = "";
+    private int telegramApiId;
+    private string telegramApiHash = "";
+    private string sessionsPath = "sessions";
     private string phoneNumber = "";
     private string verificationCode = "";
     private string password = "";
@@ -101,23 +119,54 @@
     private long userId = 0;
     private int accountId = 0;
 
+    private bool TryGetTelegramApi(out int apiId, out string apiHash, out string configuredSessionsPath)
+    {
+        apiHash = Configuration["Telegram:ApiHash"] ?? "";
+        configuredSessionsPath = Configuration["Telegram:SessionsPath"] ?? "sessions";
+        return int.TryParse(Configuration["Telegram:ApiId"], out apiId)
+               && apiId > 0
+               && !string.IsNullOrWhiteSpace(apiHash);
+    }
+
+    private bool IsApiConfigured => TryGetTelegramApi(out _, out _, out _);
+
+    private bool IsFinished =>
+        stepper != null && stepper.ActiveIndex >= stepper.Steps.Count - 1;
+
+    private bool IsLoginActionStep =>
+        stepper != null && stepper.ActiveIndex == stepper.Steps.Count - 2;
+
+    private async Task ResetStepperAsync()
+    {
+        if (stepper == null) return;
+        await stepper.ResetAsync(true);
+    }
+
+    private async Task PreviousStepAsync()
+    {
+        if (stepper == null) return;
+        await stepper.PreviousStepAsync();
+    }
+
     private async Task NextStep()
     {
-        var currentStep = stepper.GetActiveIndex();
+        if (stepper == null) return;
+
+        var currentStep = stepper.ActiveIndex;
         logging = true;
 
         try
         {
             if (currentStep == 0)
             {
-                // 步骤1：验证 API 配置并发送验证码
-                if (!int.TryParse(apiId, out int parsedApiId))
+                // 步骤1：检查全局配置并发送验证码
+                if (!TryGetTelegramApi(out telegramApiId, out telegramApiHash, out sessionsPath))
                 {
-                    Snackbar.Add("API ID 格式错误", Severity.Error);
+                    Snackbar.Add("请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）", Severity.Error);
                     return;
                 }
 
-                if (string.IsNullOrWhiteSpace(apiHash) || string.IsNullOrWhiteSpace(phoneNumber))
+                if (string.IsNullOrWhiteSpace(phoneNumber))
                 {
                     Snackbar.Add("请填写完整信息", Severity.Error);
                     return;
@@ -131,7 +180,7 @@
                 if (result.NextStep == "code")
                 {
                     Snackbar.Add($"验证码已发送到 {phoneNumber}", Severity.Info);
-                    stepper.Next();
+                    await stepper.NextStepAsync();
                 }
                 else if (result.NextStep == "signup")
                 {
@@ -161,7 +210,7 @@
                 else if (result.NextStep == "password")
                 {
                     Snackbar.Add("需要两步验证密码", Severity.Info);
-                    stepper.Next();
+                    await stepper.NextStepAsync();
                 }
                 else
                 {
@@ -211,6 +260,8 @@
                 // 更新现有账号
                 existingAccount.Username = accountInfo.Username;
                 existingAccount.IsActive = true;
+                existingAccount.ApiId = telegramApiId;
+                existingAccount.ApiHash = telegramApiHash;
                 existingAccount.LastSyncAt = DateTime.UtcNow;
                 await AccountManagement.UpdateAccountAsync(existingAccount);
 
@@ -224,9 +275,9 @@
                     Phone = accountInfo.Phone!,
                     UserId = accountInfo.TelegramUserId,
                     Username = accountInfo.Username,
-                    SessionPath = $"sessions/{accountInfo.Phone}.session",
-                    ApiId = int.Parse(apiId),
-                    ApiHash = apiHash,
+                    SessionPath = System.IO.Path.Combine(sessionsPath, $"{accountInfo.Phone}.session"),
+                    ApiId = telegramApiId,
+                    ApiHash = telegramApiHash,
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow,
                     LastSyncAt = DateTime.UtcNow
@@ -241,7 +292,10 @@
             userId = accountInfo.TelegramUserId;
 
             // 跳转到完成步骤
-            stepper.Next();
+            if (stepper != null)
+            {
+                await stepper.NextStepAsync();
+            }
         }
         catch (Exception ex)
         {

@@ -1,6 +1,10 @@
 @page "/groups"
-@inject IGroupService GroupService
+@inject GroupManagementService GroupManagement
+@inject AccountManagementService AccountManagement
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+@using TelegramPanel.Data.Entities
 
 <PageTitle>群组列表 - Telegram Panel</PageTitle>
 
@@ -8,10 +12,17 @@
 
 <MudCard>
     <MudCardContent>
-        <MudTable Items="@groups" Hover="true" Breakpoint="Breakpoint.Sm" Loading="@loading">
+        <MudTable Items="@groups" Hover="true" Breakpoint="Breakpoint.Sm" Loading="@loading" Filter="new Func<Group,bool>(FilterFunc)">
             <ToolBarContent>
-                <MudText Typo="Typo.h6">我的群组</MudText>
+                <MudText Typo="Typo.h6">我的群组 (@groups.Count)</MudText>
                 <MudSpacer />
+                <MudSelect @bind-Value="filterAccount" Label="筛选账号" Variant="Variant.Outlined" Dense="true" Class="mr-2" Style="min-width: 200px;">
+                    <MudSelectItem Value="0">全部账号</MudSelectItem>
+                    @foreach (var account in accounts)
+                    {
+                        <MudSelectItem Value="@account.Id">@account.Phone (@account.Username)</MudSelectItem>
+                    }
+                </MudSelect>
                 <MudTextField @bind-Value="searchString" Placeholder="搜索群组..." Adornment="Adornment.Start"
                               AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0" />
             </ToolBarContent>
@@ -27,13 +38,19 @@
                 <MudTd DataLabel="群组名称">
                     <div class="d-flex align-center">
                         <MudAvatar Color="Color.Secondary" Size="Size.Small" Class="mr-2">@context.Title[0]</MudAvatar>
-                        <MudText Typo="Typo.body2"><strong>@context.Title</strong></MudText>
+                        <div>
+                            <MudText Typo="Typo.body2"><strong>@context.Title</strong></MudText>
+                            @if (!string.IsNullOrEmpty(context.About))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@(context.About.Length > 50 ? context.About.Substring(0, 50) + "..." : context.About)</MudText>
+                            }
+                        </div>
                     </div>
                 </MudTd>
                 <MudTd DataLabel="用户名">
                     @if (!string.IsNullOrEmpty(context.Username))
                     {
-                        <MudChip Size="Size.Small" Icon="@Icons.Material.Filled.AlternateEmail">@context.Username</MudChip>
+                        <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.AlternateEmail">@context.Username</MudChip>
                     }
                     else
                     {
@@ -41,15 +58,24 @@
                     }
                 </MudTd>
                 <MudTd DataLabel="成员数">@context.MemberCount</MudTd>
-                <MudTd DataLabel="创建账号">账号 @context.CreatorAccountId</MudTd>
+                <MudTd DataLabel="创建账号">
+                    @if (context.CreatorAccount != null)
+                    {
+                        <span>@context.CreatorAccount.Phone</span>
+                    }
+                    else
+                    {
+                        <span>账号 @context.CreatorAccountId</span>
+                    }
+                </MudTd>
                 <MudTd DataLabel="最后同步">@context.SyncedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
                 <MudTd DataLabel="操作">
                     <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small">
-                        <MudMenuItem Icon="@Icons.Material.Filled.Info">查看详情</MudMenuItem>
-                        <MudMenuItem Icon="@Icons.Material.Filled.PersonAdd">邀请成员</MudMenuItem>
-                        <MudMenuItem Icon="@Icons.Material.Filled.Link">复制链接</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Info" OnClick="@(() => ShowDetails(context))">查看详情</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.PersonAdd" OnClick="@(() => InviteMembers(context))">邀请成员</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Link" OnClick="@(() => CopyLink(context))">复制链接</MudMenuItem>
                         <MudDivider />
-                        <MudMenuItem Icon="@Icons.Material.Filled.Delete" IconColor="Color.Error">删除群组</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Delete" IconColor="Color.Error" OnClick="@(() => DeleteGroup(context.Id))">删除群组</MudMenuItem>
                     </MudMenu>
                 </MudTd>
             </RowTemplate>
@@ -64,13 +90,29 @@
 </MudCard>
 
 @code {
-    private List<GroupInfo> groups = new();
+    private List<Group> groups = new();
+    private List<Account> accounts = new();
     private bool loading = true;
     private string searchString = "";
+    private int filterAccount = 0;
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadAccounts();
         await LoadGroups();
+    }
+
+    private async Task LoadAccounts()
+    {
+        try
+        {
+            var accountList = await AccountManagement.GetAllAccountsAsync();
+            accounts = accountList.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载账号列表失败：{ex.Message}", Severity.Error);
+        }
     }
 
     private async Task LoadGroups()
@@ -78,9 +120,8 @@
         loading = true;
         try
         {
-            // TODO: 从数据库加载群组列表
-            groups = new List<GroupInfo>();
-            Snackbar.Add("群组列表加载成功", Severity.Success);
+            var groupList = await GroupManagement.GetAllGroupsAsync();
+            groups = groupList.ToList();
         }
         catch (Exception ex)
         {
@@ -89,6 +130,66 @@
         finally
         {
             loading = false;
+        }
+    }
+
+    private bool FilterFunc(Group group)
+    {
+        if (filterAccount > 0 && group.CreatorAccountId != filterAccount)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(searchString))
+            return true;
+
+        if (group.Title.Contains(searchString, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (group.Username?.Contains(searchString, StringComparison.OrdinalIgnoreCase) == true)
+            return true;
+
+        return false;
+    }
+
+    private void ShowDetails(Group group)
+    {
+        Snackbar.Add($"查看群组详情：{group.Title}", Severity.Info);
+    }
+
+    private void InviteMembers(Group group)
+    {
+        Navigation.NavigateTo($"/batch/invite?groupId={group.Id}");
+    }
+
+    private void CopyLink(Group group)
+    {
+        var link = string.IsNullOrEmpty(group.Username)
+            ? $"私密群组（邀请链接待实现）"
+            : $"https://t.me/{group.Username}";
+        Snackbar.Add($"链接：{link}", Severity.Info);
+    }
+
+    private async Task DeleteGroup(int id)
+    {
+        var group = groups.FirstOrDefault(g => g.Id == id);
+        if (group == null) return;
+
+        bool? result = await DialogService.ShowMessageBox(
+            "确认删除",
+            $"确定要删除群组 {group.Title} 吗？此操作不可恢复。",
+            yesText: "删除", cancelText: "取消");
+
+        if (result == true)
+        {
+            try
+            {
+                await GroupManagement.DeleteGroupAsync(id);
+                groups.Remove(group);
+                Snackbar.Add("删除成功", Severity.Success);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"删除失败：{ex.Message}", Severity.Error);
+            }
         }
     }
 }

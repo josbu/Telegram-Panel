@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Models;
 using AccountStatus = TelegramPanel.Core.Interfaces.AccountStatus;
@@ -12,23 +13,30 @@ public class AccountService : IAccountService
 {
     private readonly ITelegramClientPool _clientPool;
     private readonly ILogger<AccountService> _logger;
+    private readonly IConfiguration _configuration;
 
     // 临时存储登录状态（实际项目应该使用数据库或缓存）
     private readonly Dictionary<int, string> _pendingLogins = new();
 
-    public AccountService(ITelegramClientPool clientPool, ILogger<AccountService> logger)
+    public AccountService(ITelegramClientPool clientPool, ILogger<AccountService> logger, IConfiguration configuration)
     {
         _clientPool = clientPool;
         _logger = logger;
+        _configuration = configuration;
     }
 
     public async Task<LoginResult> StartLoginAsync(int accountId, string phone)
     {
-        // 这里需要从数据库获取 apiId, apiHash, sessionPath
-        // 暂时使用示例值
-        var apiId = 0; // TODO: 从配置或数据库获取
-        var apiHash = ""; // TODO: 从配置或数据库获取
-        var sessionPath = $"sessions/{phone}.session";
+        if (!int.TryParse(_configuration["Telegram:ApiId"], out var apiId) || apiId <= 0
+            || string.IsNullOrWhiteSpace(_configuration["Telegram:ApiHash"]))
+        {
+            return new LoginResult(false, null, "请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）");
+        }
+
+        var apiHash = _configuration["Telegram:ApiHash"]!.Trim();
+        var sessionsPath = _configuration["Telegram:SessionsPath"] ?? "sessions";
+        Directory.CreateDirectory(sessionsPath);
+        var sessionPath = Path.Combine(sessionsPath, $"{phone}.session");
 
         var client = await _clientPool.GetOrCreateClientAsync(accountId, apiId, apiHash, sessionPath);
 

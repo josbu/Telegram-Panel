@@ -37,7 +37,7 @@
                 <MudTd DataLabel="分类">
                     @if (context.Category != null)
                     {
-                        <MudChip Size="Size.Small" Style="@($"background-color: {context.Category.Color ?? "#9E9E9E"}")">
+                        <MudChip T="string" Size="Size.Small" Style="@($"background-color: {context.Category.Color ?? "#9E9E9E"}")">
                             @context.Category.Name
                         </MudChip>
                     }
@@ -50,7 +50,7 @@
                     <MudText Typo="Typo.body2">@context.Channels.Count / @context.Groups.Count</MudText>
                 </MudTd>
                 <MudTd DataLabel="状态">
-                    <MudChip Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">
+                    <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">
                         @(context.IsActive ? "活跃" : "停用")
                     </MudChip>
                 </MudTd>
@@ -115,18 +115,7 @@
     private async Task ShowDetails(Account account)
     {
         var (channels, groups) = await AccountManagement.GetAccountStatisticsAsync(account.Id);
-        var message = $@"
-账号详情：
-手机号：{account.Phone}
-用户名：{account.Username ?? "无"}
-用户ID：{account.UserId}
-分类：{account.Category?.Name ?? "未分类"}
-创建的频道：{channels} 个
-创建的群组：{groups} 个
-创建时间：{account.CreatedAt:yyyy-MM-dd HH:mm}
-最后同步：{account.LastSyncAt:yyyy-MM-dd HH:mm}
-Session路径：{account.SessionPath}
-";
+        var message = $"账号详情：\n手机号：{account.Phone}\n用户名：{account.Username ?? "无"}\n用户ID：{account.UserId}\n分类：{account.Category?.Name ?? "未分类"}\n创建的频道：{channels} 个\n创建的群组：{groups} 个\n创建时间：{account.CreatedAt:yyyy-MM-dd HH:mm}\n最后同步：{account.LastSyncAt:yyyy-MM-dd HH:mm}\nSession路径：{account.SessionPath}";
         await DialogService.ShowMessageBox("账号详情", message, "关闭");
     }
 

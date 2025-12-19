@@ -1,5 +1,8 @@
 @page "/tasks"
+@inject BatchTaskManagementService TaskManagement
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using TelegramPanel.Data.Entities
 
 <PageTitle>任务中心 - Telegram Panel</PageTitle>
 
@@ -7,48 +10,62 @@
 
 <MudCard>
     <MudCardContent>
-        <MudTable Items="@tasks" Hover="true" Breakpoint="Breakpoint.Sm">
+        <MudTable Items="@filteredTasks" Hover="true" Breakpoint="Breakpoint.Sm" Loading="@loading">
             <ToolBarContent>
-                <MudText Typo="Typo.h6">任务列表</MudText>
+                <MudText Typo="Typo.h6">任务列表 (@tasks.Count)</MudText>
                 <MudSpacer />
                 <MudSelect @bind-Value="filterStatus" Label="状态筛选" Variant="Variant.Outlined" Dense="true" Style="min-width: 120px;">
-                    <MudSelectItem Value="all">全部</MudSelectItem>
-                    <MudSelectItem Value="pending">待执行</MudSelectItem>
-                    <MudSelectItem Value="running">执行中</MudSelectItem>
-                    <MudSelectItem Value="completed">已完成</MudSelectItem>
-                    <MudSelectItem Value="failed">失败</MudSelectItem>
+                    <MudSelectItem Value='@("all")'>全部</MudSelectItem>
+                    <MudSelectItem Value='@("pending")'>待执行</MudSelectItem>
+                    <MudSelectItem Value='@("running")'>执行中</MudSelectItem>
+                    <MudSelectItem Value='@("completed")'>已完成</MudSelectItem>
+                    <MudSelectItem Value='@("failed")'>失败</MudSelectItem>
                 </MudSelect>
             </ToolBarContent>
             <HeaderContent>
                 <MudTh>任务ID</MudTh>
                 <MudTh>任务类型</MudTh>
-                <MudTh>目标</MudTh>
                 <MudTh>状态</MudTh>
                 <MudTh>进度</MudTh>
                 <MudTh>创建时间</MudTh>
+                <MudTh>完成时间</MudTh>
                 <MudTh>操作</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="任务ID">@context.Id</MudTd>
                 <MudTd DataLabel="任务类型">
-                    <MudChip Size="Size.Small" Icon="@GetTaskIcon(context.Type)">@context.Type</MudChip>
+                    <MudChip T="string" Size="Size.Small" Icon="@GetTaskIcon(context.TaskType)">@GetTaskTypeName(context.TaskType)</MudChip>
                 </MudTd>
-                <MudTd DataLabel="目标">@context.Target</MudTd>
                 <MudTd DataLabel="状态">
-                    <MudChip Size="Size.Small" Color="@GetStatusColor(context.Status)">@context.Status</MudChip>
+                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">@GetStatusName(context.Status)</MudChip>
                 </MudTd>
                 <MudTd DataLabel="进度">
-                    <MudProgressLinear Value="@context.Progress" Color="Color.Primary" />
-                    <MudText Typo="Typo.caption">@context.Progress%</MudText>
+                    <MudProgressLinear Value="@GetProgress(context)" Color="@GetProgressColor(context.Status)" />
+                    <MudText Typo="Typo.caption">@context.Completed / @context.Total (@context.Failed 失败)</MudText>
                 </MudTd>
                 <MudTd DataLabel="创建时间">@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                <MudTd DataLabel="完成时间">
+                    @if (context.CompletedAt.HasValue)
+                    {
+                        @context.CompletedAt.Value.ToString("yyyy-MM-dd HH:mm")
+                    }
+                    else
+                    {
+                        <span>-</span>
+                    }
+                </MudTd>
                 <MudTd DataLabel="操作">
                     <MudIconButton Icon="@Icons.Material.Filled.Info" Size="Size.Small" Color="Color.Info"
                                    OnClick="@(() => ShowTaskDetails(context))" />
-                    @if (context.Status == "待执行" || context.Status == "执行中")
+                    @if (context.Status == "pending" || context.Status == "running")
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Cancel" Size="Size.Small" Color="Color.Warning"
                                        OnClick="@(() => CancelTask(context.Id))" />
+                    }
+                    @if (context.Status == "completed" || context.Status == "failed")
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => DeleteTask(context.Id))" />
                     }
                 </MudTd>
             </RowTemplate>
@@ -60,48 +77,144 @@
 </MudCard>
 
 @code {
+    private List<BatchTask> tasks = new();
+    private bool loading = true;
     private string filterStatus = "all";
 
-    private List<TaskModel> tasks = new()
+    private IEnumerable<BatchTask> filteredTasks =>
+        filterStatus == "all" ? tasks : tasks.Where(t => t.Status == filterStatus);
+
+    protected override async Task OnInitializedAsync()
     {
-        new TaskModel { Id = 1, Type = "批量邀请", Target = "频道1", Status = "已完成", Progress = 100, CreatedAt = DateTime.Now.AddHours(-2) },
-        new TaskModel { Id = 2, Type = "设置管理", Target = "频道2", Status = "执行中", Progress = 60, CreatedAt = DateTime.Now.AddMinutes(-30) },
-        new TaskModel { Id = 3, Type = "批量邀请", Target = "频道3", Status = "待执行", Progress = 0, CreatedAt = DateTime.Now.AddMinutes(-5) }
-    };
+        await LoadTasks();
+    }
+
+    private async Task LoadTasks()
+    {
+        loading = true;
+        try
+        {
+            var taskList = await TaskManagement.GetRecentTasksAsync(50);
+            tasks = taskList.OrderByDescending(t => t.CreatedAt).ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private double GetProgress(BatchTask task)
+    {
+        if (task.Total == 0) return 0;
+        return (double)task.Completed / task.Total * 100;
+    }
 
     private string GetTaskIcon(string type) => type switch
     {
-        "批量邀请" => Icons.Material.Filled.PersonAdd,
-        "设置管理" => Icons.Material.Filled.AdminPanelSettings,
+        "invite" => Icons.Material.Filled.PersonAdd,
+        "set_admin" => Icons.Material.Filled.AdminPanelSettings,
         _ => Icons.Material.Filled.Task
+    };
+
+    private string GetTaskTypeName(string type) => type switch
+    {
+        "invite" => "批量邀请",
+        "set_admin" => "设置管理员",
+        _ => type
+    };
+
+    private string GetStatusName(string status) => status switch
+    {
+        "pending" => "待执行",
+        "running" => "执行中",
+        "completed" => "已完成",
+        "failed" => "失败",
+        _ => status
     };
 
     private Color GetStatusColor(string status) => status switch
     {
-        "已完成" => Color.Success,
-        "执行中" => Color.Info,
-        "待执行" => Color.Default,
-        "失败" => Color.Error,
+        "completed" => Color.Success,
+        "running" => Color.Info,
+        "pending" => Color.Default,
+        "failed" => Color.Error,
         _ => Color.Default
     };
 
-    private void ShowTaskDetails(TaskModel task)
+    private Color GetProgressColor(string status) => status switch
     {
-        Snackbar.Add($"查看任务详情：{task.Type} - {task.Target}", Severity.Info);
+        "completed" => Color.Success,
+        "running" => Color.Primary,
+        "failed" => Color.Error,
+        _ => Color.Default
+    };
+
+    private void ShowTaskDetails(BatchTask task)
+    {
+        var details = $"任务类型: {GetTaskTypeName(task.TaskType)}\n" +
+                     $"状态: {GetStatusName(task.Status)}\n" +
+                     $"总数: {task.Total}\n" +
+                     $"已完成: {task.Completed}\n" +
+                     $"失败: {task.Failed}\n" +
+                     $"创建时间: {task.CreatedAt:yyyy-MM-dd HH:mm}\n";
+
+        if (task.StartedAt.HasValue)
+            details += $"开始时间: {task.StartedAt.Value:yyyy-MM-dd HH:mm}\n";
+
+        if (task.CompletedAt.HasValue)
+            details += $"完成时间: {task.CompletedAt.Value:yyyy-MM-dd HH:mm}\n";
+
+        if (!string.IsNullOrEmpty(task.Config))
+            details += $"\n配置信息:\n{task.Config}";
+
+        DialogService.ShowMessageBox("任务详情", details);
     }
 
-    private void CancelTask(int id)
+    private async Task CancelTask(int id)
     {
-        Snackbar.Add($"取消任务 #{id}", Severity.Warning);
+        bool? result = await DialogService.ShowMessageBox(
+            "确认取消",
+            "确定要取消这个任务吗？",
+            yesText: "取消任务", cancelText: "返回");
+
+        if (result == true)
+        {
+            try
+            {
+                await TaskManagement.CompleteTaskAsync(id, false);
+                await LoadTasks();
+                Snackbar.Add("任务已取消", Severity.Warning);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"取消失败：{ex.Message}", Severity.Error);
+            }
+        }
     }
 
-    private class TaskModel
+    private async Task DeleteTask(int id)
     {
-        public int Id { get; set; }
-        public string Type { get; set; } = "";
-        public string Target { get; set; } = "";
-        public string Status { get; set; } = "";
-        public int Progress { get; set; }
-        public DateTime CreatedAt { get; set; }
+        bool? result = await DialogService.ShowMessageBox(
+            "确认删除",
+            "确定要删除这个任务记录吗？此操作不可恢复。",
+            yesText: "删除", cancelText: "取消");
+
+        if (result == true)
+        {
+            try
+            {
+                await TaskManagement.DeleteTaskAsync(id);
+                tasks.RemoveAll(t => t.Id == id);
+                Snackbar.Add("任务已删除", Severity.Success);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"删除失败：{ex.Message}", Severity.Error);
+            }
+        }
     }
 }

@@ -1,5 +1,13 @@
 @page "/settings"
+@inject IConfiguration Configuration
+@inject AccountManagementService AccountManagement
+@inject ChannelManagementService ChannelManagement
+@inject GroupManagementService GroupManagement
+@inject IChannelService ChannelService
+@inject IGroupService GroupService
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IWebHostEnvironment Environment
 
 <PageTitle>系统设置 - Telegram Panel</PageTitle>
 
@@ -16,9 +24,15 @@
                               HelperText="从 https://my.telegram.org 获取" />
                 <MudTextField @bind-Value="apiHash" Label="默认 API Hash" Variant="Variant.Outlined" Class="mt-3"
                               HelperText="用于新账号登录和导入" />
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                    <MudText Typo="Typo.body2"><strong>写入位置：</strong>@LocalConfigPath</MudText>
+                    <MudText Typo="Typo.body2" Class="mt-1"><strong>文件存在：</strong>@(LocalConfigExists ? "是" : "否")</MudText>
+                    <MudText Typo="Typo.body2" Class="mt-1"><strong>当前生效 ApiId：</strong>@(Configuration["Telegram:ApiId"] ?? "（未配置）")</MudText>
+                </MudAlert>
             </MudCardContent>
             <MudCardActions>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveApiConfig">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="@(async (MouseEventArgs _) => await SaveApiConfig())">
                     保存配置
                 </MudButton>
             </MudCardActions>
@@ -41,7 +55,8 @@
                 }
             </MudCardContent>
             <MudCardActions>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveBatchConfig">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="@(async (MouseEventArgs _) => await SaveBatchConfig())">
                     保存配置
                 </MudButton>
             </MudCardActions>
@@ -61,7 +76,7 @@
                                      Min="1" Max="24" />
                 }
                 <MudButton Variant="Variant.Outlined" Color="Color.Info" FullWidth="true" Class="mt-4"
-                           OnClick="SyncNow">
+                           OnClick="@(async (MouseEventArgs _) => await SyncNow())">
                     立即同步
                 </MudButton>
             </MudCardContent>
@@ -73,16 +88,17 @@
             </MudCardHeader>
             <MudCardContent>
                 <MudSelect @bind-Value="logLevel" Label="日志级别" Variant="Variant.Outlined">
-                    <MudSelectItem Value="Debug">Debug</MudSelectItem>
-                    <MudSelectItem Value="Information">Information</MudSelectItem>
-                    <MudSelectItem Value="Warning">Warning</MudSelectItem>
-                    <MudSelectItem Value="Error">Error</MudSelectItem>
+                    <MudSelectItem Value='@("Debug")'>Debug</MudSelectItem>
+                    <MudSelectItem Value='@("Information")'>Information</MudSelectItem>
+                    <MudSelectItem Value='@("Warning")'>Warning</MudSelectItem>
+                    <MudSelectItem Value='@("Error")'>Error</MudSelectItem>
                 </MudSelect>
                 <MudNumericField @bind-Value="logRetentionDays" Label="日志保留天数" Variant="Variant.Outlined" Class="mt-3"
                                  Min="1" Max="90" />
             </MudCardContent>
             <MudCardActions>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveLogConfig">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="@(async (MouseEventArgs _) => await SaveLogConfig())">
                     保存配置
                 </MudButton>
             </MudCardActions>
@@ -98,7 +114,8 @@
                 <MudText Typo="Typo.body2" Class="mt-2"><strong>数据库：</strong> SQLite</MudText>
                 <MudDivider Class="my-3" />
                 <MudButton Variant="Variant.Outlined" Color="Color.Secondary" FullWidth="true"
-                           StartIcon="@Icons.Material.Filled.Delete" OnClick="ClearCache">
+                           StartIcon="@Icons.Material.Filled.Delete"
+                           OnClick="@(async (MouseEventArgs _) => await ClearCache())">
                     清除缓存
                 </MudButton>
             </MudCardContent>
@@ -117,31 +134,168 @@
     private int syncInterval = 6;
     private string logLevel = "Information";
     private int logRetentionDays = 30;
+    private bool syncing = false;
 
-    private void SaveApiConfig()
+    private string LocalConfigPath => System.IO.Path.Combine(Environment.ContentRootPath, "appsettings.local.json");
+    private bool LocalConfigExists => System.IO.File.Exists(LocalConfigPath);
+
+    protected override void OnInitialized()
     {
-        Snackbar.Add("API 配置已保存", Severity.Success);
+        // 从配置文件加载默认设置
+        apiId = Configuration["Telegram:ApiId"] ?? "";
+        apiHash = Configuration["Telegram:ApiHash"] ?? "";
     }
 
-    private void SaveBatchConfig()
+    private async Task SaveApiConfig()
     {
+        if (!int.TryParse(apiId, out int parsedApiId) || parsedApiId <= 0)
+        {
+            Snackbar.Add("默认 API ID 格式错误", Severity.Error);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(apiHash))
+        {
+            Snackbar.Add("默认 API Hash 不能为空", Severity.Error);
+            return;
+        }
+
+        var localSettings = new
+        {
+            Telegram = new
+            {
+                ApiId = parsedApiId,
+                ApiHash = apiHash.Trim()
+            }
+        };
+
+        try
+        {
+            var localConfigPath = LocalConfigPath;
+            var json = System.Text.Json.JsonSerializer.Serialize(
+                localSettings,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }
+            );
+
+            await System.IO.File.WriteAllTextAsync(
+                localConfigPath,
+                json,
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+            );
+
+            var fileInfo = new System.IO.FileInfo(localConfigPath);
+            Snackbar.Add($"API 配置已保存：{localConfigPath}（{fileInfo.Length} bytes）。若仍提示未配置，请刷新页面或重启应用。", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"保存失败：{ex.Message}（路径：{LocalConfigPath}）", Severity.Error);
+        }
+    }
+
+    private Task SaveBatchConfig()
+    {
+        // TODO: 实现配置保存到文件
         Snackbar.Add("批量操作配置已保存", Severity.Success);
+        return Task.CompletedTask;
     }
 
-    private void SaveLogConfig()
+    private Task SaveLogConfig()
     {
+        // TODO: 实现配置保存到文件
         Snackbar.Add("日志配置已保存", Severity.Success);
+        return Task.CompletedTask;
     }
 
     private async Task SyncNow()
     {
-        Snackbar.Add("开始同步...", Severity.Info);
-        await Task.Delay(2000);
-        Snackbar.Add("同步完成", Severity.Success);
+        if (syncing)
+        {
+            Snackbar.Add("正在同步中，请稍候...", Severity.Warning);
+            return;
+        }
+
+        syncing = true;
+        Snackbar.Add("开始同步频道和群组信息...", Severity.Info);
+
+        try
+        {
+            var accounts = await AccountManagement.GetActiveAccountsAsync();
+            int totalChannelsSynced = 0;
+            int totalGroupsSynced = 0;
+
+            foreach (var account in accounts)
+            {
+                try
+                {
+                    // 同步频道
+                    var channels = await ChannelService.GetOwnedChannelsAsync(account.Id);
+                    foreach (var channelInfo in channels)
+                    {
+                        var channel = new Data.Entities.Channel
+                        {
+                            TelegramId = channelInfo.TelegramId,
+                            AccessHash = channelInfo.AccessHash,
+                            Title = channelInfo.Title,
+                            Username = channelInfo.Username,
+                            IsBroadcast = channelInfo.IsBroadcast,
+                            MemberCount = channelInfo.MemberCount,
+                            About = channelInfo.About,
+                            CreatorAccountId = account.Id
+                        };
+                        await ChannelManagement.CreateOrUpdateChannelAsync(channel);
+                        totalChannelsSynced++;
+                    }
+
+                    // 同步群组
+                    var groups = await GroupService.GetOwnedGroupsAsync(account.Id);
+                    foreach (var groupInfo in groups)
+                    {
+                        var group = new Data.Entities.Group
+                        {
+                            TelegramId = groupInfo.TelegramId,
+                            AccessHash = groupInfo.AccessHash,
+                            Title = groupInfo.Title,
+                            Username = groupInfo.Username,
+                            MemberCount = groupInfo.MemberCount,
+                            About = null,
+                            CreatorAccountId = account.Id
+                        };
+                        await GroupManagement.CreateOrUpdateGroupAsync(group);
+                        totalGroupsSynced++;
+                    }
+
+                    // 更新账号的最后同步时间
+                    await AccountManagement.UpdateLastSyncTimeAsync(account.Id);
+                }
+                catch (Exception ex)
+                {
+                    Snackbar.Add($"账号 {account.Phone} 同步失败：{ex.Message}", Severity.Warning);
+                }
+            }
+
+            Snackbar.Add($"同步完成：{totalChannelsSynced} 个频道，{totalGroupsSynced} 个群组", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"同步失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            syncing = false;
+        }
     }
 
-    private void ClearCache()
+    private async Task ClearCache()
     {
-        Snackbar.Add("缓存已清除", Severity.Success);
+        bool? result = await DialogService.ShowMessageBox(
+            "确认清除",
+            "确定要清除缓存吗？这将清除所有临时数据。",
+            yesText: "清除", cancelText: "取消");
+
+        if (result == true)
+        {
+            // TODO: 实现缓存清除逻辑
+            Snackbar.Add("缓存已清除", Severity.Success);
+        }
     }
 }

@@ -18,12 +18,19 @@ obj/
 logs/
 *.log
 
+# Local config overrides (secrets)
+appsettings.local.json
+src/TelegramPanel.Web/appsettings.local.json
+
 # Sessions
 sessions/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# SQLite
+*.db
 
 # NuGet
 *.nupkg

@@ -1,5 +1,8 @@
 @page "/accounts/categories"
+@inject AccountCategoryManagementService CategoryManagement
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using TelegramPanel.Data.Entities
 
 <PageTitle>账号分类 - Telegram Panel</PageTitle>
 
@@ -13,7 +16,7 @@
             </MudCardHeader>
             <MudCardContent>
                 <MudTextField @bind-Value="newCategoryName" Label="分类名称" Variant="Variant.Outlined" />
-                <MudColorPicker @bind-Value="newCategoryColor" Label="分类颜色" Variant="Variant.Outlined" Class="mt-3" />
+                <MudColorPicker @bind-Value="newCategoryColor" Label="分类颜色" Class="mt-3" />
                 <MudTextField @bind-Value="newCategoryDesc" Label="描述" Variant="Variant.Outlined" Lines="3" Class="mt-3" />
             </MudCardContent>
             <MudCardActions>
@@ -31,7 +34,7 @@
                 <MudText Typo="Typo.h6">分类列表</MudText>
             </MudCardHeader>
             <MudCardContent>
-                <MudTable Items="@categories" Hover="true">
+                <MudTable Items="@categories" Hover="true" Loading="@loading">
                     <HeaderContent>
                         <MudTh>分类名称</MudTh>
                         <MudTh>颜色</MudTh>
@@ -41,18 +44,16 @@
                     </HeaderContent>
                     <RowTemplate>
                         <MudTd DataLabel="分类名称">
-                            <MudChip Style="@($"background-color: {context.Color}")">@context.Name</MudChip>
+                            <MudChip T="string" Style="@($"background-color: {context.Color ?? "#9E9E9E"}")">@context.Name</MudChip>
                         </MudTd>
                         <MudTd DataLabel="颜色">
-                            <div style="@($"width: 30px; height: 30px; background-color: {context.Color}; border-radius: 4px;")"></div>
+                            <div style="@($"width: 30px; height: 30px; background-color: {context.Color ?? "#9E9E9E"}; border-radius: 4px;")"></div>
                         </MudTd>
-                        <MudTd DataLabel="描述">@context.Description</MudTd>
-                        <MudTd DataLabel="账号数量">@context.AccountCount</MudTd>
+                        <MudTd DataLabel="描述">@(context.Description ?? "-")</MudTd>
+                        <MudTd DataLabel="账号数量">@context.Accounts.Count</MudTd>
                         <MudTd DataLabel="操作">
-                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Info"
-                                           OnClick="@(() => EditCategory(context))" />
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                           OnClick="@(() => DeleteCategory(context.Id))" />
+                                           OnClick="@(() => DeleteCategory(context))" />
                         </MudTd>
                     </RowTemplate>
                     <NoRecordsContent>
@@ -68,56 +69,77 @@
     private string newCategoryName = "";
     private MudColor newCategoryColor = "#1976d2";
     private string newCategoryDesc = "";
+    private List<AccountCategory> categories = new();
+    private bool loading = true;
 
-    private List<CategoryModel> categories = new()
+    protected override async Task OnInitializedAsync()
     {
-        new CategoryModel { Id = 1, Name = "工作账号", Color = "#1976d2", Description = "用于工作的账号", AccountCount = 5 },
-        new CategoryModel { Id = 2, Name = "推广账号", Color = "#f44336", Description = "用于推广的账号", AccountCount = 10 },
-        new CategoryModel { Id = 3, Name = "测试账号", Color = "#4caf50", Description = "测试用账号", AccountCount = 3 }
-    };
-
-    private void AddCategory()
-    {
-        var newCategory = new CategoryModel
-        {
-            Id = categories.Max(c => c.Id) + 1,
-            Name = newCategoryName,
-            Color = newCategoryColor.ToString(),
-            Description = newCategoryDesc,
-            AccountCount = 0
-        };
-
-        categories.Add(newCategory);
-        Snackbar.Add($"分类 \"{newCategoryName}\" 添加成功", Severity.Success);
-
-        // 清空表单
-        newCategoryName = "";
-        newCategoryColor = "#1976d2";
-        newCategoryDesc = "";
+        await LoadCategories();
     }
 
-    private void EditCategory(CategoryModel category)
+    private async Task LoadCategories()
     {
-        Snackbar.Add($"编辑分类：{category.Name}", Severity.Info);
-        // TODO: 实现编辑对话框
-    }
-
-    private void DeleteCategory(int id)
-    {
-        var category = categories.FirstOrDefault(c => c.Id == id);
-        if (category != null)
+        loading = true;
+        try
         {
-            categories.Remove(category);
-            Snackbar.Add($"分类已删除", Severity.Success);
+            var result = await CategoryManagement.GetAllCategoriesAsync();
+            categories = result.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            loading = false;
         }
     }
 
-    private class CategoryModel
+    private async Task AddCategory()
     {
-        public int Id { get; set; }
-        public string Name { get; set; } = "";
-        public string Color { get; set; } = "";
-        public string Description { get; set; } = "";
-        public int AccountCount { get; set; }
+        try
+        {
+            var category = new AccountCategory
+            {
+                Name = newCategoryName,
+                Color = newCategoryColor.Value,
+                Description = newCategoryDesc,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await CategoryManagement.CreateCategoryAsync(category);
+            await LoadCategories();
+            Snackbar.Add($"分类 \"{newCategoryName}\" 添加成功", Severity.Success);
+
+            newCategoryName = "";
+            newCategoryColor = "#1976d2";
+            newCategoryDesc = "";
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"添加失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteCategory(AccountCategory category)
+    {
+        bool? result = await DialogService.ShowMessageBox(
+            "确认删除",
+            $"确定要删除分类 {category.Name} 吗？关联的账号将变为未分类。",
+            yesText: "删除", cancelText: "取消");
+
+        if (result == true)
+        {
+            try
+            {
+                await CategoryManagement.DeleteCategoryAsync(category.Id);
+                categories.Remove(category);
+                Snackbar.Add("删除成功", Severity.Success);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"删除失败：{ex.Message}", Severity.Error);
+            }
+        }
     }
 }

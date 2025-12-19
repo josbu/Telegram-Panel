@@ -1,6 +1,11 @@
 @page "/batch/admins"
 @inject IChannelService ChannelService
+@inject AccountManagementService AccountManagement
+@inject ChannelManagementService ChannelManagement
+@inject BatchTaskManagementService TaskManagement
 @inject ISnackbar Snackbar
+@using TelegramPanel.Data.Entities
+@using TelegramPanel.Core.Interfaces
 
 <PageTitle>批量设管理 - Telegram Panel</PageTitle>
 
@@ -15,14 +20,18 @@
             <MudCardContent>
                 <MudSelect @bind-Value="selectedAccountId" Label="执行账号" Variant="Variant.Outlined" Required="true">
                     <MudSelectItem Value="0">-- 请选择账号 --</MudSelectItem>
-                    <MudSelectItem Value="1">账号1 (+86xxxxxxxx)</MudSelectItem>
-                    <MudSelectItem Value="2">账号2 (+86yyyyyyyy)</MudSelectItem>
+                    @foreach (var account in accounts)
+                    {
+                        <MudSelectItem Value="@account.Id">@account.Phone (@account.Username)</MudSelectItem>
+                    }
                 </MudSelect>
 
                 <MudSelect @bind-Value="selectedChannelId" Label="目标频道" Variant="Variant.Outlined" Required="true" Class="mt-4">
-                    <MudSelectItem Value="0L">-- 请选择频道 --</MudSelectItem>
-                    <MudSelectItem Value="1L">频道1</MudSelectItem>
-                    <MudSelectItem Value="2L">频道2</MudSelectItem>
+                    <MudSelectItem Value="0">-- 请选择频道 --</MudSelectItem>
+                    @foreach (var channel in channels)
+                    {
+                        <MudSelectItem Value="@channel.Id">@channel.Title (@channel.Username)</MudSelectItem>
+                    }
                 </MudSelect>
 
                 <MudTextField @bind-Value="adminTitle" Label="管理员头衔" Variant="Variant.Outlined" Class="mt-4"
@@ -40,8 +49,7 @@
                 <MudCheckBox @bind-Value="permissions.AddAdmins" Label="添加管理员" />
 
                 <MudTextField @bind-Value="usernames" Label="用户名列表" Variant="Variant.Outlined" Lines="8" Class="mt-4"
-                              HelperText="每行一个用户名"
-                              Placeholder="@user1&#10;user2&#10;@user3" />
+                              HelperText="每行一个用户名" />
             </MudCardContent>
             <MudCardActions>
                 <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="ClearForm">清空</MudButton>
@@ -69,16 +77,16 @@
                 <MudText Typo="Typo.h6">设置结果</MudText>
             </MudCardHeader>
             <MudCardContent>
-                <MudList Dense="true">
+                <MudList T="string" Dense="true">
                     @foreach (var result in results)
                     {
-                        <MudListItem Icon="@(result.Success ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                        <MudListItem T="string" Icon="@(result.Success ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
                                      IconColor="@(result.Success ? Color.Success : Color.Error)">
                             <div>
                                 <MudText Typo="Typo.body2">@("@" + result.Username)</MudText>
-                                @if (!result.Success)
+                                @if (!result.Success && result.Error != null)
                                 {
-                                    <MudText Typo="Typo.caption" Color="Color.Error">@result.ErrorMessage</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Error">@result.Error</MudText>
                                 }
                             </div>
                         </MudListItem>
@@ -97,14 +105,48 @@
 </MudGrid>
 
 @code {
+    private List<Account> accounts = new();
+    private List<Channel> channels = new();
     private int selectedAccountId = 0;
-    private long selectedChannelId = 0;
+    private int selectedChannelId = 0;
     private string adminTitle = "Admin";
     private string usernames = "";
     private bool processing = false;
 
     private AdminPermissions permissions = new();
     private List<SetAdminResult> results = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAccounts();
+        await LoadChannels();
+    }
+
+    private async Task LoadAccounts()
+    {
+        try
+        {
+            var accountList = await AccountManagement.GetActiveAccountsAsync();
+            accounts = accountList.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载账号列表失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task LoadChannels()
+    {
+        try
+        {
+            var channelList = await ChannelManagement.GetAllChannelsAsync();
+            channels = channelList.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载频道列表失败：{ex.Message}", Severity.Error);
+        }
+    }
 
     private async Task StartSetAdmins()
     {
@@ -113,13 +155,69 @@
 
         try
         {
+            // 解析用户名列表
             var usernameList = usernames.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Select(u => u.Trim().TrimStart('@'))
                 .Where(u => !string.IsNullOrEmpty(u))
                 .ToList();
 
-            // TODO: 转换权限并调用 API
-            Snackbar.Add("批量设置管理员功能开发中", Severity.Info);
+            if (usernameList.Count == 0)
+            {
+                Snackbar.Add("请输入至少一个用户名", Severity.Warning);
+                return;
+            }
+
+            // 获取选中的频道
+            var channel = channels.FirstOrDefault(c => c.Id == selectedChannelId);
+            if (channel == null)
+            {
+                Snackbar.Add("未找到选中的频道", Severity.Error);
+                return;
+            }
+
+            // 转换权限
+            var rights = AdminRights.None;
+            if (permissions.ChangeInfo) rights |= AdminRights.ChangeInfo;
+            if (permissions.PostMessages) rights |= AdminRights.PostMessages;
+            if (permissions.EditMessages) rights |= AdminRights.EditMessages;
+            if (permissions.DeleteMessages) rights |= AdminRights.DeleteMessages;
+            if (permissions.BanUsers) rights |= AdminRights.BanUsers;
+            if (permissions.InviteUsers) rights |= AdminRights.InviteUsers;
+            if (permissions.PinMessages) rights |= AdminRights.PinMessages;
+            if (permissions.AddAdmins) rights |= AdminRights.AddAdmins;
+
+            // 创建批量任务记录
+            var task = new BatchTask
+            {
+                TaskType = "set_admin",
+                Total = usernameList.Count,
+                Completed = 0,
+                Failed = 0,
+                Config = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    ChannelId = channel.TelegramId,
+                    ChannelTitle = channel.Title,
+                    Rights = rights.ToString(),
+                    Title = adminTitle
+                })
+            };
+            var createdTask = await TaskManagement.CreateTaskAsync(task);
+            await TaskManagement.StartTaskAsync(createdTask.Id);
+
+            // 创建管理员请求列表
+            var adminRequests = usernameList.Select(u => new AdminRequest(u, rights, adminTitle)).ToList();
+
+            // 执行批量设置管理员
+            var setResults = await ChannelService.BatchSetAdminsAsync(selectedAccountId, channel.TelegramId, adminRequests);
+            results.AddRange(setResults);
+
+            // 更新任务状态
+            var successCount = setResults.Count(r => r.Success);
+            var failedCount = setResults.Count(r => !r.Success);
+            await TaskManagement.UpdateTaskProgressAsync(createdTask.Id, successCount, failedCount);
+            await TaskManagement.CompleteTaskAsync(createdTask.Id, true);
+
+            Snackbar.Add($"设置完成：{successCount}/{setResults.Count} 成功", successCount == setResults.Count ? Severity.Success : Severity.Warning);
         }
         catch (Exception ex)
         {

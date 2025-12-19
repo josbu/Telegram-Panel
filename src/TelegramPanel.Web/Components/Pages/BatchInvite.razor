@@ -1,6 +1,10 @@
 @page "/batch/invite"
 @inject IChannelService ChannelService
+@inject AccountManagementService AccountManagement
+@inject ChannelManagementService ChannelManagement
+@inject BatchTaskManagementService TaskManagement
 @inject ISnackbar Snackbar
+@using TelegramPanel.Data.Entities
 
 <PageTitle>批量邀请 - Telegram Panel</PageTitle>
 
@@ -15,19 +19,22 @@
             <MudCardContent>
                 <MudSelect @bind-Value="selectedAccountId" Label="执行账号" Variant="Variant.Outlined" Required="true">
                     <MudSelectItem Value="0">-- 请选择账号 --</MudSelectItem>
-                    <MudSelectItem Value="1">账号1 (+86xxxxxxxx)</MudSelectItem>
-                    <MudSelectItem Value="2">账号2 (+86yyyyyyyy)</MudSelectItem>
+                    @foreach (var account in accounts)
+                    {
+                        <MudSelectItem Value="@account.Id">@account.Phone (@account.Username)</MudSelectItem>
+                    }
                 </MudSelect>
 
                 <MudSelect @bind-Value="selectedChannelId" Label="目标频道" Variant="Variant.Outlined" Required="true" Class="mt-4">
-                    <MudSelectItem Value="0L">-- 请选择频道 --</MudSelectItem>
-                    <MudSelectItem Value="1L">频道1</MudSelectItem>
-                    <MudSelectItem Value="2L">频道2</MudSelectItem>
+                    <MudSelectItem Value="0">-- 请选择频道 --</MudSelectItem>
+                    @foreach (var channel in channels)
+                    {
+                        <MudSelectItem Value="@channel.Id">@channel.Title (@channel.Username)</MudSelectItem>
+                    }
                 </MudSelect>
 
                 <MudTextField @bind-Value="usernames" Label="用户名列表" Variant="Variant.Outlined" Lines="10" Class="mt-4"
-                              HelperText="每行一个用户名，支持 @username 或直接 username 格式"
-                              Placeholder="@user1&#10;user2&#10;@user3" />
+                              HelperText="每行一个用户名" />
 
                 <MudNumericField @bind-Value="delayMs" Label="邀请间隔 (毫秒)" Variant="Variant.Outlined" Min="1000" Max="10000" Class="mt-4"
                                  HelperText="建议设置2000-5000ms，避免触发风控" />
@@ -58,16 +65,16 @@
                 <MudText Typo="Typo.h6">邀请结果</MudText>
             </MudCardHeader>
             <MudCardContent>
-                <MudList Dense="true">
+                <MudList T="string" Dense="true">
                     @foreach (var result in inviteResults)
                     {
-                        <MudListItem Icon="@(result.Success ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                        <MudListItem T="string" Icon="@(result.Success ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
                                      IconColor="@(result.Success ? Color.Success : Color.Error)">
                             <div>
                                 <MudText Typo="Typo.body2">@("@" + result.Username)</MudText>
-                                @if (!result.Success)
+                                @if (!result.Success && result.Error != null)
                                 {
-                                    <MudText Typo="Typo.caption" Color="Color.Error">@result.ErrorMessage</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Error">@result.Error</MudText>
                                 }
                             </div>
                         </MudListItem>
@@ -86,13 +93,47 @@
 </MudGrid>
 
 @code {
+    private List<Account> accounts = new();
+    private List<Channel> channels = new();
     private int selectedAccountId = 0;
-    private long selectedChannelId = 0;
+    private int selectedChannelId = 0;
     private string usernames = "";
     private int delayMs = 2000;
     private bool inviting = false;
 
     private List<InviteResult> inviteResults = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAccounts();
+        await LoadChannels();
+    }
+
+    private async Task LoadAccounts()
+    {
+        try
+        {
+            var accountList = await AccountManagement.GetActiveAccountsAsync();
+            accounts = accountList.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载账号列表失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task LoadChannels()
+    {
+        try
+        {
+            var channelList = await ChannelManagement.GetAllChannelsAsync();
+            channels = channelList.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载频道列表失败：{ex.Message}", Severity.Error);
+        }
+    }
 
     private async Task StartInvite()
     {
@@ -101,15 +142,53 @@
 
         try
         {
+            // 解析用户名列表
             var usernameList = usernames.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Select(u => u.Trim().TrimStart('@'))
                 .Where(u => !string.IsNullOrEmpty(u))
                 .ToList();
 
-            var results = await ChannelService.BatchInviteUsersAsync(selectedAccountId, selectedChannelId, usernameList, delayMs);
+            if (usernameList.Count == 0)
+            {
+                Snackbar.Add("请输入至少一个用户名", Severity.Warning);
+                return;
+            }
+
+            // 获取选中的频道
+            var channel = channels.FirstOrDefault(c => c.Id == selectedChannelId);
+            if (channel == null)
+            {
+                Snackbar.Add("未找到选中的频道", Severity.Error);
+                return;
+            }
+
+            // 创建批量任务记录
+            var task = new BatchTask
+            {
+                TaskType = "invite",
+                Total = usernameList.Count,
+                Completed = 0,
+                Failed = 0,
+                Config = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    ChannelId = channel.TelegramId,
+                    ChannelTitle = channel.Title,
+                    DelayMs = delayMs
+                })
+            };
+            var createdTask = await TaskManagement.CreateTaskAsync(task);
+            await TaskManagement.StartTaskAsync(createdTask.Id);
+
+            // 执行批量邀请
+            var results = await ChannelService.BatchInviteUsersAsync(selectedAccountId, channel.TelegramId, usernameList, delayMs);
             inviteResults.AddRange(results);
 
+            // 更新任务状态
             var successCount = results.Count(r => r.Success);
+            var failedCount = results.Count(r => !r.Success);
+            await TaskManagement.UpdateTaskProgressAsync(createdTask.Id, successCount, failedCount);
+            await TaskManagement.CompleteTaskAsync(createdTask.Id, true);
+
             Snackbar.Add($"邀请完成：{successCount}/{results.Count} 成功", successCount == results.Count ? Severity.Success : Severity.Warning);
         }
         catch (Exception ex)
