@@ -335,12 +335,35 @@ internal static class SessionDataConverter
             lock (sessionObj) save.Invoke(sessionObj, null);
         }
 
-        // 2) 用 LoginUserIfNeeded 验证（不允许自动重新登录，避免进入要验证码流程）
+        // 2) 验证：使用已导入的 AuthKey 直接请求 Self（避免进入 LoginUserIfNeeded 的“发验证码”分支）
         await using var probe = new Client(Config);
         try
         {
-            _ = await probe.LoginUserIfNeeded(reloginOnFailedResume: false);
-            logger.LogInformation("WTelegram session validated for {Phone} on DC {DcId}", phoneDigits, dcId);
+            await probe.ConnectAsync();
+            var users = await probe.Users_GetUsers(InputUser.Self);
+            var self = users.OfType<User>().FirstOrDefault();
+            if (self == null)
+                return false;
+
+            // 写回 UserId（让后续服务端能用 LoginUserIfNeeded 快速恢复 User）
+            var clientType = typeof(Client);
+            var sessionField = clientType.GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("无法访问 WTelegram.Client._session");
+            var dcSessionField = clientType.GetField("_dcSession", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("无法访问 WTelegram.Client._dcSession");
+
+            var sessionObj = sessionField.GetValue(probe) ?? throw new InvalidOperationException("WTelegram session 未初始化");
+            var sessionType = sessionObj.GetType();
+            sessionType.GetField("UserId")?.SetValue(sessionObj, self.id);
+
+            var dcSessionObj = dcSessionField.GetValue(probe);
+            dcSessionObj?.GetType().GetField("UserId")?.SetValue(dcSessionObj, self.id);
+
+            var save = sessionType.GetMethod("Save", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("无法访问 Session.Save()");
+            lock (sessionObj) save.Invoke(sessionObj, null);
+
+            logger.LogInformation("WTelegram session validated for {Phone} (user_id={UserId}) on DC {DcId}", phoneDigits, self.id, dcId);
             return true;
         }
         catch (Exception ex)
