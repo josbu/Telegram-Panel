@@ -25,7 +25,17 @@ catch (Exception ex)
 {
     Console.Error.WriteLine($"Failed to ensure appsettings.local.json exists: {ex.Message}");
 }
-builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true);
+
+try
+{
+    // 注意：如果该路径是“悬空符号链接”，配置系统可能会认为文件存在并尝试打开，从而抛 FileNotFoundException。
+    // 本地覆盖配置不应该阻塞启动，因此这里兜底吞掉 FileNotFoundException。
+    builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true);
+}
+catch (FileNotFoundException ex)
+{
+    Console.Error.WriteLine($"Ignoring missing appsettings.local.json: {ex.Message}");
+}
 
 // 配置 Serilog
 Log.Logger = new LoggerConfiguration()
