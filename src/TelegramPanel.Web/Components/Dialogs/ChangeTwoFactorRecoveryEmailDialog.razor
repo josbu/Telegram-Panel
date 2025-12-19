@@ -1,0 +1,328 @@
+@namespace TelegramPanel.Web.Components.Dialogs
+@inject AccountManagementService AccountManagement
+@inject TelegramPanel.Core.Services.Telegram.AccountTelegramToolsService AccountTelegramTools
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using TelegramPanel.Data.Entities
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                这里绑定的是 Telegram 两步验证（2FA）的“找回邮箱”。修改后会向新邮箱发送验证码，需要输入验证码确认。
+            </MudAlert>
+
+            @if (!loaded)
+            {
+                <MudProgressCircular Indeterminate="true" />
+            }
+            else if (account == null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">账号不存在</MudAlert>
+            }
+            else
+            {
+                <MudText Typo="Typo.subtitle2">账号：@account.Phone</MudText>
+
+                <MudStack direction="Row" Spacing="2" AlignItems="AlignItems.Center">
+                    <MudChip T="string" Size="Size.Small" Color="@(hasTwoFactorPassword ? Color.Success : Color.Warning)">
+                        @(hasTwoFactorPassword ? "已开启2FA" : "未开启2FA")
+                    </MudChip>
+                    <MudChip T="string" Size="Size.Small" Color="@(hasRecoveryEmail ? Color.Success : Color.Default)">
+                        @(hasRecoveryEmail ? "已绑定找回邮箱" : "未绑定找回邮箱")
+                    </MudChip>
+                    @if (!string.IsNullOrWhiteSpace(unconfirmedEmailPattern))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">待确认：@unconfirmedEmailPattern</MudChip>
+                    }
+                </MudStack>
+
+                @if (!hasTwoFactorPassword)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                        该账号未开启两步验证，无法绑定找回邮箱。请先设置二级密码。
+                    </MudAlert>
+                }
+                else if (step == Step.SetEmail)
+                {
+                    <MudTextField @bind-Value="currentPassword" Label="原二级密码" Variant="Variant.Outlined"
+                                  InputType="InputType.Password" Required="true" />
+
+                    <MudTextField @bind-Value="email" Label="新找回邮箱" Variant="Variant.Outlined"
+                                  HelperText="将会向该邮箱发送验证码" Required="true" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="code" Label="邮箱验证码" Variant="Variant.Outlined"
+                                  HelperText="请到邮箱中查看验证码（注意垃圾箱/延迟）" Required="true" />
+
+                    <MudStack direction="Row" Spacing="2">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Default" Disabled="@running" OnClick="Resend">
+                            重发验证码
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Default" Disabled="@running" OnClick="CancelVerification">
+                            取消验证
+                        </MudButton>
+                    </MudStack>
+                }
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" Disabled="@running" OnClick="Close">关闭</MudButton>
+
+        @if (loaded && account != null && !hasTwoFactorPassword)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@running" OnClick="OpenPasswordDialog">
+                去设置二级密码
+            </MudButton>
+        }
+        else if (loaded && account != null && hasTwoFactorPassword)
+        {
+            @if (step == Step.SetEmail)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@running" OnClick="SendCode">
+                    @if (running)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        <span>发送中...</span>
+                    }
+                    else
+                    {
+                        <span>发送验证码</span>
+                    }
+                </MudButton>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@running" OnClick="Confirm">
+                    @if (running)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        <span>确认中...</span>
+                    }
+                    else
+                    {
+                        <span>确认绑定</span>
+                    }
+                </MudButton>
+            }
+        }
+    </DialogActions>
+</MudDialog>
+
+@code
+{
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int AccountId { get; set; }
+
+    private Account? account;
+    private bool loaded;
+    private bool running;
+
+    private bool hasTwoFactorPassword;
+    private bool hasRecoveryEmail;
+    private string? unconfirmedEmailPattern;
+
+    private Step step = Step.SetEmail;
+
+    private string currentPassword = "";
+    private string email = "";
+    private string code = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadStatus();
+    }
+
+    private async Task ReloadStatus()
+    {
+        loaded = false;
+        try
+        {
+            var all = await AccountManagement.GetAllAccountsAsync();
+            account = all.FirstOrDefault(a => a.Id == AccountId);
+
+            if (account != null)
+            {
+                var (ok, err, hasPwd, hasEmail, unconfirmed) = await AccountTelegramTools.GetTwoFactorRecoveryEmailStatusAsync(AccountId);
+                if (!ok)
+                {
+                    Snackbar.Add($"获取2FA邮箱状态失败：{err}", Severity.Warning);
+                }
+                hasTwoFactorPassword = hasPwd;
+                hasRecoveryEmail = hasEmail;
+                unconfirmedEmailPattern = unconfirmed;
+
+                step = string.IsNullOrWhiteSpace(unconfirmedEmailPattern) ? Step.SetEmail : Step.Confirm;
+            }
+        }
+        finally
+        {
+            loaded = true;
+        }
+    }
+
+    private async Task SendCode()
+    {
+        if (running)
+            return;
+
+        if (account == null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(currentPassword))
+        {
+            Snackbar.Add("请填写原二级密码", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            Snackbar.Add("请填写新找回邮箱", Severity.Warning);
+            return;
+        }
+
+        bool? confirm = await DialogService.ShowMessageBox(
+            "确认发送验证码",
+            "将向新邮箱发送验证码，用于绑定/换绑找回邮箱。是否继续？",
+            yesText: "继续", cancelText: "取消");
+
+        if (confirm != true)
+            return;
+
+        running = true;
+        try
+        {
+            var (ok, err, pattern) = await AccountTelegramTools.SetTwoFactorRecoveryEmailAsync(
+                accountId: AccountId,
+                currentPassword: currentPassword,
+                email: email,
+                cancellationToken: CancellationToken.None);
+
+            if (!ok)
+            {
+                Snackbar.Add($"发送失败：{err}", Severity.Error);
+                return;
+            }
+
+            unconfirmedEmailPattern = pattern;
+            step = Step.Confirm;
+            code = "";
+            Snackbar.Add("验证码已发送，请到邮箱中查看并输入验证码确认。", Severity.Success);
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private async Task Confirm()
+    {
+        if (running)
+            return;
+
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            Snackbar.Add("请填写邮箱验证码", Severity.Warning);
+            return;
+        }
+
+        running = true;
+        try
+        {
+            var (ok, err) = await AccountTelegramTools.ConfirmTwoFactorRecoveryEmailAsync(AccountId, code, CancellationToken.None);
+            if (!ok)
+            {
+                Snackbar.Add($"确认失败：{err}", Severity.Error);
+                return;
+            }
+
+            Snackbar.Add("找回邮箱已确认绑定。", Severity.Success);
+            await ReloadStatus();
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private async Task Resend()
+    {
+        if (running)
+            return;
+
+        running = true;
+        try
+        {
+            var (ok, err, pattern, _) = await AccountTelegramTools.ResendTwoFactorRecoveryEmailAsync(AccountId, CancellationToken.None);
+            if (!ok)
+            {
+                Snackbar.Add($"重发失败：{err}", Severity.Error);
+                return;
+            }
+
+            unconfirmedEmailPattern = pattern ?? unconfirmedEmailPattern;
+            Snackbar.Add("验证码已重发。", Severity.Success);
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private async Task CancelVerification()
+    {
+        if (running)
+            return;
+
+        bool? confirm = await DialogService.ShowMessageBox(
+            "取消验证",
+            "将取消当前待确认的邮箱验证码。是否继续？",
+            yesText: "继续", cancelText: "取消");
+
+        if (confirm != true)
+            return;
+
+        running = true;
+        try
+        {
+            var (ok, err) = await AccountTelegramTools.CancelTwoFactorRecoveryEmailAsync(AccountId, CancellationToken.None);
+            if (!ok)
+            {
+                Snackbar.Add($"取消失败：{err}", Severity.Error);
+                return;
+            }
+
+            Snackbar.Add("已取消验证。", Severity.Success);
+            await ReloadStatus();
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private void Close() => MudDialog.Close();
+
+    private async Task OpenPasswordDialog()
+    {
+        if (account == null)
+            return;
+
+        var parameters = new DialogParameters
+        {
+            ["AccountIds"] = new List<int> { account.Id }
+        };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        DialogService.Show<ChangeTwoFactorPasswordDialog>("设置二级密码", parameters, options);
+        MudDialog.Close();
+        await Task.CompletedTask;
+    }
+
+    private enum Step
+    {
+        SetEmail,
+        Confirm
+    }
+}

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Net.Mail;
 using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Models;
 using TelegramPanel.Data.Entities;
@@ -316,6 +317,190 @@ public class AccountTelegramToolsService
             };
 
             await client.Account_UpdatePasswordSettings(oldCheck, settings);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            var (summary, details) = MapTelegramException(ex);
+            var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
+            return (false, msg);
+        }
+    }
+
+    /// <summary>
+    /// 获取两步验证找回邮箱状态（是否已绑定、是否存在待确认的邮箱）。
+    /// </summary>
+    public async Task<(bool Success, string? Error, bool HasTwoFactorPassword, bool HasRecoveryEmail, string? UnconfirmedEmailPattern)>
+        GetTwoFactorRecoveryEmailStatusAsync(int accountId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var pwd = await client.Account_GetPassword();
+            var hasPassword = pwd.current_algo != null;
+            var hasRecoveryEmail = pwd.flags.HasFlag(TL.Account_Password.Flags.has_recovery);
+            var unconfirmed = pwd.flags.HasFlag(TL.Account_Password.Flags.has_email_unconfirmed_pattern)
+                ? (pwd.email_unconfirmed_pattern ?? "").Trim()
+                : null;
+
+            if (string.IsNullOrWhiteSpace(unconfirmed))
+                unconfirmed = null;
+
+            return (true, null, hasPassword, hasRecoveryEmail, unconfirmed);
+        }
+        catch (Exception ex)
+        {
+            var (summary, details) = MapTelegramException(ex);
+            var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
+            return (false, msg, false, false, null);
+        }
+    }
+
+    /// <summary>
+    /// 绑定/换绑两步验证找回邮箱（会发送验证码到邮箱，需调用 ConfirmTwoFactorRecoveryEmailAsync 确认）。
+    /// </summary>
+    public async Task<(bool Success, string? Error, string? EmailPattern)> SetTwoFactorRecoveryEmailAsync(
+        int accountId,
+        string? currentPassword,
+        string email,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            email = (email ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(email))
+                return (false, "邮箱不能为空", null);
+
+            try
+            {
+                _ = new MailAddress(email);
+            }
+            catch
+            {
+                return (false, "邮箱格式不正确", null);
+            }
+
+            currentPassword = (currentPassword ?? string.Empty).Trim();
+
+            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var pwd = await client.Account_GetPassword();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (pwd.current_algo == null)
+                return (false, "该账号未开启两步验证，无法绑定找回邮箱，请先设置二级密码", null);
+
+            if (string.IsNullOrWhiteSpace(currentPassword))
+                return (false, "请填写原二级密码", null);
+
+            var oldCheck = await WTelegram.Client.InputCheckPassword(pwd, currentPassword);
+
+            var settings = new TL.Account_PasswordInputSettings
+            {
+                flags = TL.Account_PasswordInputSettings.Flags.has_email,
+                email = email
+            };
+
+            await client.Account_UpdatePasswordSettings(oldCheck, settings);
+
+            // 更新后可通过 getPassword 获取“待确认邮箱”掩码信息
+            var after = await client.Account_GetPassword();
+            var pattern = after.flags.HasFlag(TL.Account_Password.Flags.has_email_unconfirmed_pattern)
+                ? (after.email_unconfirmed_pattern ?? "").Trim()
+                : null;
+
+            if (string.IsNullOrWhiteSpace(pattern))
+                pattern = null;
+
+            return (true, null, pattern);
+        }
+        catch (Exception ex)
+        {
+            var (summary, details) = MapTelegramException(ex);
+            var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
+            return (false, msg, null);
+        }
+    }
+
+    /// <summary>
+    /// 确认两步验证找回邮箱验证码。
+    /// </summary>
+    public async Task<(bool Success, string? Error)> ConfirmTwoFactorRecoveryEmailAsync(
+        int accountId,
+        string code,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            code = (code ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(code))
+                return (false, "验证码不能为空");
+
+            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            _ = await client.Account_ConfirmPasswordEmail(code);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            var (summary, details) = MapTelegramException(ex);
+            var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
+            return (false, msg);
+        }
+    }
+
+    /// <summary>
+    /// 重发两步验证找回邮箱验证码（需要先设置邮箱）。
+    /// </summary>
+    public async Task<(bool Success, string? Error, string? EmailPattern, int? CodeLength)> ResendTwoFactorRecoveryEmailAsync(
+        int accountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var ok = await client.Account_ResendPasswordEmail();
+            if (!ok)
+                return (false, "重发失败", null, null);
+
+            var pwd = await client.Account_GetPassword();
+            var pattern = pwd.flags.HasFlag(TL.Account_Password.Flags.has_email_unconfirmed_pattern)
+                ? (pwd.email_unconfirmed_pattern ?? "").Trim()
+                : null;
+
+            if (string.IsNullOrWhiteSpace(pattern))
+                pattern = null;
+
+            // 该 API 不返回验证码长度，仅返回邮箱掩码信息
+            return (true, null, pattern, null);
+        }
+        catch (Exception ex)
+        {
+            var (summary, details) = MapTelegramException(ex);
+            var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
+            return (false, msg, null, null);
+        }
+    }
+
+    /// <summary>
+    /// 取消待确认的找回邮箱验证码。
+    /// </summary>
+    public async Task<(bool Success, string? Error)> CancelTwoFactorRecoveryEmailAsync(
+        int accountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            _ = await client.Account_CancelPasswordEmail();
             return (true, null);
         }
         catch (Exception ex)

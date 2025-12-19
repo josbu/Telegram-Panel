@@ -125,6 +125,8 @@
                                    Disabled="@loading" OnClick="@(() => OpenDevices(context))" Title="在线设备" />
                     <MudIconButton Icon="@Icons.Material.Filled.Password" Size="Size.Small" Color="Color.Warning"
                                    Disabled="@loading" OnClick="@(() => OpenChangeTwoFactorPassword(context))" Title="修改二级密码" />
+                    <MudIconButton Icon="@Icons.Material.Filled.AlternateEmail" Size="Size.Small" Color="Color.Warning"
+                                   Disabled="@loading" OnClick="@(() => OpenChangeTwoFactorRecoveryEmail(context))" Title="绑定/换绑找回邮箱" />
                     <MudIconButton Icon="@(context.IsActive ? Icons.Material.Filled.Stop : Icons.Material.Filled.PlayArrow)"
                                    Size="Size.Small" Color="@(context.IsActive ? Color.Warning : Color.Success)"
                                    OnClick="@(() => ToggleActive(context))"
@@ -245,6 +247,20 @@
         };
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
         DialogService.Show<TelegramPanel.Web.Components.Dialogs.ChangeTwoFactorPasswordDialog>("修改二级密码", parameters, options);
+        await Task.CompletedTask;
+    }
+
+    private async Task OpenChangeTwoFactorRecoveryEmail(Account account)
+    {
+        if (loading)
+            return;
+
+        var parameters = new DialogParameters
+        {
+            ["AccountId"] = account.Id
+        };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        DialogService.Show<TelegramPanel.Web.Components.Dialogs.ChangeTwoFactorRecoveryEmailDialog>("绑定/换绑找回邮箱", parameters, options);
         await Task.CompletedTask;
     }
 
