@@ -42,7 +42,9 @@ public class AppDbContext : DbContext
             entity.Property(e => e.TelegramStatusDetails).HasMaxLength(2000);
 
             entity.HasIndex(e => e.Phone).IsUnique();
-            entity.HasIndex(e => e.UserId).IsUnique();
+            // 注意：UserId 在未登录/未验证的 session 导入场景可能为 0，SQLite 的 UNIQUE 约束会导致多账号导入失败。
+            // 这里保留索引但不做唯一约束，真正的去重以 Phone 为准。
+            entity.HasIndex(e => e.UserId);
 
             // 与AccountCategory的关系
             entity.HasOne(e => e.Category)

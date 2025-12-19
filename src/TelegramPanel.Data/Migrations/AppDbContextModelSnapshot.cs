@@ -67,8 +67,7 @@ namespace TelegramPanel.Data.Migrations
                     b.HasIndex("Phone")
                         .IsUnique();
 
-                    b.HasIndex("UserId")
-                        .IsUnique();
+                    b.HasIndex("UserId");
 
                     b.ToTable("Accounts");
                 });

@@ -32,6 +32,10 @@ src/TelegramPanel.Web/admin_auth.json
 sessions/
 session数据/
 
+# Imported account packages (avoid committing phone/session dumps)
+*/*.session
+*/*.json
+
 # OS
 .DS_Store
 Thumbs.db

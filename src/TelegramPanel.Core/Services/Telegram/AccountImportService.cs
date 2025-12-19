@@ -60,35 +60,54 @@ public class AccountImportService
                 // 如果导入成功，保存到数据库
                 if (result.Success && result.UserId.HasValue)
                 {
-                    var account = new Account
-                    {
-                        Phone = result.Phone!,
-                        UserId = result.UserId.Value,
-                        Username = result.Username,
-                        SessionPath = result.SessionPath!,
-                        ApiId = apiId,
-                        ApiHash = apiHash,
-                        IsActive = true,
-                        CategoryId = categoryId,
-                        CreatedAt = DateTime.UtcNow,
-                        LastSyncAt = DateTime.UtcNow
-                    };
-
                     try
                     {
-                        await _accountManagement.CreateAccountAsync(account);
-                        _logger.LogInformation("Account saved to database: {Phone}", account.Phone);
+                        // 入库策略：按手机号 upsert（方便重复导入/替换 session）
+                        var phone = result.Phone!;
+                        var existing = await _accountManagement.GetAccountByPhoneAsync(phone);
+                        if (existing != null)
+                        {
+                            existing.UserId = result.UserId.Value;
+                            existing.Username = result.Username;
+                            existing.SessionPath = result.SessionPath!;
+                            existing.ApiId = apiId;
+                            existing.ApiHash = apiHash.Trim();
+                            existing.IsActive = true;
+                            existing.CategoryId = categoryId ?? existing.CategoryId;
+                            existing.LastSyncAt = DateTime.UtcNow;
+                            await _accountManagement.UpdateAccountAsync(existing);
+                        }
+                        else
+                        {
+                            var account = new Account
+                            {
+                                Phone = phone,
+                                UserId = result.UserId.Value,
+                                Username = result.Username,
+                                SessionPath = result.SessionPath!,
+                                ApiId = apiId,
+                                ApiHash = apiHash.Trim(),
+                                IsActive = true,
+                                CategoryId = categoryId,
+                                CreatedAt = DateTime.UtcNow,
+                                LastSyncAt = DateTime.UtcNow
+                            };
+
+                            await _accountManagement.CreateAccountAsync(account);
+                        }
+
+                        _logger.LogInformation("Account saved to database: {Phone}", phone);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Failed to save account to database: {Phone}", account.Phone);
+                        _logger.LogError(ex, "Failed to save account to database: {Phone}", result.Phone);
                         result = new ImportResult(
                             false,
                             result.Phone,
                             result.UserId,
                             result.Username,
                             result.SessionPath,
-                            $"Session imported but database save failed: {ex.Message}"
+                            $"Session 已导入，但数据库保存失败：{FormatException(ex)}"
                         );
                     }
                 }
@@ -111,7 +130,7 @@ public class AccountImportService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to process file: {FileName}", file.Name);
-                results.Add(new ImportResult(false, null, null, null, null, $"File processing failed: {ex.Message}"));
+                results.Add(new ImportResult(false, null, null, null, null, $"文件处理失败：{FormatException(ex)}"));
             }
         }
 
@@ -135,36 +154,48 @@ public class AccountImportService
         // 如果导入成功，保存到数据库
         if (result.Success && result.UserId.HasValue)
         {
-            var account = new Account
-            {
-                Phone = result.Phone!,
-                UserId = result.UserId.Value,
-                Username = result.Username,
-                SessionPath = result.SessionPath!,
-                ApiId = apiId,
-                ApiHash = apiHash,
-                IsActive = true,
-                CategoryId = categoryId,
-                CreatedAt = DateTime.UtcNow,
-                LastSyncAt = DateTime.UtcNow
-            };
-
             try
             {
-                await _accountManagement.CreateAccountAsync(account);
-                _logger.LogInformation("Account saved to database: {Phone}", account.Phone);
+                var phone = result.Phone!;
+                var existing = await _accountManagement.GetAccountByPhoneAsync(phone);
+                if (existing != null)
+                {
+                    existing.UserId = result.UserId.Value;
+                    existing.Username = result.Username;
+                    existing.SessionPath = result.SessionPath!;
+                    existing.ApiId = apiId;
+                    existing.ApiHash = apiHash.Trim();
+                    existing.IsActive = true;
+                    existing.CategoryId = categoryId ?? existing.CategoryId;
+                    existing.LastSyncAt = DateTime.UtcNow;
+                    await _accountManagement.UpdateAccountAsync(existing);
+                }
+                else
+                {
+                    var account = new Account
+                    {
+                        Phone = phone,
+                        UserId = result.UserId.Value,
+                        Username = result.Username,
+                        SessionPath = result.SessionPath!,
+                        ApiId = apiId,
+                        ApiHash = apiHash.Trim(),
+                        IsActive = true,
+                        CategoryId = categoryId,
+                        CreatedAt = DateTime.UtcNow,
+                        LastSyncAt = DateTime.UtcNow
+                    };
+
+                    await _accountManagement.CreateAccountAsync(account);
+                }
+
+                _logger.LogInformation("Account saved to database: {Phone}", phone);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to save account to database: {Phone}", account.Phone);
-                return new ImportResult(
-                    false,
-                    result.Phone,
-                    result.UserId,
-                    result.Username,
-                    result.SessionPath,
-                    $"Session imported but database save failed: {ex.Message}"
-                );
+                _logger.LogError(ex, "Failed to save account to database: {Phone}", result.Phone);
+                return new ImportResult(false, result.Phone, result.UserId, result.Username, result.SessionPath,
+                    $"StringSession 已导入，但数据库保存失败：{FormatException(ex)}");
             }
         }
 
@@ -417,7 +448,7 @@ public class AccountImportService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to import package entry from {JsonPath}", jsonPath);
-            return new ImportResult(false, null, null, null, null, ex.Message);
+            return new ImportResult(false, null, null, null, null, FormatException(ex));
         }
 
         string extractDirFallback() => Path.GetTempPath();
@@ -507,5 +538,22 @@ public class AccountImportService
 
         value = null;
         return false;
+    }
+
+    private static string FormatException(Exception ex)
+    {
+        // 把 inner exception 展开，避免 UI 只显示 “See the inner exception for details.”
+        var messages = new List<string>();
+        for (var current = ex; current != null; current = current.InnerException)
+        {
+            var msg = (current.Message ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(msg))
+                messages.Add(msg);
+
+            if (messages.Count >= 5)
+                break;
+        }
+
+        return messages.Count == 0 ? "未知错误" : string.Join(" | ", messages.Distinct());
     }
 }
