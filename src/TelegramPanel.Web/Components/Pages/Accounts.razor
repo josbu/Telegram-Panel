@@ -217,7 +217,14 @@
         try
         {
             loading = true;
-            var result = await AccountTelegramTools.RefreshAccountStatusAsync(account.Id);
+            bool? probeResult = await DialogService.ShowMessageBox(
+                "刷新 Telegram 状态",
+                "是否进行深度探测（将创建并删除一个测试频道，用于判断“创建频道接口是否被冻结”）？",
+                yesText: "深度探测",
+                cancelText: "普通刷新");
+
+            var probe = probeResult == true;
+            var result = await AccountTelegramTools.RefreshAccountStatusAsync(account.Id, probeCreateChannel: probe);
             telegramStatus[account.Id] = result;
 
             // 资料刷新后重新加载（昵称/用户名/用户ID 可能更新）

@@ -32,7 +32,10 @@ public class AccountTelegramToolsService
         _logger = logger;
     }
 
-    public async Task<TelegramAccountStatusResult> RefreshAccountStatusAsync(int accountId)
+    /// <summary>
+    /// 刷新账号状态（可选深度探测：检测“创建频道接口是否被冻结”，会创建并删除一个测试频道）
+    /// </summary>
+    public async Task<TelegramAccountStatusResult> RefreshAccountStatusAsync(int accountId, bool probeCreateChannel = false)
     {
         var checkedAt = DateTime.UtcNow;
         try
@@ -76,6 +79,38 @@ public class AccountTelegramToolsService
                 summary = "账号已注销/被删除";
             else if (profile.IsRestricted)
                 summary = "账号受限（Restricted）";
+
+            if (probeCreateChannel)
+            {
+                var probe = await ProbeCreateChannelCapabilityAsync(client, accountId);
+                if (probe.IsFrozen)
+                {
+                    return new TelegramAccountStatusResult(
+                        Ok: false,
+                        Summary: "创建频道受限（冻结）",
+                        Details: $"创建频道探测：{probe.Message}{Environment.NewLine}{BuildProfileDetails(profile)}",
+                        CheckedAtUtc: checkedAt,
+                        Profile: profile);
+                }
+
+                if (!probe.Success)
+                {
+                    return new TelegramAccountStatusResult(
+                        Ok: false,
+                        Summary: "创建频道探测失败",
+                        Details: $"创建频道探测：{probe.Message}{Environment.NewLine}{BuildProfileDetails(profile)}",
+                        CheckedAtUtc: checkedAt,
+                        Profile: profile);
+                }
+
+                // 探测成功，不影响原状态，仅补充详情
+                return new TelegramAccountStatusResult(
+                    Ok: true,
+                    Summary: summary,
+                    Details: $"创建频道探测：可用（已自动清理测试频道）{Environment.NewLine}{BuildProfileDetails(profile)}",
+                    CheckedAtUtc: checkedAt,
+                    Profile: profile);
+            }
 
             return new TelegramAccountStatusResult(
                 Ok: true,
@@ -310,6 +345,51 @@ public class AccountTelegramToolsService
         var flagText = flags.Count == 0 ? "无" : string.Join(", ", flags);
         return $"昵称：{profile.DisplayName}；用户名：{profile.Username ?? "-"}；UserId：{profile.UserId}；标记：{flagText}";
     }
+
+    private async Task<CreateChannelProbeResult> ProbeCreateChannelCapabilityAsync(Client client, int accountId)
+    {
+        // 注意：这是“深度探测”，会创建并删除一个测试频道。
+        var title = $"tp-check-{DateTime.UtcNow:MMddHHmmss}";
+        const string about = "Telegram Panel create-channel probe (auto delete)";
+
+        try
+        {
+            UpdatesBase updates;
+            try
+            {
+                updates = await client.Channels_CreateChannel(title: title, about: about, broadcast: true);
+            }
+            catch (RpcException ex) when (ex.Code == 420 && string.Equals(ex.Message, "FROZEN_METHOD_INVALID", StringComparison.OrdinalIgnoreCase))
+            {
+                return new CreateChannelProbeResult(false, true, "Telegram 返回 FROZEN_METHOD_INVALID（创建频道接口被冻结）");
+            }
+
+            var channel = updates.Chats.Values.OfType<Channel>().FirstOrDefault();
+            if (channel == null)
+                return new CreateChannelProbeResult(false, false, "创建测试频道失败：未返回 Channel");
+
+            try
+            {
+                // 立即删除，避免留下垃圾频道
+                var input = new InputChannel(channel.id, channel.access_hash);
+                await client.Invoke(new TL.Channels_DeleteChannel { channel = input });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Probe channel created but failed to delete (account {AccountId}, channel {ChannelId})", accountId, channel.id);
+                return new CreateChannelProbeResult(false, false, $"创建测试频道成功，但删除失败：{ex.Message}（请手动删除频道：{title}）");
+            }
+
+            return new CreateChannelProbeResult(true, false, "可用");
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.Message ?? "未知错误";
+            return new CreateChannelProbeResult(false, false, msg);
+        }
+    }
+
+    private sealed record CreateChannelProbeResult(bool Success, bool IsFrozen, string Message);
 
     private static (string summary, string details) MapTelegramException(Exception ex)
     {
