@@ -53,6 +53,11 @@ public interface IChannelService
     Task<bool> SetForwardingAllowedAsync(int accountId, long channelId, bool allowed);
 
     /// <summary>
+    /// 导出频道加入链接：公开频道返回 t.me 链接；私密频道导出邀请链接（需要权限）。
+    /// </summary>
+    Task<string> ExportJoinLinkAsync(int accountId, long channelId);
+
+    /// <summary>
     /// 获取频道管理员列表
     /// </summary>
     Task<List<ChannelAdminInfo>> GetAdminsAsync(int accountId, long channelId);

@@ -431,6 +431,28 @@ public class ChannelService : IChannelService
         return true;
     }
 
+    public async Task<string> ExportJoinLinkAsync(int accountId, long channelId)
+    {
+        var client = await GetOrCreateConnectedClientAsync(accountId);
+        var channel = await GetChannelByIdAsync(client, channelId)
+            ?? throw new InvalidOperationException($"Channel {channelId} not found");
+
+        if (!string.IsNullOrWhiteSpace(channel.MainUsername))
+            return $"https://t.me/{channel.MainUsername}";
+
+        var invite = await client.Messages_ExportChatInvite(channel);
+        var link = invite switch
+        {
+            ChatInviteExported e => e.link,
+            _ => null
+        };
+
+        if (string.IsNullOrWhiteSpace(link))
+            throw new InvalidOperationException("无法导出邀请链接（可能无权限）");
+
+        return link;
+    }
+
     public async Task<List<ChannelAdminInfo>> GetAdminsAsync(int accountId, long channelId)
     {
         var client = await GetOrCreateConnectedClientAsync(accountId);
