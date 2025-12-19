@@ -15,7 +15,21 @@
             </MudCardHeader>
             <MudCardContent>
                 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
-                    支持批量导入账号压缩包：每个账号一个独立子文件夹，文件夹内包含一个 <strong>.json</strong> + 一个 <strong>.session</strong>。
+                    <div>
+                        <div>支持导入账号 Zip（推荐）：</div>
+                        <ul style="margin: 6px 0 0 18px;">
+                            <li>单账号：Zip 根目录直接包含一个 <strong>.json</strong> + 一个 <strong>.session</strong></li>
+                            <li>批量导入：每个账号一个独立子文件夹，文件夹内包含一个 <strong>.json</strong> + 一个 <strong>.session</strong></li>
+                        </ul>
+                        <div style="margin-top: 6px;">批量结构示例：</div>
+                        <pre style="margin: 4px 0 0; white-space: pre; overflow: auto;">xx.zip
+  ├─ 8613111111111
+  │   ├─ 8613111111111.json
+  │   └─ 8613111111111.session
+  └─ 8615119714541
+      ├─ 8615119714541.json
+      └─ 8615119714541.session</pre>
+                    </div>
                 </MudAlert>
 
                 <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="OnZipFilesChanged" Accept=".zip" MaximumFileCount="1">
