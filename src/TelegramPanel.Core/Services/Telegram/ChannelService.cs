@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Models;
+using TelegramPanel.Core.Services;
 using TL;
 using WTelegram;
 
@@ -12,18 +13,22 @@ namespace TelegramPanel.Core.Services.Telegram;
 public class ChannelService : IChannelService
 {
     private readonly ITelegramClientPool _clientPool;
+    private readonly AccountManagementService _accountManagement;
     private readonly ILogger<ChannelService> _logger;
 
-    public ChannelService(ITelegramClientPool clientPool, ILogger<ChannelService> logger)
+    public ChannelService(
+        ITelegramClientPool clientPool,
+        AccountManagementService accountManagement,
+        ILogger<ChannelService> logger)
     {
         _clientPool = clientPool;
+        _accountManagement = accountManagement;
         _logger = logger;
     }
 
     public async Task<List<ChannelInfo>> GetOwnedChannelsAsync(int accountId)
     {
-        var client = _clientPool.GetClient(accountId)
-            ?? throw new InvalidOperationException($"Client not found for account {accountId}");
+        var client = await GetOrCreateConnectedClientAsync(accountId);
 
         var ownedChannels = new List<ChannelInfo>();
         var dialogs = await client.Messages_GetAllDialogs();
@@ -72,8 +77,7 @@ public class ChannelService : IChannelService
 
     public async Task<ChannelInfo> CreateChannelAsync(int accountId, string title, string about, bool isPublic = false)
     {
-        var client = _clientPool.GetClient(accountId)
-            ?? throw new InvalidOperationException($"Client not found for account {accountId}");
+        var client = await GetOrCreateConnectedClientAsync(accountId);
 
         _logger.LogInformation("Creating channel '{Title}' for account {AccountId}", title, accountId);
 
@@ -99,8 +103,7 @@ public class ChannelService : IChannelService
 
     public async Task<bool> SetChannelVisibilityAsync(int accountId, long channelId, bool isPublic, string? username = null)
     {
-        var client = _clientPool.GetClient(accountId)
-            ?? throw new InvalidOperationException($"Client not found for account {accountId}");
+        var client = await GetOrCreateConnectedClientAsync(accountId);
 
         var channel = await GetChannelByIdAsync(client, channelId);
         if (channel == null) return false;
@@ -128,8 +131,7 @@ public class ChannelService : IChannelService
 
     public async Task<InviteResult> InviteUserAsync(int accountId, long channelId, string username)
     {
-        var client = _clientPool.GetClient(accountId)
-            ?? throw new InvalidOperationException($"Client not found for account {accountId}");
+        var client = await GetOrCreateConnectedClientAsync(accountId);
 
         try
         {
@@ -178,8 +180,7 @@ public class ChannelService : IChannelService
 
     public async Task<bool> SetAdminAsync(int accountId, long channelId, string username, Interfaces.AdminRights rights, string title = "Admin")
     {
-        var client = _clientPool.GetClient(accountId)
-            ?? throw new InvalidOperationException($"Client not found for account {accountId}");
+        var client = await GetOrCreateConnectedClientAsync(accountId);
 
         var channel = await GetChannelByIdAsync(client, channelId)
             ?? throw new InvalidOperationException($"Channel {channelId} not found");
@@ -226,6 +227,38 @@ public class ChannelService : IChannelService
     {
         var dialogs = await client.Messages_GetAllDialogs();
         return dialogs.chats.Values.OfType<Channel>().FirstOrDefault(c => c.id == channelId);
+    }
+
+    private async Task<Client> GetOrCreateConnectedClientAsync(int accountId)
+    {
+        var existing = _clientPool.GetClient(accountId);
+        if (existing?.User != null)
+            return existing;
+
+        var account = await _accountManagement.GetAccountAsync(accountId)
+            ?? throw new InvalidOperationException($"账号不存在：{accountId}");
+
+        if (account.ApiId <= 0 || string.IsNullOrWhiteSpace(account.ApiHash))
+            throw new InvalidOperationException("账号缺少 ApiId/ApiHash，无法创建 Telegram 客户端");
+
+        if (string.IsNullOrWhiteSpace(account.SessionPath))
+            throw new InvalidOperationException("账号缺少 SessionPath，无法创建 Telegram 客户端");
+
+        var client = await _clientPool.GetOrCreateClientAsync(accountId, account.ApiId, account.ApiHash, account.SessionPath);
+
+        try
+        {
+            await client.ConnectAsync();
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Telegram 会话加载失败：{ex.Message}", ex);
+        }
+
+        if (client.User == null)
+            throw new InvalidOperationException("账号未登录或 session 已失效，请重新登录生成新的 session");
+
+        return client;
     }
 
     private static ChatAdminRights ConvertAdminRights(Interfaces.AdminRights rights)

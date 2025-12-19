@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Models;
+using TelegramPanel.Core.Services;
 using TL;
 
 namespace TelegramPanel.Core.Services.Telegram;
@@ -11,18 +12,22 @@ namespace TelegramPanel.Core.Services.Telegram;
 public class GroupService : IGroupService
 {
     private readonly ITelegramClientPool _clientPool;
+    private readonly AccountManagementService _accountManagement;
     private readonly ILogger<GroupService> _logger;
 
-    public GroupService(ITelegramClientPool clientPool, ILogger<GroupService> logger)
+    public GroupService(
+        ITelegramClientPool clientPool,
+        AccountManagementService accountManagement,
+        ILogger<GroupService> logger)
     {
         _clientPool = clientPool;
+        _accountManagement = accountManagement;
         _logger = logger;
     }
 
     public async Task<List<GroupInfo>> GetOwnedGroupsAsync(int accountId)
     {
-        var client = _clientPool.GetClient(accountId)
-            ?? throw new InvalidOperationException($"Client not found for account {accountId}");
+        var client = await GetOrCreateConnectedClientAsync(accountId);
 
         var ownedGroups = new List<GroupInfo>();
         var dialogs = await client.Messages_GetAllDialogs();
@@ -100,5 +105,37 @@ public class GroupService : IGroupService
     {
         var groups = await GetOwnedGroupsAsync(accountId);
         return groups.FirstOrDefault(g => g.TelegramId == groupId);
+    }
+
+    private async Task<WTelegram.Client> GetOrCreateConnectedClientAsync(int accountId)
+    {
+        var existing = _clientPool.GetClient(accountId);
+        if (existing?.User != null)
+            return existing;
+
+        var account = await _accountManagement.GetAccountAsync(accountId)
+            ?? throw new InvalidOperationException($"账号不存在：{accountId}");
+
+        if (account.ApiId <= 0 || string.IsNullOrWhiteSpace(account.ApiHash))
+            throw new InvalidOperationException("账号缺少 ApiId/ApiHash，无法创建 Telegram 客户端");
+
+        if (string.IsNullOrWhiteSpace(account.SessionPath))
+            throw new InvalidOperationException("账号缺少 SessionPath，无法创建 Telegram 客户端");
+
+        var client = await _clientPool.GetOrCreateClientAsync(accountId, account.ApiId, account.ApiHash, account.SessionPath);
+
+        try
+        {
+            await client.ConnectAsync();
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Telegram 会话加载失败：{ex.Message}", ex);
+        }
+
+        if (client.User == null)
+            throw new InvalidOperationException("账号未登录或 session 已失效，请重新登录生成新的 session");
+
+        return client;
     }
 }
