@@ -2,6 +2,7 @@ using MudBlazor.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 using System.Security.Claims;
 using Serilog;
 using TelegramPanel.Core;
@@ -53,6 +54,19 @@ builder.Services.AddRazorComponents()
 
 // MudBlazor
 builder.Services.AddMudServices();
+
+// 反向代理支持（宝塔/Nginx/Caddy 等）
+// 让应用正确识别外部访问的 Host/Proto，避免重定向到 http://localhost/...
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor
+                               | ForwardedHeaders.XForwardedProto
+                               | ForwardedHeaders.XForwardedHost;
+
+    // 适配宝塔等面板：上游代理 IP 不固定时不做白名单限制（由部署环境保证信任边界）。
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 // 数据库上下文
 var configuredConnectionString = builder.Configuration.GetConnectionString("DefaultConnection")
@@ -308,6 +322,8 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
+
+app.UseForwardedHeaders();
 
 app.UseHttpsRedirection();
 
