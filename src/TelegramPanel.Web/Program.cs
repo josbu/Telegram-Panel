@@ -113,8 +113,31 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.Cookie.Name = "TelegramPanel.Auth";
         options.LoginPath = "/login";
         options.AccessDeniedPath = "/login";
+        options.ReturnUrlParameter = "returnUrl";
         options.SlidingExpiration = true;
         options.ExpireTimeSpan = TimeSpan.FromDays(30);
+
+        // 反向代理（宝塔默认反代）可能会把 Host 透传为 127.0.0.1/localhost，导致框架生成绝对跳转到 http://localhost/login
+        // 这里强制使用“相对路径重定向”，不依赖 Host/Proto，就算反代没配 header 也能正常跳转。
+        var loginPathValue = options.LoginPath.HasValue ? options.LoginPath.Value : "/login";
+        var returnUrlParam = options.ReturnUrlParameter;
+        options.Events = new CookieAuthenticationEvents
+        {
+            OnRedirectToLogin = ctx =>
+            {
+                var returnUrl = (ctx.Request.PathBase + ctx.Request.Path + ctx.Request.QueryString).ToString();
+                var target = $"{loginPathValue}?{returnUrlParam}={Uri.EscapeDataString(returnUrl)}";
+                ctx.Response.Redirect(target);
+                return Task.CompletedTask;
+            },
+            OnRedirectToAccessDenied = ctx =>
+            {
+                var returnUrl = (ctx.Request.PathBase + ctx.Request.Path + ctx.Request.QueryString).ToString();
+                var target = $"{loginPathValue}?{returnUrlParam}={Uri.EscapeDataString(returnUrl)}";
+                ctx.Response.Redirect(target);
+                return Task.CompletedTask;
+            }
+        };
     });
 builder.Services.AddAuthorization();
 
@@ -353,7 +376,9 @@ app.MapGet("/login", async (HttpContext http, IConfiguration configuration, Admi
 
     var q = http.Request.Query;
     var error = q.TryGetValue("error", out var e) ? e.ToString() : "";
-    var returnUrl = q.TryGetValue("returnUrl", out var r) ? r.ToString() : "/";
+    var returnUrl = q.TryGetValue("returnUrl", out var r) ? r.ToString() : "";
+    if (string.IsNullOrWhiteSpace(returnUrl))
+        returnUrl = q.TryGetValue("ReturnUrl", out var r2) ? r2.ToString() : "/";
     if (!AdminAuthHelpers.IsLocalReturnUrl(returnUrl))
         returnUrl = "/";
 
