@@ -63,6 +63,7 @@ builder.Services.AddTelegramPanelData(connectionString);
 builder.Services.AddTelegramPanelCore();
 builder.Services.AddScoped<AccountExportService>();
 builder.Services.AddScoped<DataSyncService>();
+builder.Services.AddHostedService<BatchTaskBackgroundService>();
 builder.Services.AddHostedService<BotAutoSyncBackgroundService>();
 builder.Services.AddHttpClient<TelegramBotApiClient>();
 

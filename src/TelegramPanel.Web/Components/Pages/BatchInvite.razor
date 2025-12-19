@@ -261,56 +261,14 @@
                 Failed = 0,
                 Config = System.Text.Json.JsonSerializer.Serialize(new
                 {
-                    ChannelIds = targetChannels.Select(c => c.TelegramId).ToList(),
-                    ChannelTitles = targetChannels.Select(c => c.Title).ToList(),
+                    ChannelTelegramIds = targetChannels.Select(c => c.TelegramId).ToList(),
+                    Usernames = usernameList,
                     DelayMs = delayMs,
-                    ExecutedByAccountId = selectedAccountId
+                    PreferredExecuteAccountId = selectedAccountId
                 })
             };
             var createdTask = await TaskManagement.CreateTaskAsync(task);
-            await TaskManagement.StartTaskAsync(createdTask.Id);
-
-            var totalSuccess = 0;
-            var totalFailed = 0;
-
-            foreach (var channel in targetChannels)
-            {
-                var executeAccountId = await ChannelManagement.ResolveExecuteAccountIdAsync(channel, selectedAccountId > 0 ? selectedAccountId : null);
-                if (executeAccountId is not > 0)
-                    throw new InvalidOperationException($"频道“{channel.Title}”没有可用的执行账号：请先【同步数据】或手动选择一个执行账号");
-
-                List<InviteResult> results;
-                try
-                {
-                    results = await ChannelService.BatchInviteUsersAsync(executeAccountId.Value, channel.TelegramId, usernameList, delayMs);
-                }
-                catch (Exception ex)
-                {
-                    results = usernameList.Select(u => new InviteResult(u, false, ex.Message)).ToList();
-                }
-
-                foreach (var r in results)
-                {
-                    inviteResults.Add(new InviteOutcome(
-                        ChannelTelegramId: channel.TelegramId,
-                        ChannelTitle: channel.Title,
-                        Username: r.Username,
-                        Success: r.Success,
-                        Error: r.Error,
-                        ExecutedByAccountId: executeAccountId.Value
-                    ));
-                }
-
-                var successCount = results.Count(r => r.Success);
-                var failedCount = results.Count - successCount;
-                totalSuccess += successCount;
-                totalFailed += failedCount;
-                await TaskManagement.UpdateTaskProgressAsync(createdTask.Id, totalSuccess, totalFailed);
-                StateHasChanged();
-            }
-
-            await TaskManagement.CompleteTaskAsync(createdTask.Id, true);
-            Snackbar.Add($"邀请完成：成功 {totalSuccess}，失败 {totalFailed}（频道：{targetChannels.Count}）", totalFailed == 0 ? Severity.Success : Severity.Warning);
+            Snackbar.Add($"已提交后台任务 #{createdTask.Id}（批量邀请）。请到【任务中心】查看进度。", Severity.Success);
         }
         catch (Exception ex)
         {

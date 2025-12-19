@@ -305,59 +305,15 @@
                 Failed = 0,
                 Config = System.Text.Json.JsonSerializer.Serialize(new
                 {
-                    ChannelIds = targetChannels.Select(c => c.TelegramId).ToList(),
-                    ChannelTitles = targetChannels.Select(c => c.Title).ToList(),
-                    Rights = rights.ToString(),
+                    ChannelTelegramIds = targetChannels.Select(c => c.TelegramId).ToList(),
+                    Usernames = usernameList,
+                    Rights = (int)rights,
                     Title = adminTitle,
-                    ExecutedByAccountId = selectedAccountId
+                    PreferredExecuteAccountId = selectedAccountId
                 })
             };
             var createdTask = await TaskManagement.CreateTaskAsync(task);
-            await TaskManagement.StartTaskAsync(createdTask.Id);
-
-            var totalSuccess = 0;
-            var totalFailed = 0;
-
-            foreach (var channel in targetChannels)
-            {
-                var executeAccountId = await ChannelManagement.ResolveExecuteAccountIdAsync(channel, selectedAccountId > 0 ? selectedAccountId : null);
-                if (executeAccountId is not > 0)
-                    throw new InvalidOperationException($"频道“{channel.Title}”没有可用的执行账号：请先【同步数据】或手动选择一个执行账号");
-                var adminRequests = usernameList.Select(u => new AdminRequest(u, rights, adminTitle)).ToList();
-
-                List<SetAdminResult> setResults;
-                try
-                {
-                    setResults = await ChannelService.BatchSetAdminsAsync(executeAccountId.Value, channel.TelegramId, adminRequests);
-                }
-                catch (Exception ex)
-                {
-                    setResults = usernameList.Select(u => new SetAdminResult(u, false, ex.Message)).ToList();
-                }
-
-                foreach (var r in setResults)
-                {
-                    results.Add(new AdminSetOutcome(
-                        ChannelTelegramId: channel.TelegramId,
-                        ChannelTitle: channel.Title,
-                        Username: r.Username,
-                        Success: r.Success,
-                        Error: r.Error,
-                        ExecutedByAccountId: executeAccountId.Value
-                    ));
-                }
-
-                var successCount = setResults.Count(r => r.Success);
-                var failedCount = setResults.Count - successCount;
-                totalSuccess += successCount;
-                totalFailed += failedCount;
-
-                await TaskManagement.UpdateTaskProgressAsync(createdTask.Id, totalSuccess, totalFailed);
-                StateHasChanged();
-            }
-
-            await TaskManagement.CompleteTaskAsync(createdTask.Id, true);
-            Snackbar.Add($"设置完成：成功 {totalSuccess}，失败 {totalFailed}（频道：{targetChannels.Count}）", totalFailed == 0 ? Severity.Success : Severity.Warning);
+            Snackbar.Add($"已提交后台任务 #{createdTask.Id}（批量设置管理员）。请到【任务中心】查看进度。", Severity.Success);
         }
         catch (Exception ex)
         {
