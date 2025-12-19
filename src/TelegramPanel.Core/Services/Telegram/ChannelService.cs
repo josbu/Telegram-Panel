@@ -52,22 +52,26 @@ public class ChannelService : IChannelService
 
             try
             {
-                // 通过管理员列表判定：只有当本账号是管理员/创建者时，该接口通常才允许调用
-                var participants = await client.Channels_GetParticipants(channel, new ChannelParticipantsAdmins());
-
-                var selfId = client.User!.id;
-                var isCreator = participants.participants
-                    .OfType<ChannelParticipantCreator>()
-                    .Any(p => p.user_id == selfId);
-
-                var isAdmin = isCreator || participants.participants
-                    .OfType<ChannelParticipantAdmin>()
-                    .Any(p => p.user_id == selfId);
-
+                // 先用 dialogs 里自带的权限信息过滤，避免对“非管理员频道”调用管理员接口导致 400 CHAT_ADMIN_REQUIRED
+                // （也能大幅提升同步速度）
+                var isCreator = ReadBool(channel, "creator", "Creator", "is_creator", "IsCreator");
+                var adminRights = ReadObject(channel, "admin_rights", "AdminRights", "adminRights");
+                var isAdmin = isCreator || adminRights != null;
                 if (!isAdmin)
                     continue;
 
-                var fullChannel = await client.Channels_GetFullChannel(channel);
+                var memberCount = ReadInt(channel, 0, "participants_count", "ParticipantsCount", "participantsCount", "memberCount", "MemberCount");
+                string? about = null;
+                try
+                {
+                    var fullChannel = await client.Channels_GetFullChannel(channel);
+                    memberCount = fullChannel.full_chat.ParticipantsCount;
+                    about = (fullChannel.full_chat as ChannelFull)?.about;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to get full channel info for {ChannelId}", channel.id);
+                }
 
                 channels.Add(new ChannelInfo
                 {
@@ -76,8 +80,8 @@ public class ChannelService : IChannelService
                     Title = channel.title,
                     Username = channel.MainUsername,
                     IsBroadcast = channel.IsChannel,
-                    MemberCount = fullChannel.full_chat.ParticipantsCount,
-                    About = (fullChannel.full_chat as ChannelFull)?.about,
+                    MemberCount = memberCount,
+                    About = about,
                     CreatorAccountId = isCreator ? accountId : null,
                     IsCreator = isCreator,
                     IsAdmin = true,
@@ -93,6 +97,63 @@ public class ChannelService : IChannelService
 
         _logger.LogInformation("Found {Count} admined channels for account {AccountId}", channels.Count, accountId);
         return channels;
+    }
+
+    private static bool ReadBool(object obj, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (TryReadMember(obj, name, out var value) && value is bool b)
+                return b;
+        }
+        return false;
+    }
+
+    private static int ReadInt(object obj, int fallback, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (TryReadMember(obj, name, out var value))
+            {
+                if (value is int i) return i;
+                if (value is long l) return unchecked((int)l);
+                if (value is short s) return s;
+                if (value is byte by) return by;
+            }
+        }
+        return fallback;
+    }
+
+    private static object? ReadObject(object obj, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (TryReadMember(obj, name, out var value) && value != null)
+                return value;
+        }
+        return null;
+    }
+
+    private static bool TryReadMember(object obj, string name, out object? value)
+    {
+        var type = obj.GetType();
+
+        var prop = type.GetProperty(name);
+        if (prop != null && prop.CanRead)
+        {
+            value = prop.GetValue(obj);
+            return true;
+        }
+
+        var field = type.GetField(name);
+        if (field != null)
+        {
+            value = field.GetValue(obj);
+            return true;
+        }
+
+        value = null;
+        return false;
     }
 
     public async Task<ChannelInfo> CreateChannelAsync(int accountId, string title, string about, bool isPublic = false)
