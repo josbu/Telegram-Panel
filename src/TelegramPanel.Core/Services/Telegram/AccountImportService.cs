@@ -343,23 +343,34 @@ public class AccountImportService
             // 优先尝试使用 json 里的 session_string（映射到 WTelegram 的 session_key）来生成可用 session 文件。
             if (LooksLikeSqliteSession(sessionCandidate))
             {
+                bool ok;
                 if (string.IsNullOrWhiteSpace(sessionKey))
                 {
-                    return new ImportResult(false, phone, userId, username, null, "该 .session 为 SQLite 格式且缺少 session_string，无法导入（请重新登录生成新 session）");
+                    // 没有 session_string 也不阻挡：直接从 sqlite 里取 dc/auth_key 转换为 WTelegram session
+                    ok = await SessionDataConverter.TryCreateWTelegramSessionFromTelethonSqliteFileAsync(
+                        sqliteSessionPath: sessionCandidate,
+                        apiId: apiId,
+                        apiHash: apiHash.Trim(),
+                        targetSessionPath: targetSessionPath,
+                        phone: phone,
+                        userId: userId,
+                        logger: _logger);
                 }
-
-                var ok = await SessionDataConverter.TryCreateWTelegramSessionFromSessionStringAsync(
-                    sessionString: sessionKey,
-                    apiId: apiId,
-                    apiHash: apiHash.Trim(),
-                    targetSessionPath: targetSessionPath,
-                    phone: phone,
-                    userId: userId,
-                    logger: _logger);
+                else
+                {
+                    ok = await SessionDataConverter.TryCreateWTelegramSessionFromSessionStringAsync(
+                        sessionString: sessionKey,
+                        apiId: apiId,
+                        apiHash: apiHash.Trim(),
+                        targetSessionPath: targetSessionPath,
+                        phone: phone,
+                        userId: userId,
+                        logger: _logger);
+                }
 
                 if (!ok)
                 {
-                    return new ImportResult(false, phone, userId, username, null, "该 .session 为 SQLite 格式，且 session_string 无法转换为可用 session（请重新登录生成新 session）");
+                    return new ImportResult(false, phone, userId, username, null, "该 .session 为 SQLite 格式，且无法自动转换为可用 session（请重新登录生成新 session）");
                 }
             }
             else

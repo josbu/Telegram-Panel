@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using TL;
 using WTelegram;
@@ -22,38 +23,58 @@ internal static class SessionDataConverter
         try
         {
             var absoluteSqliteSessionPath = Path.GetFullPath(sqliteSessionPath);
+            if (!File.Exists(absoluteSqliteSessionPath) || !LooksLikeSqliteSession(absoluteSqliteSessionPath))
+                return false;
+
             var jsonPath = TryFindAnySessionJsonPath(phone, absoluteSqliteSessionPath);
-            if (string.IsNullOrWhiteSpace(jsonPath))
-                return false;
+            if (!string.IsNullOrWhiteSpace(jsonPath) && File.Exists(jsonPath))
+            {
+                var jsonText = await File.ReadAllTextAsync(jsonPath);
+                using var doc = JsonDocument.Parse(jsonText);
 
-            var jsonText = await File.ReadAllTextAsync(jsonPath);
-            using var doc = JsonDocument.Parse(jsonText);
+                if (doc.RootElement.TryGetProperty("session_string", out var sessionProp) && sessionProp.ValueKind == JsonValueKind.String)
+                {
+                    var sessionString = sessionProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(sessionString))
+                    {
+                        _ = doc.RootElement.TryGetProperty("user_id", out var userIdProp);
+                        _ = doc.RootElement.TryGetProperty("uid", out var uidProp);
+                        long? userId = null;
+                        if (userIdProp.ValueKind == JsonValueKind.Number && userIdProp.TryGetInt64(out var uid1)) userId = uid1;
+                        if (userId == null && uidProp.ValueKind == JsonValueKind.Number && uidProp.TryGetInt64(out var uid2)) userId = uid2;
 
-            if (!doc.RootElement.TryGetProperty("session_string", out var sessionProp) || sessionProp.ValueKind != JsonValueKind.String)
-                return false;
+                        var ok = await TryCreateWTelegramSessionFromSessionStringAsync(
+                            sessionString: sessionString.Trim(),
+                            apiId: apiId,
+                            apiHash: apiHash,
+                            targetSessionPath: absoluteSqliteSessionPath,
+                            phone: phone,
+                            userId: userId,
+                            logger: logger);
 
-            var sessionString = sessionProp.GetString();
-            if (string.IsNullOrWhiteSpace(sessionString))
-                return false;
+                        if (ok)
+                        {
+                            logger.LogInformation("Converted sqlite session for {Phone} using json: {JsonPath}", phone, jsonPath);
+                            return true;
+                        }
+                    }
+                }
+            }
 
-            _ = doc.RootElement.TryGetProperty("user_id", out var userIdProp);
-            _ = doc.RootElement.TryGetProperty("uid", out var uidProp);
-            long? userId = null;
-            if (userIdProp.ValueKind == JsonValueKind.Number && userIdProp.TryGetInt64(out var uid1)) userId = uid1;
-            if (userId == null && uidProp.ValueKind == JsonValueKind.Number && uidProp.TryGetInt64(out var uid2)) userId = uid2;
-
-            var ok = await TryCreateWTelegramSessionFromSessionStringAsync(
-                sessionString: sessionString.Trim(),
+            // json 不存在/缺少 session_string/转换失败 → 直接从 sqlite 读取 dc/auth_key 进行转换
+            var sqliteOk = await TryCreateWTelegramSessionFromTelethonSqliteFileAsync(
+                sqliteSessionPath: absoluteSqliteSessionPath,
                 apiId: apiId,
                 apiHash: apiHash,
                 targetSessionPath: absoluteSqliteSessionPath,
                 phone: phone,
-                userId: userId,
+                userId: null,
                 logger: logger);
-            if (!ok) return false;
 
-            logger.LogInformation("Converted sqlite session for {Phone} using json: {JsonPath}", phone, jsonPath);
-            return true;
+            if (sqliteOk)
+                logger.LogInformation("Converted sqlite session for {Phone} using sqlite content", phone);
+
+            return sqliteOk;
         }
         catch (Exception ex)
         {
@@ -142,6 +163,107 @@ internal static class SessionDataConverter
         }
         catch
         {
+            return false;
+        }
+    }
+
+    public static async Task<bool> TryCreateWTelegramSessionFromTelethonSqliteFileAsync(
+        string sqliteSessionPath,
+        int apiId,
+        string apiHash,
+        string targetSessionPath,
+        string phone,
+        long? userId,
+        ILogger logger)
+    {
+        string? backupPath = null;
+        try
+        {
+            var absoluteSqlitePath = Path.GetFullPath(sqliteSessionPath);
+            var absoluteTarget = Path.GetFullPath(targetSessionPath);
+
+            if (!File.Exists(absoluteSqlitePath) || !LooksLikeSqliteSession(absoluteSqlitePath))
+                return false;
+
+            if (!TryReadTelethonSqliteSession(absoluteSqlitePath, out var telethon))
+                return false;
+
+            var normalizedPhone = NormalizePhone(phone);
+            if (string.IsNullOrWhiteSpace(normalizedPhone))
+                normalizedPhone = NormalizePhone(Path.GetFileNameWithoutExtension(absoluteTarget));
+
+            if (File.Exists(absoluteTarget))
+            {
+                var suffix = LooksLikeSqliteSession(absoluteTarget) ? "sqlite.bak" : "bak";
+                backupPath = BuildBackupPath(absoluteTarget, suffix);
+                Directory.CreateDirectory(Path.GetDirectoryName(backupPath) ?? Directory.GetCurrentDirectory());
+                File.Move(absoluteTarget, backupPath, overwrite: true);
+            }
+
+            var ok = await WriteWTelegramSessionFileAsync(
+                apiId: apiId,
+                apiHash: apiHash,
+                sessionPath: absoluteTarget,
+                phoneDigits: normalizedPhone ?? string.Empty,
+                userId: userId,
+                dcId: telethon.DcId,
+                ipAddress: telethon.IpAddress,
+                port: telethon.Port,
+                authKey: telethon.AuthKey,
+                logger: logger
+            );
+
+            if (!ok)
+                throw new InvalidOperationException("WTelegram session 生成失败或校验失败");
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to create WTelegram session from telethon sqlite session");
+            try { if (File.Exists(targetSessionPath)) File.Delete(targetSessionPath); } catch { }
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath) && !File.Exists(targetSessionPath))
+                    File.Move(backupPath, targetSessionPath, overwrite: true);
+            }
+            catch { }
+            return false;
+        }
+    }
+
+    private static bool TryReadTelethonSqliteSession(string sqliteSessionPath, out TelethonSessionData data)
+    {
+        try
+        {
+            data = default;
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = sqliteSessionPath,
+                Mode = SqliteOpenMode.ReadOnly
+            }.ToString());
+            connection.Open();
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT dc_id, server_address, port, auth_key FROM sessions LIMIT 1";
+            using var reader = cmd.ExecuteReader();
+            if (!reader.Read())
+                return false;
+
+            var dcId = reader.GetInt32(0);
+            var serverAddress = reader.IsDBNull(1) ? null : reader.GetString(1);
+            var port = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
+            var authKey = reader.IsDBNull(3) ? null : (byte[])reader[3];
+
+            if (dcId <= 0 || string.IsNullOrWhiteSpace(serverAddress) || port <= 0 || authKey == null || authKey.Length != 256)
+                return false;
+
+            data = new TelethonSessionData(dcId, serverAddress.Trim(), (ushort)port, authKey);
+            return true;
+        }
+        catch
+        {
+            data = default;
             return false;
         }
     }
