@@ -331,6 +331,50 @@ public class AccountTelegramToolsService
     }
 
     /// <summary>
+    /// 忘记二级密码：向 Telegram 发起“重置两步验证密码”申请（通常需要等待 7 天）。
+    /// </summary>
+    public async Task<(bool Success, string? Error, DateTimeOffset? WaitUntilUtc)> RequestTwoFactorPasswordResetAsync(
+        int accountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var result = await client.Account_ResetPassword();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            switch (result)
+            {
+                case TL.Account_ResetPasswordOk:
+                    return (true, "二级密码已重置成功（现在可以直接重新设置二级密码）", null);
+
+                case TL.Account_ResetPasswordRequestedWait wait:
+                {
+                    var untilUtc = DateTimeOffset.FromUnixTimeSeconds(wait.until_date);
+                    return (true, $"已提交重置申请，请等待至 {untilUtc:yyyy-MM-dd HH:mm:ss} UTC 后再完成重置/重新设置二级密码", untilUtc);
+                }
+
+                case TL.Account_ResetPasswordFailedWait failed:
+                {
+                    var retryUtc = DateTimeOffset.FromUnixTimeSeconds(failed.retry_date);
+                    return (false, $"近期有被取消的重置申请，需等待至 {retryUtc:yyyy-MM-dd HH:mm:ss} UTC 后才能再次申请", retryUtc);
+                }
+
+                default:
+                    return (false, $"未知返回类型：{result.GetType().Name}", null);
+            }
+        }
+        catch (Exception ex)
+        {
+            var (summary, details) = MapTelegramException(ex);
+            var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
+            return (false, msg, null);
+        }
+    }
+
+    /// <summary>
     /// 获取两步验证找回邮箱状态（是否已绑定、是否存在待确认的邮箱）。
     /// </summary>
     public async Task<(bool Success, string? Error, bool HasTwoFactorPassword, bool HasRecoveryEmail, string? UnconfirmedEmailPattern)>
