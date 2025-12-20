@@ -659,8 +659,8 @@ public class AccountTelegramToolsService
 
             var title = chat switch
             {
-                Channel c => c.title,
-                Chat c => c.title,
+                TL.Channel c => c.title,
+                TL.Chat c => c.title,
                 _ => null
             };
 

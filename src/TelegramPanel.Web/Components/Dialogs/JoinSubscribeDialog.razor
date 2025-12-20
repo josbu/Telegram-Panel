@@ -14,7 +14,7 @@
             <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
                 将使用指定账号订阅频道/加入群组。支持输入多个链接/用户名，换行分隔。
                 <MudText Typo="Typo.body2" Class="mt-1">
-                    支持：<b>https://t.me/xxx</b>、<b>t.me/+hash</b>、<b>@username</b>、<b>username</b>、<b>tg://join?invite=hash</b>
+                    支持：<b>https://t.me/xxx</b>、<b>t.me/+hash</b>、<b>@@username</b>、<b>username</b>、<b>tg://join?invite=hash</b>
                 </MudText>
             </MudAlert>
 
@@ -155,4 +155,3 @@
 
     private void Cancel() => MudDialog.Close();
 }
-

@@ -1,5 +1,6 @@
 @namespace TelegramPanel.Web.Components.Dialogs
 @inject AccountManagementService AccountManagement
+@inject AccountCategoryManagementService CategoryManagement
 @inject TelegramPanel.Core.Services.AccountRiskService RiskService
 @inject BatchTaskManagementService TaskManagement
 @inject ISnackbar Snackbar
@@ -43,7 +44,7 @@
                 <MudDivider Class="my-2" />
 
                 <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
-                    批量订阅频道/加群（用户任务）：支持输入多个链接/用户名，换行分隔。支持：<b>https://t.me/xxx</b>、<b>t.me/+hash</b>、<b>@username</b>、<b>username</b>、<b>tg://join?invite=hash</b>。
+                    批量订阅频道/加群（用户任务）：支持输入多个链接/用户名，换行分隔。支持：<b>https://t.me/xxx</b>、<b>t.me/+hash</b>、<b>@@username</b>、<b>username</b>、<b>tg://join?invite=hash</b>。
                 </MudAlert>
 
                 <MudTextField @bind-Value="linksText" Label="频道/群链接列表（换行分隔）" Variant="Variant.Outlined" Lines="8"
@@ -55,12 +56,26 @@
                 <MudStack direction="Row" AlignItems="AlignItems.Center" Spacing="2">
                     <MudText Typo="Typo.subtitle2">选择执行账号：@selectedAccounts.Count / @accounts.Count</MudText>
                     <MudSpacer />
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SelectAll" Disabled="@(accounts.Count == 0)">全选</MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SelectAll" Disabled="@(accounts.Count == 0)">全选当前筛选</MudButton>
                     <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="ClearSelection" Disabled="@(selectedAccounts.Count == 0)">清空</MudButton>
                 </MudStack>
 
-                <MudTextField @bind-Value="accountSearch" Placeholder="搜索账号（手机号/昵称/用户名）" Variant="Variant.Outlined"
-                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" />
+                <MudGrid>
+                    <MudItem xs="12" md="4">
+                        <MudSelect @bind-Value="filterAccountCategoryId" Label="账号分类筛选" Variant="Variant.Outlined" Dense="true" Style="min-width: 160px;">
+                            <MudSelectItem Value="0">全部分类</MudSelectItem>
+                            <MudSelectItem Value="-1">未分类</MudSelectItem>
+                            @foreach (var c in categories)
+                            {
+                                <MudSelectItem Value="@c.Id">@c.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="8">
+                        <MudTextField @bind-Value="accountSearch" Placeholder="搜索账号（手机号/昵称/用户名）" Variant="Variant.Outlined"
+                                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" />
+                    </MudItem>
+                </MudGrid>
 
                 <MudTable Items="@FilteredAccounts" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm"
                           MultiSelection="true" @bind-SelectedItems="selectedAccounts" Loading="@loadingAccounts">
@@ -68,11 +83,13 @@
                         <MudTh>手机号</MudTh>
                         <MudTh>昵称</MudTh>
                         <MudTh>用户名</MudTh>
+                        <MudTh>分类</MudTh>
                     </HeaderContent>
                     <RowTemplate>
                         <MudTd DataLabel="手机号">@context.Phone</MudTd>
                         <MudTd DataLabel="昵称">@(string.IsNullOrWhiteSpace(context.Nickname) ? "-" : context.Nickname)</MudTd>
                         <MudTd DataLabel="用户名">@(string.IsNullOrWhiteSpace(context.Username) ? "-" : "@" + context.Username)</MudTd>
+                        <MudTd DataLabel="分类">@GetAccountCategoryName(context.CategoryId)</MudTd>
                     </RowTemplate>
                     <NoRecordsContent>
                         <MudText>暂无账号</MudText>
@@ -150,7 +167,9 @@
 
     private bool loadingAccounts;
     private List<Account> accounts = new();
+    private List<AccountCategory> categories = new();
     private string accountSearch = "";
+    private int filterAccountCategoryId = 0;
     private HashSet<Account> selectedAccounts = new();
 
     private IEnumerable<TaskOption> AvailableOptions => Options.Where(o => o.Category == selectedCategory);
@@ -159,6 +178,11 @@
     private IEnumerable<Account> FilteredAccounts =>
         accounts.Where(a =>
         {
+            if (filterAccountCategoryId > 0 && a.CategoryId != filterAccountCategoryId)
+                return false;
+            if (filterAccountCategoryId == -1 && a.CategoryId != null)
+                return false;
+
             if (string.IsNullOrWhiteSpace(accountSearch))
                 return true;
             var q = accountSearch.Trim();
@@ -170,7 +194,21 @@
     protected override async Task OnInitializedAsync()
     {
         EnsureTaskTypeValid();
+        await LoadCategories();
         await LoadAccounts();
+    }
+
+    private async Task LoadCategories()
+    {
+        try
+        {
+            var list = await CategoryManagement.GetAllCategoriesAsync();
+            categories = list.OrderBy(c => c.Id).ToList();
+        }
+        catch
+        {
+            categories = new List<AccountCategory>();
+        }
     }
 
     private async Task LoadAccounts()
@@ -201,8 +239,15 @@
         }
     }
 
-    private void SelectAll() => selectedAccounts = accounts.ToHashSet();
+    private void SelectAll() => selectedAccounts = FilteredAccounts.ToHashSet();
     private void ClearSelection() => selectedAccounts = new HashSet<Account>();
+
+    private string GetAccountCategoryName(int? categoryId)
+    {
+        if (categoryId is not > 0)
+            return "未分类";
+        return categories.FirstOrDefault(c => c.Id == categoryId)?.Name ?? $"#{categoryId}";
+    }
 
     private async Task Create()
     {
