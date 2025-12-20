@@ -352,13 +352,13 @@ public class AccountTelegramToolsService
 
                 case TL.Account_ResetPasswordRequestedWait wait:
                 {
-                    var untilUtc = DateTimeOffset.FromUnixTimeSeconds(wait.until_date);
+                    var untilUtc = ToUtcDateTimeOffset(wait.until_date);
                     return (true, $"已提交重置申请，请等待至 {untilUtc:yyyy-MM-dd HH:mm:ss} UTC 后再完成重置/重新设置二级密码", untilUtc);
                 }
 
                 case TL.Account_ResetPasswordFailedWait failed:
                 {
-                    var retryUtc = DateTimeOffset.FromUnixTimeSeconds(failed.retry_date);
+                    var retryUtc = ToUtcDateTimeOffset(failed.retry_date);
                     return (false, $"近期有被取消的重置申请，需等待至 {retryUtc:yyyy-MM-dd HH:mm:ss} UTC 后才能再次申请", retryUtc);
                 }
 
@@ -372,6 +372,16 @@ public class AccountTelegramToolsService
             var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
             return (false, msg, null);
         }
+    }
+
+    private static DateTimeOffset ToUtcDateTimeOffset(DateTime value)
+    {
+        if (value.Kind == DateTimeKind.Unspecified)
+            value = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        else
+            value = value.ToUniversalTime();
+
+        return new DateTimeOffset(value);
     }
 
     /// <summary>
