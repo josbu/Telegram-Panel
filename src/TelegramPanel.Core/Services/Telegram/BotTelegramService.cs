@@ -282,17 +282,31 @@ public class BotTelegramService
         if (string.IsNullOrWhiteSpace(title))
             throw new ArgumentException("频道标题不能为空", nameof(title));
 
-        await _api.CallAsync(bot.Token, "setChatTitle", new Dictionary<string, string?>
+        try
         {
-            ["chat_id"] = channelTelegramId.ToString(),
-            ["title"] = title
-        }, cancellationToken);
+            await _api.CallAsync(bot.Token, "setChatTitle", new Dictionary<string, string?>
+            {
+                ["chat_id"] = channelTelegramId.ToString(),
+                ["title"] = title
+            }, cancellationToken);
+        }
+        catch (Exception ex) when (IsBotApiNotModified(ex, "setChatTitle"))
+        {
+            // ignore: title not modified
+        }
 
-        await _api.CallAsync(bot.Token, "setChatDescription", new Dictionary<string, string?>
+        try
         {
-            ["chat_id"] = channelTelegramId.ToString(),
-            ["description"] = about ?? ""
-        }, cancellationToken);
+            await _api.CallAsync(bot.Token, "setChatDescription", new Dictionary<string, string?>
+            {
+                ["chat_id"] = channelTelegramId.ToString(),
+                ["description"] = about ?? ""
+            }, cancellationToken);
+        }
+        catch (Exception ex) when (IsBotApiNotModified(ex, "setChatDescription"))
+        {
+            // ignore: description not modified
+        }
 
         return true;
     }
@@ -359,6 +373,22 @@ public class BotTelegramService
             cancellationToken: cancellationToken);
 
         return true;
+    }
+
+    private static bool IsBotApiNotModified(Exception ex, string method)
+    {
+        // Telegram Bot API 会在“内容未修改”时返回 400：
+        // - setChatTitle: "Bad Request: chat title is not modified"
+        // - setChatDescription: "Bad Request: chat description is not modified"
+        // 这类情况不应该阻塞后续操作（例如继续设置头像）。
+        if (ex is not InvalidOperationException)
+            return false;
+
+        var msg = ex.Message ?? string.Empty;
+        if (!msg.Contains($"Bot API 调用失败：{method} (400)", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return msg.Contains("is not modified", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<int> PromoteChatMemberAsync(int botId, IReadOnlyList<long> channelTelegramIds, long userId, BotAdminRights rights, CancellationToken cancellationToken)
