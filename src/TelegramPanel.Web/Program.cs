@@ -320,6 +320,7 @@ builder.Services.AddHostedService<AccountDataAutoSyncBackgroundService>();
 builder.Services.AddHostedService<BotAutoSyncBackgroundService>();
 builder.Services.AddHttpClient<TelegramBotApiClient>();
 builder.Services.AddModuleSystem(builder.Configuration, builder.Environment);
+builder.Services.AddSingleton<AppRestartService>();
 
 // 后台账号密码验证（Cookie 登录）
 builder.Services.Configure<AdminAuthOptions>(builder.Configuration.GetSection("AdminAuth"));
