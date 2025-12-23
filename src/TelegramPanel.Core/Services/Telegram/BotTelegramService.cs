@@ -11,7 +11,7 @@ namespace TelegramPanel.Core.Services.Telegram;
 /// <summary>
 /// Bot 相关能力（双轨）：
 /// - 主轨：Telegram Bot API（不依赖 ApiId/ApiHash），用于“秒级新增频道/导出邀请链接”
-/// - 兜底：保留手动同步入口（本实现同样走 Bot API pull updates）
+/// - 兜底：手动对账（清理失效频道记录）
 /// </summary>
 public class BotTelegramService
 {
@@ -30,13 +30,128 @@ public class BotTelegramService
     }
 
     /// <summary>
-    /// 兼容入口：旧版曾在这里直接 getUpdates 拉取 my_chat_member。
-    /// 现在 getUpdates 已由 <see cref="BotUpdateHub"/> 统一轮询与分发，避免 409 Conflict 与 offset 争抢。
+    /// 手动同步（对账）：Bot API 无法直接“枚举 Bot 作为管理员的频道”，
+    /// 新增/移除主要依赖 <see cref="BotUpdateHub"/> 轮询到的 my_chat_member updates。
+    ///
+    /// 此处仅用于：对本地已记录的频道做一次权限核验，
+    /// 自动清理 Bot 已被移除/降权导致的“僵尸频道”记录（用于修复漏收 updates 的场景）。
     /// </summary>
-    public Task<int> SyncBotChannelsAsync(int botId, CancellationToken cancellationToken)
+    public async Task<int> SyncBotChannelsAsync(int botId, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("SyncBotChannelsAsync 已迁移为自动同步（BotUpdateHub），不再在此处拉取 updates：botId={BotId}", botId);
-        return Task.FromResult(0);
+        if (botId <= 0)
+            throw new ArgumentException("botId 无效", nameof(botId));
+
+        var bot = await _botManagement.GetBotAsync(botId)
+            ?? throw new InvalidOperationException($"机器人不存在：{botId}");
+
+        if (!bot.IsActive)
+            throw new InvalidOperationException("该机器人已停用");
+
+        var channels = (await _botManagement.GetChannelsAsync(botId)).ToList();
+        if (channels.Count == 0)
+        {
+            bot.LastSyncAt = DateTime.UtcNow;
+            await _botManagement.UpdateBotAsync(bot);
+            return 0;
+        }
+
+        var botUserId = await GetBotUserIdAsync(bot.Token, cancellationToken);
+
+        var removed = 0;
+        foreach (var ch in channels)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var status = await GetBotMemberStatusAsync(bot.Token, ch.TelegramId, botUserId, cancellationToken);
+                if (string.Equals(status, "creator", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(status, "administrator", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                await _botManagement.DeleteChannelByTelegramIdAsync(bot.Id, ch.TelegramId);
+                removed++;
+            }
+            catch (InvalidOperationException ex) when (TryGetRetryAfterSeconds(ex.Message, out var seconds))
+            {
+                // 429：按提示退避（不重试当前 chat，避免长时间卡住页面）
+                _logger.LogWarning("Bot manual sync hit rate limit, retry after {Seconds}s", seconds);
+                await Task.Delay(TimeSpan.FromSeconds(seconds), cancellationToken);
+            }
+            catch (InvalidOperationException ex) when (IsStaleChannelError(ex.Message))
+            {
+                // Bot 已被踢/频道不存在等：清理本地记录
+                await _botManagement.DeleteChannelByTelegramIdAsync(bot.Id, ch.TelegramId);
+                removed++;
+            }
+        }
+
+        bot.LastSyncAt = DateTime.UtcNow;
+        await _botManagement.UpdateBotAsync(bot);
+
+        if (removed > 0)
+            _logger.LogInformation("Bot manual sync completed: removed {Removed}/{Total} stale channels (botId={BotId})", removed, channels.Count, botId);
+        else
+            _logger.LogInformation("Bot manual sync completed: no stale channels removed (botId={BotId})", botId);
+
+        return removed;
+    }
+
+    private async Task<string?> GetBotMemberStatusAsync(string token, long chatId, long botUserId, CancellationToken cancellationToken)
+    {
+        var member = await _api.CallAsync(token, "getChatMember", new Dictionary<string, string?>
+        {
+            ["chat_id"] = chatId.ToString(),
+            ["user_id"] = botUserId.ToString()
+        }, cancellationToken);
+
+        if (member.ValueKind != JsonValueKind.Object)
+            return null;
+
+        return member.TryGetProperty("status", out var statusEl) ? statusEl.GetString() : null;
+    }
+
+    private static bool IsStaleChannelError(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        var m = message.ToLowerInvariant();
+
+        // 典型：bot 被踢/不在频道里/频道不存在
+        if (m.Contains("bot was kicked"))
+            return true;
+        if (m.Contains("bot is not a member"))
+            return true;
+        if (m.Contains("chat not found"))
+            return true;
+        if (m.Contains("channel not found"))
+            return true;
+
+        return false;
+    }
+
+    private static bool TryGetRetryAfterSeconds(string message, out int seconds)
+    {
+        seconds = 0;
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        // Telegram: "Too Many Requests: retry after 5"
+        var idx = message.IndexOf("retry after", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            return false;
+
+        var tail = message.Substring(idx + "retry after".Length).Trim();
+        var num = new string(tail.TakeWhile(char.IsDigit).ToArray());
+        if (!int.TryParse(num, out seconds))
+            return false;
+
+        if (seconds < 1) seconds = 1;
+        if (seconds > 120) seconds = 120;
+        return true;
     }
 
     /// <summary>
