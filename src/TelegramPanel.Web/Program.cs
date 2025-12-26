@@ -248,6 +248,7 @@ builder.Services.AddRazorComponents()
 
 // MudBlazor
 builder.Services.AddMudServices();
+builder.Services.AddMemoryCache();
 
 // DataProtection keys 持久化：避免容器重建/重启后出现 antiforgery token 无法解密
 try
@@ -315,6 +316,8 @@ builder.Services.AddTelegramPanelCore();
 builder.Services.AddScoped<AccountExportService>();
 builder.Services.AddScoped<DataSyncService>();
 builder.Services.AddScoped<UiPreferencesService>();
+builder.Services.Configure<UpdateCheckOptions>(builder.Configuration.GetSection("UpdateCheck"));
+builder.Services.AddSingleton<UpdateCheckService>();
 builder.Services.Configure<PanelTimeZoneOptions>(builder.Configuration.GetSection("System"));
 builder.Services.AddSingleton<PanelTimeZoneService>();
 builder.Services.AddHostedService<BatchTaskBackgroundService>();

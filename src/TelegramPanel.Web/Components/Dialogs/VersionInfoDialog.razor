@@ -1,5 +1,6 @@
 @namespace TelegramPanel.Web.Components.Dialogs
 @using TelegramPanel.Web.Services
+@inject UpdateCheckService UpdateCheck
 
 <MudDialog>
     <DialogContent>
@@ -16,6 +17,67 @@
                      Rel="noopener noreferrer">
                 GitHub 仓库
             </MudLink>
+
+            <MudDivider Class="my-2" />
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                <MudText Typo="Typo.subtitle2">检查更新</MudText>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_checking" OnClick="ForceRefresh">
+                    @if (_checking)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    立即检查
+                </MudButton>
+            </MudStack>
+
+            @if (_updateInfo == null)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">正在检查…</MudText>
+            }
+            else if (!_updateInfo.Success)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                    检查失败：@_updateInfo.Error
+                </MudAlert>
+            }
+            else if (_updateInfo.Source == "disabled")
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">已禁用检查更新</MudText>
+            }
+            else if (_updateInfo.UpdateAvailable)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                    发现新版本：v@_updateInfo.LatestVersion（当前 v@_updateInfo.CurrentVersion）
+                    @if (!string.IsNullOrWhiteSpace(_updateInfo.Url))
+                    {
+                        <div style="margin-top: 6px;">
+                            <MudLink Href="@_updateInfo.Url" Target="_blank" Rel="noopener noreferrer">查看发布页</MudLink>
+                        </div>
+                    }
+                </MudAlert>
+
+                @if (!string.IsNullOrWhiteSpace(_updateInfo.Notes))
+                {
+                    <MudText Typo="Typo.subtitle2">更新说明（节选）</MudText>
+                    <MudPaper Variant="Variant.Outlined" Class="pa-3" Style="max-height: 240px; overflow: auto;">
+                        <MudText Typo="Typo.body2" Style="white-space: pre-wrap; user-select: text;">@_updateInfo.Notes</MudText>
+                    </MudPaper>
+                }
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">
+                    当前已是最新版本（v@_updateInfo.CurrentVersion）
+                </MudText>
+            }
+
+            @if (_updateInfo != null)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    最近检查：@_updateInfo.CheckedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")（来源：@_updateInfo.Source）
+                </MudText>
+            }
         </MudStack>
     </DialogContent>
     <DialogActions>
@@ -26,6 +88,27 @@
 @code
 {
     [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    private bool _checking;
+    private UpdateCheckInfo? _updateInfo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _updateInfo = await UpdateCheck.GetLatestAsync(forceRefresh: false);
+    }
+
+    private async Task ForceRefresh()
+    {
+        _checking = true;
+        try
+        {
+            _updateInfo = await UpdateCheck.GetLatestAsync(forceRefresh: true);
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
 
     private void Close()
     {
