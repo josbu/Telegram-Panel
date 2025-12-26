@@ -1,0 +1,132 @@
+@inject AccountManagementService AccountManagement
+@inject PanelTimeZoneService TimeZone
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Info" Class="mr-2" />
+            账号详情
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (account == null)
+        {
+            <MudProgressCircular Indeterminate="true" />
+        }
+        else
+        {
+            <MudStack Spacing="3">
+                <MudTextField Value="@FormatCreatedAt()" Label="创建时间" ReadOnly="true" Variant="Variant.Outlined" />
+                <MudTextField Value="@account.SessionPath" Label="Session 路径" ReadOnly="true" Variant="Variant.Outlined" />
+
+                <MudDivider Class="my-2" />
+
+                <MudText Typo="Typo.subtitle1" Class="mb-1">二级密码</MudText>
+
+                @if (isEditingPassword)
+                {
+                    <MudTextField @bind-Value="newPassword" Label="新密码" Variant="Variant.Outlined"
+                                  InputType="@(showPassword ? InputType.Text : InputType.Password)"
+                                  Adornment="Adornment.End"
+                                  AdornmentIcon="@(showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                  OnAdornmentClick="() => showPassword = !showPassword" />
+
+                    <MudStack Row="true" Spacing="2" Justify="Justify.FlexEnd">
+                        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CancelEdit">取消</MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SavePassword" Disabled="@saving">
+                            @if (saving)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            }
+                            保存
+                        </MudButton>
+                    </MudStack>
+                }
+                else
+                {
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudTextField Value="@DisplayPassword()" Label="当前保存的密码" ReadOnly="true" Variant="Variant.Outlined"
+                                      InputType="@(showPassword ? InputType.Text : InputType.Password)"
+                                      Adornment="Adornment.End"
+                                      AdornmentIcon="@(showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                      OnAdornmentClick="() => showPassword = !showPassword"
+                                      Style="flex: 1;" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Primary" OnClick="StartEdit" Title="修改" />
+                    </MudStack>
+                }
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">关闭</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private MudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public int AccountId { get; set; }
+
+    private TelegramPanel.Data.Entities.Account? account;
+    private bool isEditingPassword;
+    private string newPassword = "";
+    private bool showPassword;
+    private bool saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        account = await AccountManagement.GetAccountAsync(AccountId);
+    }
+
+    private string FormatCreatedAt()
+    {
+        return account == null ? "-" : TimeZone.Format(account.CreatedAt, "yyyy-MM-dd HH:mm");
+    }
+
+    private string DisplayPassword()
+    {
+        if (account == null)
+            return "-";
+        return string.IsNullOrEmpty(account.TwoFactorPassword) ? "（未保存）" : account.TwoFactorPassword;
+    }
+
+    private void StartEdit()
+    {
+        newPassword = account?.TwoFactorPassword ?? "";
+        isEditingPassword = true;
+    }
+
+    private void CancelEdit()
+    {
+        isEditingPassword = false;
+        newPassword = "";
+    }
+
+    private async Task SavePassword()
+    {
+        if (account == null)
+            return;
+
+        saving = true;
+        try
+        {
+            account.TwoFactorPassword = string.IsNullOrWhiteSpace(newPassword) ? null : newPassword.Trim();
+            await AccountManagement.UpdateAccountAsync(account);
+            isEditingPassword = false;
+            Snackbar.Add("二级密码已保存", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"保存失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void Close() => MudDialog.Close();
+}

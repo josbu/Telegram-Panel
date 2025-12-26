@@ -23,7 +23,7 @@
                     <MudSelectItem Value="0">全部账号</MudSelectItem>
                     @foreach (var account in accounts)
                     {
-                        <MudSelectItem Value="@account.Id">@account.Phone (@account.Username)</MudSelectItem>
+                        <MudSelectItem Value="@account.Id">@account.DisplayPhone (@account.Username)</MudSelectItem>
                     }
                 </MudSelect>
                 <MudTextField @bind-Value="searchString" Placeholder="搜索群组..." Adornment="Adornment.Start"
@@ -64,7 +64,7 @@
                 <MudTd DataLabel="创建账号">
                     @if (context.CreatorAccount != null)
                     {
-                        <span>@context.CreatorAccount.Phone</span>
+                        <span>@context.CreatorAccount.DisplayPhone</span>
                     }
                     else
                     {

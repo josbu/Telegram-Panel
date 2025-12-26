@@ -188,7 +188,7 @@
                 {
                     processed++;
                     failed++;
-                    results.Add(new ResultRow(a.Phone, "", false, genErr ?? "生成用户名失败"));
+                    results.Add(new ResultRow(a.DisplayPhone, "", false, genErr ?? "生成用户名失败"));
                     StateHasChanged();
                     continue;
                 }
@@ -200,7 +200,7 @@
 
                 processed++;
                 if (ok) success++; else failed++;
-                results.Add(new ResultRow(a.Phone, newUsername, ok, err));
+                results.Add(new ResultRow(a.DisplayPhone, newUsername, ok, err));
 
                 if (ok)
                 {

@@ -72,6 +72,10 @@ namespace TelegramPanel.Data.Migrations
                     b.Property<string>("TelegramStatusSummary")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TwoFactorPassword")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("UserId")
                         .HasColumnType("INTEGER");
 

@@ -125,7 +125,7 @@
             var creator = await AccountManagement.GetAccountAsync(group.CreatorAccountId);
             creatorDisplay = creator == null
                 ? $"账号 {group.CreatorAccountId}"
-                : $"{creator.Phone}（{creator.Nickname ?? creator.Username ?? creator.UserId.ToString()}）";
+                : $"{creator.DisplayPhone}（{creator.Nickname ?? creator.Username ?? creator.UserId.ToString()}）";
         }
         catch (Exception ex)
         {

@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <!-- 集中管理项目版本号 -->
+    <!-- 版本格式: 主版本.次版本.修订号 -->
+    <!-- 主版本: 重大变更/不兼容更新 -->
+    <!-- 次版本: 新功能/兼容性更新 -->
+    <!-- 修订号: Bug修复/小改进 -->
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
+    <InformationalVersion>1.1.0</InformationalVersion>
+
+    <!-- 项目元信息 -->
+    <Authors>Telegram Panel Contributors</Authors>
+    <Company>Telegram Panel</Company>
+    <Product>Telegram Panel</Product>
+    <Copyright>Copyright (c) 2024-2025 Telegram Panel Contributors</Copyright>
+    <Description>Telegram Multi-Account Management Panel</Description>
+    <RepositoryUrl>https://github.com/moeacgx/Telegram-Panel</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+</Project>

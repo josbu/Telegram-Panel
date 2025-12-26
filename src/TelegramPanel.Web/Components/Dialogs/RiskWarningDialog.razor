@@ -48,7 +48,7 @@
                 @foreach (var account in RiskyAccounts)
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ma-1">
-                        @account.Phone
+                        @account.DisplayPhone
                         @if (account.LastLoginAt != null)
                         {
                             <text> (登录 @account.GetLoginHoursFormatted() 小时)</text>

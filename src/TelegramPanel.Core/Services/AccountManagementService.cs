@@ -234,7 +234,9 @@ public class AccountManagementService
         if (account == null)
             return;
 
-        account.Phone = PhoneNumberFormatter.FormatWithCountryCode(account.Phone);
+        // 只设置 DisplayPhone（非持久化字段），不修改 Phone（持久化字段）
+        // 这样可以避免 EF Core 追踪 Phone 的变化导致 UNIQUE 约束冲突
+        account.DisplayPhone = PhoneNumberFormatter.FormatWithCountryCode(account.Phone);
     }
 
     private static string? TryFindRepoRoot()

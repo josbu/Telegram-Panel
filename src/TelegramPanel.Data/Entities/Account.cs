@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace TelegramPanel.Data.Entities;
 
 /// <summary>
@@ -7,6 +9,20 @@ public class Account
 {
     public int Id { get; set; }
     public string Phone { get; set; } = null!;
+
+    private string? _displayPhone;
+
+    /// <summary>
+    /// 格式化后的手机号（用于 UI 展示，不持久化），格式如：+86 13800138000
+    /// 如果未通过 AccountManagementService 设置，则回退到 Phone 的值
+    /// </summary>
+    [NotMapped]
+    public string DisplayPhone
+    {
+        get => _displayPhone ?? Phone;
+        set => _displayPhone = value;
+    }
+
     public long UserId { get; set; }
     /// <summary>
     /// 账号昵称（Telegram 显示名称）
@@ -45,6 +61,11 @@ public class Account
     /// Telegram 状态检测时间（UTC）
     /// </summary>
     public DateTime? TelegramStatusCheckedAtUtc { get; set; }
+
+    /// <summary>
+    /// 二级密码（两步验证密码），用于系统保存以便后续修改
+    /// </summary>
+    public string? TwoFactorPassword { get; set; }
 
     // 导航属性
     public AccountCategory? Category { get; set; }

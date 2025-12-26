@@ -25,7 +25,7 @@
             else
             {
                 <MudText Typo="Typo.subtitle2">
-                    执行账号：@account.Phone @(string.IsNullOrWhiteSpace(account.Nickname) ? "" : $"（{account.Nickname}）")
+                    执行账号：@account.DisplayPhone @(string.IsNullOrWhiteSpace(account.Nickname) ? "" : $"（{account.Nickname}）")
                 </MudText>
             }
 
@@ -103,7 +103,7 @@
 
         bool? confirm = await DialogService.ShowMessageBox(
             "确认执行",
-            $"将使用账号 {account.Phone} 对 {links.Count} 个链接执行订阅/加群操作。是否继续？",
+            $"将使用账号 {account.DisplayPhone} 对 {links.Count} 个链接执行订阅/加群操作。是否继续？",
             yesText: "继续", cancelText: "取消");
 
         if (confirm != true)

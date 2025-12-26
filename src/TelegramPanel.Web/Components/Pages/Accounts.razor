@@ -88,7 +88,7 @@
                 <MudTh>操作</MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="手机号">@context.Phone</MudTd>
+                <MudTd DataLabel="手机号">@context.DisplayPhone</MudTd>
                 <MudTd DataLabel="昵称">@(context.Nickname ?? "-")</MudTd>
                 <MudTd DataLabel="用户名">@(context.Username ?? "-")</MudTd>
                 <MudTd DataLabel="用户ID">@context.UserId</MudTd>
@@ -248,11 +248,15 @@
 
     private async Task ShowDetails(Account account)
     {
-        var (channels, groups) = await AccountManagement.GetAccountStatisticsAsync(account.Id);
-        var createdAt = TimeZone.Format(account.CreatedAt, "yyyy-MM-dd HH:mm");
-        var lastSyncAt = TimeZone.Format(account.LastSyncAt, "yyyy-MM-dd HH:mm");
-        var message = $"账号详情：\n手机号：{account.Phone}\n用户名：{account.Username ?? "无"}\n用户ID：{account.UserId}\n分类：{account.Category?.Name ?? "未分类"}\n创建的频道：{channels} 个\n创建的群组：{groups} 个\n创建时间：{createdAt}\n最后数据同步：{lastSyncAt}\nSession路径：{account.SessionPath}";
-        await DialogService.ShowMessageBox("账号详情", message, "关闭");
+        var parameters = new DialogParameters
+        {
+            ["AccountId"] = account.Id
+        };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = DialogService.Show<TelegramPanel.Web.Components.Dialogs.AccountDetailsDialog>("账号详情", parameters, options)!;
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+            await LoadAccounts();
     }
 
     private async Task OpenChangeTwoFactorPassword(Account account)
@@ -569,7 +573,7 @@
             // 资料刷新后重新加载（昵称/用户名/用户ID 可能更新）
             await LoadAccounts();
 
-            Snackbar.Add($"账号 {account.Phone} 状态：{result.Summary}", result.Ok ? Severity.Success : Severity.Warning);
+            Snackbar.Add($"账号 {account.DisplayPhone} 状态：{result.Summary}", result.Ok ? Severity.Success : Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -857,7 +861,7 @@
         var parameters = new DialogParameters
         {
             ["AccountId"] = account.Id,
-            ["Phone"] = account.Phone
+            ["Phone"] = account.DisplayPhone
         };
 
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
@@ -870,7 +874,7 @@
         var parameters = new DialogParameters
         {
             ["AccountId"] = account.Id,
-            ["Phone"] = account.Phone
+            ["Phone"] = account.DisplayPhone
         };
 
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Large, FullWidth = true };
@@ -900,7 +904,7 @@
     {
         bool? result = await DialogService.ShowMessageBox(
             "确认删除",
-            $"确定要删除账号 {account.Phone} 吗？此操作不可撤销！",
+            $"确定要删除账号 {account.DisplayPhone} 吗？此操作不可撤销！",
             yesText: "删除", cancelText: "取消");
 
         if (result == true)

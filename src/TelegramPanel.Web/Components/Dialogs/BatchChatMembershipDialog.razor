@@ -150,7 +150,7 @@
                 {
                     _cts.Token.ThrowIfCancellationRequested();
 
-                    currentHint = $"{a.Phone} => {link}";
+                    currentHint = $"{a.DisplayPhone} => {link}";
                     StateHasChanged();
 
                     (bool Success, string? Error, string? Title) result;
@@ -163,7 +163,7 @@
                     if (!result.Success)
                     {
                         failed++;
-                        failures.Add($"{a.Phone} => {link}：{result.Error}");
+                        failures.Add($"{a.DisplayPhone} => {link}：{result.Error}");
                     }
 
                     StateHasChanged();

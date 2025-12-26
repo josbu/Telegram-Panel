@@ -24,7 +24,7 @@
                     可修改：昵称、Bio、用户名、头像。用户名暂时仅支持单账号设置。
                 </MudAlert>
 
-                <MudText Typo="Typo.subtitle2">账号：@account.Phone</MudText>
+                <MudText Typo="Typo.subtitle2">账号：@account.DisplayPhone</MudText>
 
                 <MudSwitch @bind-Value="editNickname" Label="修改昵称" Color="Color.Primary" />
                 <MudTextField @bind-Value="nickname" Label="昵称" Variant="Variant.Outlined" Disabled="@(!editNickname)"

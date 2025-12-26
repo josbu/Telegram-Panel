@@ -155,7 +155,7 @@
                 var creator = await AccountManagement.GetAccountAsync(channel.CreatorAccountId.Value);
                 creatorDisplay = creator == null
                     ? $"账号 {channel.CreatorAccountId.Value}"
-                    : $"{creator.Phone}（{creator.Nickname ?? creator.Username ?? creator.UserId.ToString()}）";
+                    : $"{creator.DisplayPhone}（{creator.Nickname ?? creator.Username ?? creator.UserId.ToString()}）";
             }
             else
             {

@@ -214,7 +214,8 @@ public class AccountImportService
     /// </summary>
     public async Task<List<ImportResult>> ImportFromZipAsync(
         IBrowserFile zipFile,
-        int? categoryId = null)
+        int? categoryId = null,
+        string? twoFactorPassword = null)
     {
         var results = new List<ImportResult>();
 
@@ -251,7 +252,7 @@ public class AccountImportService
             var importedPhones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var jsonPath in jsonFiles)
             {
-                var result = await ImportFromPackageEntryAsync(jsonPath, categoryId);
+                var result = await ImportFromPackageEntryAsync(jsonPath, categoryId, twoFactorPassword);
                 if (result.Phone != null && !importedPhones.Add(result.Phone))
                 {
                     results.Add(new ImportResult(false, result.Phone, result.UserId, result.Username, result.SessionPath, "重复账号已跳过"));
@@ -331,7 +332,7 @@ public class AccountImportService
         }
     }
 
-    private async Task<ImportResult> ImportFromPackageEntryAsync(string jsonPath, int? categoryId)
+    private async Task<ImportResult> ImportFromPackageEntryAsync(string jsonPath, int? categoryId, string? twoFactorPassword)
     {
         try
         {
@@ -374,6 +375,10 @@ public class AccountImportService
             {
                 return new ImportResult(false, phone, userId, username, null, "未找到对应的 .session 文件");
             }
+
+            // 尝试从 2fa.txt 读取二级密码（优先于用户输入的统一密码）
+            var twoFaFromFile = await TryRead2faFileAsync(dir);
+            var effectiveTwoFactorPassword = !string.IsNullOrWhiteSpace(twoFaFromFile) ? twoFaFromFile : twoFactorPassword;
 
             var sessionsPath = _configuration["Telegram:SessionsPath"] ?? "sessions";
             Directory.CreateDirectory(sessionsPath);
@@ -432,6 +437,9 @@ public class AccountImportService
                 existing.ApiHash = apiHash.Trim();
                 existing.IsActive = true;
                 existing.LastSyncAt = DateTime.UtcNow;
+                // 仅在提供了二级密码时更新，避免覆盖已有密码
+                if (!string.IsNullOrWhiteSpace(effectiveTwoFactorPassword))
+                    existing.TwoFactorPassword = effectiveTwoFactorPassword.Trim();
                 await _accountManagement.UpdateAccountAsync(existing);
             }
             else
@@ -447,6 +455,7 @@ public class AccountImportService
                     ApiHash = apiHash.Trim(),
                     IsActive = true,
                     CategoryId = categoryId,
+                    TwoFactorPassword = string.IsNullOrWhiteSpace(effectiveTwoFactorPassword) ? null : effectiveTwoFactorPassword.Trim(),
                     CreatedAt = DateTime.UtcNow,
                     LastSyncAt = DateTime.UtcNow
                 };
@@ -463,6 +472,35 @@ public class AccountImportService
         }
 
         string extractDirFallback() => Path.GetTempPath();
+    }
+
+    /// <summary>
+    /// 尝试从目录中读取 2fa.txt 文件内容作为二级密码
+    /// </summary>
+    private static async Task<string?> TryRead2faFileAsync(string directory)
+    {
+        try
+        {
+            // 支持多种常见文件名
+            var possibleNames = new[] { "2fa.txt", "2FA.txt", "2fa", "2FA", "twofa.txt", "password.txt" };
+            foreach (var name in possibleNames)
+            {
+                var filePath = Path.Combine(directory, name);
+                if (!File.Exists(filePath))
+                    continue;
+
+                var content = await File.ReadAllTextAsync(filePath);
+                var password = content?.Trim();
+                if (!string.IsNullOrWhiteSpace(password))
+                    return password;
+            }
+        }
+        catch
+        {
+            // 读取失败不影响导入流程
+        }
+
+        return null;
     }
 
     private static string? BuildNickname(string? firstName, string? lastName, string? username)
