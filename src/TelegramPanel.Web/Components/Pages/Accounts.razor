@@ -48,6 +48,10 @@
                Disabled="@(loading || selectedAccounts.Count == 0)" OnClick="BatchRefreshTelegramStatus" Size="Size.Small">
         刷新已选状态
     </MudButton>
+    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Devices"
+               Disabled="@(loading || selectedAccounts.Count == 0)" OnClick="BatchKickAllOtherDevices" Size="Size.Small">
+        踢出其他设备（已选）
+    </MudButton>
     <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep"
                Disabled="@(loading || selectedAccounts.Count == 0)" OnClick="CleanupSelectedWasteAccounts" Size="Size.Small">
         清理废号（已选）
