@@ -354,6 +354,9 @@ public class ChannelService : IChannelService
             if (ex.Message.Contains("USER_ALREADY_PARTICIPANT", StringComparison.OrdinalIgnoreCase))
                 return new InviteResult(username, true);
 
+            if (ex.Message.Contains("RIGHT_FORBIDDEN", StringComparison.OrdinalIgnoreCase))
+                return new InviteResult(username, false, "RIGHT_FORBIDDEN：执行账号缺少邀请权限，或该频道限制邀请");
+
             return new InviteResult(username, false, ex.Message);
         }
         catch (Exception ex)
@@ -394,15 +397,72 @@ public class ChannelService : IChannelService
 
         var resolved = await client.Contacts_ResolveUsername(username);
 
-        var chatAdminRights = ConvertAdminRights(rights);
+        var requestedRights = SanitizeRequestedAdminRights(channel, resolved.User, rights);
+        var effectiveRights = requestedRights;
+        if (requestedRights != rights)
+        {
+            _logger.LogInformation(
+                "Admin rights sanitized for channel {ChannelId} target @{Username}: requested={Requested} sanitized={Sanitized}",
+                channelId, username, rights, requestedRights);
+        }
+
+        async Task PromoteAsync(Interfaces.AdminRights toGrant)
+        {
+            var chatAdminRights = ConvertAdminRights(toGrant);
+            await client.Channels_EditAdmin(channel, resolved.User, chatAdminRights, title);
+        }
+
+        async Task<Interfaces.AdminRights?> TryGetExecutorAdminRightsAsync()
+        {
+            try
+            {
+                var meId = client.User?.id ?? 0;
+                if (meId <= 0)
+                    return null;
+                return await TryGetGrantedAdminRightsAsync(client, channel, meId);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        async Task<bool> TryPromoteWithFallbackAsync(Interfaces.AdminRights toGrant)
+        {
+            try
+            {
+                await PromoteAsync(toGrant);
+                effectiveRights = toGrant;
+                return true;
+            }
+            catch (RpcException ex) when (ex.Message.Contains("RIGHT_FORBIDDEN", StringComparison.OrdinalIgnoreCase))
+            {
+                // 如果执行账号能“提升管理员”，但不能授予某些权限（比如 add_admins/anonymous/manage_topics），则交集降级后重试一次
+                var executorRights = await TryGetExecutorAdminRightsAsync();
+                if (!executorRights.HasValue)
+                    throw;
+
+                var reduced = toGrant & executorRights.Value;
+                if (reduced == toGrant || reduced == Interfaces.AdminRights.None)
+                    throw;
+
+                _logger.LogInformation(
+                    "Promote rights downgraded for channel {ChannelId}: requested={Requested} executor={Executor} effective={Effective}",
+                    channelId, requestedRights, executorRights.Value, reduced);
+
+                await PromoteAsync(reduced);
+                effectiveRights = reduced;
+                return true;
+            }
+        }
 
         try
         {
-            await client.Channels_EditAdmin(channel, resolved.User, chatAdminRights, title);
+            await TryPromoteWithFallbackAsync(requestedRights);
         }
         catch (RpcException ex) when (ex.Message.Contains("USER_NOT_PARTICIPANT", StringComparison.OrdinalIgnoreCase))
         {
-            // 目标用户不在频道：先尝试邀请进频道，再重试一次提升权限
+            // 目标用户不在频道：先尝试邀请进频道，再提升权限（邀请可能会因缺少 invite 权限而失败）
             try
             {
                 await client.Channels_InviteToChannel(channel, new InputUser(resolved.User.id, resolved.User.access_hash));
@@ -413,16 +473,33 @@ public class ChannelService : IChannelService
             }
             catch (RpcException inviteEx) when (inviteEx.Message.Contains("USER_BOT", StringComparison.OrdinalIgnoreCase))
             {
-                // 目标是 Bot：邀请成员可能不被允许，继续尝试提升（部分频道/权限组合仍可直接提升）
+                // 目标是 Bot：邀请成员可能不被允许，继续尝试提升
                 _logger.LogDebug(inviteEx, "Invite bot as member is not allowed for channel {ChannelId}, continue promoting", channelId);
             }
+            catch (RpcException inviteEx) when (inviteEx.Message.Contains("RIGHT_FORBIDDEN", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "目标用户不在频道，且执行账号缺少“邀请用户”权限，无法先邀请再设置管理员。", inviteEx);
+            }
 
-            await client.Channels_EditAdmin(channel, resolved.User, chatAdminRights, title);
+            try
+            {
+                await TryPromoteWithFallbackAsync(requestedRights);
+            }
+            catch (RpcException ex2) when (ex2.Message.Contains("RIGHT_FORBIDDEN", StringComparison.OrdinalIgnoreCase))
+            {
+                var executor = await TryGetExecutorAdminRightsAsync();
+                var executorHint = executor.HasValue ? $"执行账号可授予：{FormatAdminRights(executor.Value)}。" : "";
+                throw new InvalidOperationException(
+                    $"RIGHT_FORBIDDEN：执行账号无权设置管理员，或请求授予的权限超出可授予范围。{executorHint}", ex2);
+            }
         }
         catch (RpcException ex) when (ex.Message.Contains("RIGHT_FORBIDDEN", StringComparison.OrdinalIgnoreCase))
         {
+            var executor = await TryGetExecutorAdminRightsAsync();
+            var executorHint = executor.HasValue ? $"执行账号可授予：{FormatAdminRights(executor.Value)}。" : "";
             throw new InvalidOperationException(
-                "RIGHT_FORBIDDEN：执行账号缺少权限。请确认执行账号是频道创建者，或在频道里拥有“邀请用户/添加管理员”等权限。");
+                $"RIGHT_FORBIDDEN：执行账号无权设置管理员，或请求授予的权限超出可授予范围。{executorHint}", ex);
         }
 
         // 权限校验：Telegram 可能会静默“削减”你请求的权限（典型：执行账号本身没有 add_admins/promote 权限）
@@ -431,12 +508,12 @@ public class ChannelService : IChannelService
             var granted = await TryGetGrantedAdminRightsAsync(client, channel, resolved.User.id);
             if (granted.HasValue)
             {
-                var missing = rights & ~granted.Value;
+                var missing = effectiveRights & ~granted.Value;
                 if (missing != Interfaces.AdminRights.None)
                 {
                     throw new InvalidOperationException(
                         $"已设置管理员，但部分权限未生效：{FormatAdminRights(missing)}。" +
-                        "请确认：执行账号是该频道创建者，或执行账号在频道内拥有“添加管理员”权限。");
+                        "请确认：执行账号是该频道创建者，或执行账号在频道内拥有足够的授权权限。");
                 }
             }
         }
@@ -452,6 +529,49 @@ public class ChannelService : IChannelService
 
         _logger.LogInformation("Set @{Username} as admin in channel {ChannelId}", username, channelId);
         return true;
+    }
+
+    private static Interfaces.AdminRights SanitizeRequestedAdminRights(Channel channel, User targetUser, Interfaces.AdminRights rights)
+    {
+        var sanitized = rights;
+
+        // 频道（broadcast）不支持“管理话题”；仅 forum 超级群才有话题
+        var isMegagroup = TryGetBoolMember(channel, "megagroup");
+        var isForum = TryGetBoolMember(channel, "forum");
+        if (!isMegagroup || !isForum)
+            sanitized &= ~Interfaces.AdminRights.ManageTopics;
+
+        // Bot 在频道内的可授予权限有额外限制（例如 invite_users 常见会被拒绝）
+        var isBot = TryGetBoolMember(targetUser, "bot");
+        if (isBot)
+        {
+            sanitized &= ~Interfaces.AdminRights.InviteUsers;
+            sanitized &= ~Interfaces.AdminRights.Anonymous;
+            sanitized &= ~Interfaces.AdminRights.ManageTopics;
+        }
+
+        return sanitized;
+    }
+
+    private static bool TryGetBoolMember(object obj, string memberName)
+    {
+        try
+        {
+            var t = obj.GetType();
+            var prop = t.GetProperty(memberName);
+            if (prop != null && prop.PropertyType == typeof(bool))
+                return (bool)(prop.GetValue(obj) ?? false);
+
+            var field = t.GetField(memberName);
+            if (field != null && field.FieldType == typeof(bool))
+                return (bool)(field.GetValue(obj) ?? false);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return false;
     }
 
     public async Task<List<SetAdminResult>> BatchSetAdminsAsync(int accountId, long channelId, List<AdminRequest> requests)
