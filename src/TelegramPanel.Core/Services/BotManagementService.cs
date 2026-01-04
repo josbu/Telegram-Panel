@@ -133,6 +133,11 @@ public class BotManagementService
             if (msg.Contains("UNIQUE constraint failed: BotChannelCategories.Name", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("分类名称已存在");
 
+            if (msg.Contains("database is locked", StringComparison.OrdinalIgnoreCase)
+                || msg.Contains("database is busy", StringComparison.OrdinalIgnoreCase)
+                || msg.Contains("SQLite Error 5", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("数据库正被占用（SQLite database is locked），请稍后重试；若云端部署了多个实例共享同一个 sqlite 文件，请改为单实例或换用 MySQL/PostgreSQL。");
+
             if (msg.Contains("no such table: BotChannelCategories", StringComparison.OrdinalIgnoreCase)
                 || msg.Contains("no such column", StringComparison.OrdinalIgnoreCase)
                 || msg.Contains("NOT NULL constraint failed: BotChannelCategories.BotId", StringComparison.OrdinalIgnoreCase))

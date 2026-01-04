@@ -13,6 +13,7 @@ using TelegramPanel.Web.Modules;
 using TelegramPanel.Web.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Data.Sqlite;
 
 // 诊断：对某个目录下的 *.json/*.session 做一次“可转换/可校验”检查（不写数据库）
 // 用法：dotnet run --project src/TelegramPanel.Web -- --diag-session-dir "D:/path/to/dir"
@@ -309,6 +310,22 @@ catch (Exception ex)
     Log.Warning(ex, "Failed to normalize sqlite connection string, using configured value");
     connectionString = configuredConnectionString;
 }
+
+// 云端场景（容器/卷/后台任务）更容易出现 SQLite 写锁：这里统一增强连接参数，提升抗锁能力
+try
+{
+    var csb = new SqliteConnectionStringBuilder(connectionString)
+    {
+        // 等待写锁释放的最大秒数（映射/等价于 busy_timeout 行为）
+        DefaultTimeout = 30,
+        Pooling = true
+    };
+    connectionString = csb.ToString();
+}
+catch (Exception ex)
+{
+    Log.Warning(ex, "Failed to enhance sqlite connection string, using current value");
+}
 builder.Services.AddTelegramPanelData(connectionString);
 
 // Telegram Panel 核心服务
@@ -390,6 +407,8 @@ using (var scope = app.Services.CreateScope())
         if (conn.State != System.Data.ConnectionState.Open)
             conn.Open();
 
+        ConfigureSqliteConnection(conn);
+
         List<string> tables;
         using (var cmd = conn.CreateCommand())
         {
@@ -466,6 +485,34 @@ using (var scope = app.Services.CreateScope())
             else
             {
                 Log.Error("Accounts table missing. Existing tables: {Tables}", string.Join(", ", tables));
+            }
+        }
+
+        void ConfigureSqliteConnection(System.Data.Common.DbConnection connection)
+        {
+            // journal_mode=WAL 会持久化到库；busy_timeout 是连接级参数
+            // 这里提前设置，减少在云端并发写入时的 “database is locked” 概率
+            try
+            {
+                using (var cmd = connection.CreateCommand())
+                {
+                    cmd.CommandText = "PRAGMA journal_mode=WAL;";
+                    _ = cmd.ExecuteScalar();
+                }
+                using (var cmd = connection.CreateCommand())
+                {
+                    cmd.CommandText = "PRAGMA synchronous=NORMAL;";
+                    cmd.ExecuteNonQuery();
+                }
+                using (var cmd = connection.CreateCommand())
+                {
+                    cmd.CommandText = "PRAGMA busy_timeout=5000;";
+                    cmd.ExecuteNonQuery();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Failed to configure sqlite pragmas");
             }
         }
 
