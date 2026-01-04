@@ -86,11 +86,19 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"保存失败：{ex.Message}", Severity.Error);
+            Snackbar.Add($"保存失败：{GetInnermostMessage(ex)}", Severity.Error);
         }
         finally
         {
             saving = false;
         }
+    }
+
+    private static string GetInnermostMessage(Exception ex)
+    {
+        var cur = ex;
+        while (cur.InnerException != null)
+            cur = cur.InnerException;
+        return string.IsNullOrWhiteSpace(cur.Message) ? ex.Message : cur.Message;
     }
 }

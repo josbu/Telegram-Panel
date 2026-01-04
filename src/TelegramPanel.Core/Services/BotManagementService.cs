@@ -123,7 +123,31 @@ public class BotManagementService
             CreatedAt = DateTime.UtcNow
         };
 
-        return await _categoryRepository.AddAsync(cat);
+        try
+        {
+            return await _categoryRepository.AddAsync(cat);
+        }
+        catch (DbUpdateException ex)
+        {
+            var msg = GetInnermostMessage(ex);
+            if (msg.Contains("UNIQUE constraint failed: BotChannelCategories.Name", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("分类名称已存在");
+
+            if (msg.Contains("no such table: BotChannelCategories", StringComparison.OrdinalIgnoreCase)
+                || msg.Contains("no such column", StringComparison.OrdinalIgnoreCase)
+                || msg.Contains("NOT NULL constraint failed: BotChannelCategories.BotId", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"数据库结构过旧或未完成迁移，请重启主程序以自动迁移数据库。详情：{msg}");
+
+            throw new InvalidOperationException($"创建分类失败：{msg}", ex);
+        }
+    }
+
+    private static string GetInnermostMessage(Exception ex)
+    {
+        var cur = ex;
+        while (cur.InnerException != null)
+            cur = cur.InnerException;
+        return string.IsNullOrWhiteSpace(cur.Message) ? ex.Message : cur.Message;
     }
 
     public async Task DeleteCategoryAsync(int categoryId)
