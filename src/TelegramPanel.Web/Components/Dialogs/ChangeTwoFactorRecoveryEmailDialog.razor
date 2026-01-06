@@ -147,6 +147,9 @@
 
             if (account != null)
             {
+                if (string.IsNullOrWhiteSpace(currentPassword) && !string.IsNullOrWhiteSpace(account.TwoFactorPassword))
+                    currentPassword = account.TwoFactorPassword;
+
                 var (ok, err, hasPwd, hasEmail, unconfirmed) = await AccountTelegramTools.GetTwoFactorRecoveryEmailStatusAsync(AccountId);
                 if (!ok && !silent)
                 {
@@ -174,8 +177,14 @@
 
         if (string.IsNullOrWhiteSpace(currentPassword))
         {
-            Snackbar.Add("请填写原二级密码", Severity.Warning);
-            return;
+            if (!string.IsNullOrWhiteSpace(account.TwoFactorPassword))
+                currentPassword = account.TwoFactorPassword;
+
+            if (string.IsNullOrWhiteSpace(currentPassword))
+            {
+                Snackbar.Add("请填写原二级密码", Severity.Warning);
+                return;
+            }
         }
 
         if (string.IsNullOrWhiteSpace(email))

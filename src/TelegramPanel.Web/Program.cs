@@ -352,6 +352,8 @@ builder.Services.AddHostedService<AccountDataAutoSyncBackgroundService>();
 builder.Services.AddHostedService<BotAutoSyncBackgroundService>();
 builder.Services.AddHostedService<TelegramPanel.Web.Services.WebhookRegistrationService>();
 builder.Services.AddHttpClient<TelegramBotApiClient>();
+builder.Services.AddHttpClient<TelegramPanel.Web.Services.CloudMailClient>();
+builder.Services.AddScoped<TelegramPanel.Modules.ITelegramEmailCodeService, TelegramPanel.Web.Services.TelegramEmailCodeService>();
 builder.Services.AddModuleSystem(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton<AppRestartService>();
 

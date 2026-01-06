@@ -1056,9 +1056,13 @@ public class AccountTelegramToolsService
                 "请点击“重发验证码”，并使用最新邮件中的验证码。" + Environment.NewLine + msg);
 
         if (msg.Contains("EMAIL_UNCONFIRMED", StringComparison.OrdinalIgnoreCase))
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(msg, "(EMAIL_UNCONFIRMED(?:_[A-Z0-9]+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var code = m.Success ? m.Groups[1].Value.ToUpperInvariant() : "EMAIL_UNCONFIRMED";
             return (
-                "邮箱未确认（EMAIL_UNCONFIRMED）",
+                $"邮箱未确认（{code}）",
                 "请在面板输入邮箱收到的验证码进行确认；如提示过期请重发并使用最新验证码。" + Environment.NewLine + msg);
+        }
 
         if (msg.Contains("EMAIL_INVALID", StringComparison.OrdinalIgnoreCase))
             return ("邮箱无效（EMAIL_INVALID）", msg);
@@ -1080,6 +1084,9 @@ public class AccountTelegramToolsService
 
         if (msg.Contains("SESSION_PASSWORD_NEEDED", StringComparison.OrdinalIgnoreCase))
             return ("需要两步验证密码（SESSION_PASSWORD_NEEDED）", msg);
+
+        if (msg.Contains("CODE_INVALID", StringComparison.OrdinalIgnoreCase))
+            return ("验证码错误（CODE_INVALID）", "验证码不正确或不是最新验证码。请点击“重发验证码”，并使用最新邮件中的验证码。" + Environment.NewLine + msg);
 
         if (msg.Contains("PHOTO_FILE_MISSING", StringComparison.OrdinalIgnoreCase))
             return ("头像上传失败（PHOTO_FILE_MISSING）", msg);

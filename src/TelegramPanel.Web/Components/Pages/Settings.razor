@@ -12,6 +12,7 @@
 @inject IWebHostEnvironment Environment
 @inject PanelTimeZoneService TimeZone
 @inject NavigationManager Navigation
+@inject CloudMailClient CloudMail
 @using TelegramPanel.Web.Services
 
 <PageTitle>系统设置 - Telegram Panel</PageTitle>
@@ -43,6 +44,42 @@
             </MudCardActions>
         </MudCard>
 
+        <MudCard Class="mb-4">
+            <MudCardHeader>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudText Typo="Typo.h6">Cloud Mail 对接</MudText>
+                    <MudLink Href="https://github.com/maillab/cloud-mail" Target="_blank" Underline="Underline.Always">
+                        GitHub
+                    </MudLink>
+                </MudStack>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField @bind-Value="cloudMailBaseUrl" Label="Cloud Mail URL" Variant="Variant.Outlined"
+                              HelperText="例如：https://mail.example.com（无需填写 /api）" />
+                <MudTextField @bind-Value="cloudMailDomain" Label="邮箱域名" Variant="Variant.Outlined" Class="mt-3"
+                              HelperText="例如：xx.com（将生成 手机号数字@xx.com）" />
+                <MudTextField @bind-Value="cloudMailToken" Label="Authorization Token" Variant="Variant.Outlined" Class="mt-3"
+                              HelperText="Cloud Mail 的全局 Token（生成新 Token 会使旧 Token 失效）" />
+
+                <MudDivider Class="my-3" />
+                <MudText Typo="Typo.subtitle2">生成 Token（可选）</MudText>
+                <MudTextField @bind-Value="cloudMailAdminEmail" Label="管理员邮箱" Variant="Variant.Outlined" Class="mt-2" />
+                <MudTextField @bind-Value="cloudMailAdminPassword" Label="管理员密码" Variant="Variant.Outlined" Class="mt-3"
+                              InputType="InputType.Password" />
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="@(async (MouseEventArgs _) => await SaveCloudMailConfig())">
+                    保存配置
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Info"
+                           Disabled="@cloudMailGeneratingToken"
+                           OnClick="@(async (MouseEventArgs _) => await GenerateCloudMailToken())">
+                    生成并填入 Token
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+ 
         <MudCard>
             <MudCardHeader>
                 <MudText Typo="Typo.h6">批量操作设置</MudText>
@@ -218,6 +255,12 @@
     private int logRetentionDays = 30;
     private bool syncing = false;
     private string timeZoneId = "";
+    private string cloudMailBaseUrl = "";
+    private string cloudMailDomain = "";
+    private string cloudMailToken = "";
+    private string cloudMailAdminEmail = "";
+    private string cloudMailAdminPassword = "";
+    private bool cloudMailGeneratingToken = false;
 
     private sealed record TimeZoneChoice(string Id, string Label);
 
@@ -253,6 +296,9 @@
         botAutoSyncEnabled = Configuration.GetValue("Telegram:BotAutoSyncEnabled", false);
         botAutoSyncIntervalSeconds = Configuration.GetValue("Telegram:BotAutoSyncIntervalSeconds", 2);
         timeZoneId = Configuration["System:TimeZoneId"] ?? "";
+        cloudMailBaseUrl = Configuration["CloudMail:BaseUrl"] ?? "";
+        cloudMailDomain = Configuration["CloudMail:Domain"] ?? "";
+        cloudMailToken = Configuration["CloudMail:Token"] ?? "";
     }
 
     private async Task SaveApiConfig()
@@ -323,6 +369,64 @@
         catch (Exception ex)
         {
             Snackbar.Add($"保存失败：{ex.Message}（路径：{LocalConfigPath}）", Severity.Error);
+        }
+    }
+
+    private async Task SaveCloudMailConfig()
+    {
+        try
+        {
+            var root = await LoadOrCreateLocalConfigAsync();
+            var cloud = EnsureObject(root, "CloudMail");
+            cloud["BaseUrl"] = (cloudMailBaseUrl ?? string.Empty).Trim();
+            cloud["Domain"] = (cloudMailDomain ?? string.Empty).Trim().TrimStart('@');
+            cloud["Token"] = (cloudMailToken ?? string.Empty).Trim();
+            await SaveLocalConfigAsync(root);
+
+            Snackbar.Add("Cloud Mail 配置已保存（配置热重载后生效）", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"保存失败：{ex.Message}（路径：{LocalConfigPath}）", Severity.Error);
+        }
+    }
+
+    private async Task GenerateCloudMailToken()
+    {
+        if (cloudMailGeneratingToken)
+            return;
+
+        var baseUrl = (cloudMailBaseUrl ?? string.Empty).Trim();
+        var email = (cloudMailAdminEmail ?? string.Empty).Trim();
+        var password = cloudMailAdminPassword ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            Snackbar.Add("请先填写 Cloud Mail URL", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        {
+            Snackbar.Add("请填写管理员邮箱和密码", Severity.Warning);
+            return;
+        }
+
+        cloudMailGeneratingToken = true;
+        try
+        {
+            var token = await CloudMail.GenerateTokenAsync(baseUrl, email, password, CancellationToken.None);
+            cloudMailToken = token;
+            Snackbar.Add("Token 已生成并填入（记得点击“保存配置”）", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"生成 Token 失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            cloudMailGeneratingToken = false;
         }
     }
 

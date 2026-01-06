@@ -200,6 +200,36 @@ public sealed class ExampleKickApiModule : ITelegramPanelModule
 }
 ```
 
+## 宿主内置服务（模块可注入）
+
+模块与宿主同进程运行，因此模块的 API/任务/页面都可以直接从 DI 获取宿主服务。
+
+### 获取 Telegram 邮箱验证码（Cloud Mail）
+
+宿主提供 `ITelegramEmailCodeService` 供模块复用“邮箱验证码”能力（例如：部分客户端会把验证码发送到邮箱而非短信）。
+
+前置条件：在面板「系统设置」配置 `CloudMail:BaseUrl` / `CloudMail:Token` / `CloudMail:Domain`。
+
+示例（在模块任意 DI 场景注入即可，如 `IModuleTaskHandler` / `MapEndpoints`）：
+
+```csharp
+using TelegramPanel.Modules;
+
+public sealed class MyHandler : IModuleTaskHandler
+{
+    public string TaskType => "example.mail-code";
+    private readonly ITelegramEmailCodeService _emailCodes;
+
+    public MyHandler(ITelegramEmailCodeService emailCodes) => _emailCodes = emailCodes;
+
+    public async Task ExecuteAsync(IModuleTaskExecutionHost host, CancellationToken ct)
+    {
+        var r = await _emailCodes.TryGetLatestCodeByPhoneDigitsAsync("8413111454444", sinceUtc: DateTimeOffset.UtcNow.AddMinutes(-5), ct);
+        // r.Success / r.Code
+    }
+}
+```
+
 ## UI 模块项目模板（Razor 组件）
 
 如果你的模块需要提供页面（`IModuleUiProvider.GetPages`），推荐把模块做成 `Microsoft.NET.Sdk.Razor` 项目（类似 Razor Class Library），例如：

@@ -1,0 +1,482 @@
+@namespace TelegramPanel.Web.Components.Dialogs
+@inject IConfiguration Configuration
+@inject AccountManagementService AccountManagement
+@inject TelegramPanel.Core.Services.Telegram.AccountTelegramToolsService AccountTelegramTools
+@inject TelegramPanel.Web.Services.CloudMailClient CloudMail
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using System.Text.RegularExpressions
+@using TelegramPanel.Core.Utils
+@using TelegramPanel.Data.Entities
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                将使用 Cloud Mail 收取 Telegram 邮件验证码，批量完成“找回邮箱”绑定/换绑并自动确认。
+            </MudAlert>
+
+            <MudTextField @bind-Value="cloudMailBaseUrl" Label="Cloud Mail URL" Variant="Variant.Outlined" />
+            <MudTextField @bind-Value="cloudMailToken" Label="Authorization Token" Variant="Variant.Outlined" />
+            <MudTextField @bind-Value="domain" Label="邮箱域名" Variant="Variant.Outlined"
+                          HelperText="将生成 手机号数字@域名，例如：8413111454444@xx.com" />
+
+            <MudSwitch @bind-Value="createUsers" Label="先在 Cloud Mail 添加邮箱用户（addUser，可选）" Color="Color.Primary" />
+            <MudSwitch @bind-Value="useStoredPasswords" Label="优先使用数据库中保存的原二级密码" Color="Color.Primary" />
+
+            @if (!useStoredPasswords)
+            {
+                <MudTextField @bind-Value="currentPassword" Label="原二级密码（统一）" Variant="Variant.Outlined"
+                              InputType="InputType.Password" Required="true" />
+            }
+            else
+            {
+                <MudTextField @bind-Value="currentPassword" Label="原二级密码（统一，作为兜底）" Variant="Variant.Outlined"
+                              HelperText="当某账号未保存二级密码时，使用这里作为兜底；留空则该账号会失败"
+                              InputType="InputType.Password" />
+            }
+
+            <MudSwitch @bind-Value="autoConfirm" Label="自动从邮箱取码并确认绑定" Color="Color.Primary" />
+            @if (autoConfirm)
+            {
+                <MudNumericField @bind-Value="pollIntervalSeconds" Label="收码轮询间隔(秒)" Variant="Variant.Outlined" Min="2" Max="30" />
+                <MudNumericField @bind-Value="pollTimeoutSeconds" Label="收码超时(秒)" Variant="Variant.Outlined" Min="10" Max="300" />
+                <MudTextField @bind-Value="sendEmailFilter" Label="发件人过滤(sendEmail，支持%)" Variant="Variant.Outlined"
+                              HelperText="留空=不过滤；Cloud Mail 支持模糊匹配，例如 %telegram%" />
+                <MudTextField @bind-Value="subjectFilter" Label="主题过滤(subject，支持%)" Variant="Variant.Outlined"
+                              HelperText="留空=不过滤；Cloud Mail 支持模糊匹配，例如 %Telegram%" />
+            }
+
+            @if (accounts.Count > 0)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                    已选账号：@accounts.Count；进度：@processed/@accounts.Count；成功：@success；失败：@failed
+                </MudAlert>
+            }
+
+            @if (results.Count > 0)
+            {
+                <MudTable Items="results" Dense="true" Hover="true">
+                    <HeaderContent>
+                        <MudTh>手机号</MudTh>
+                        <MudTh>邮箱</MudTh>
+                        <MudTh>结果</MudTh>
+                        <MudTh>信息</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="手机号">@context.Phone</MudTd>
+                        <MudTd DataLabel="邮箱">@context.Email</MudTd>
+                        <MudTd DataLabel="结果">@(context.Success ? "成功" : "失败")</MudTd>
+                        <MudTd DataLabel="信息">@(context.Message ?? "-")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" Disabled="@running" OnClick="Cancel">关闭</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@running" OnClick="Start">开始批量换绑</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code
+{
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public List<int>? AccountIds { get; set; }
+
+    private readonly List<Account> accounts = new();
+    private readonly List<ResultRow> results = new();
+
+    private bool running;
+    private int processed;
+    private int success;
+    private int failed;
+
+    private string cloudMailBaseUrl = "";
+    private string cloudMailToken = "";
+    private string domain = "";
+
+    private bool createUsers = false;
+    private bool useStoredPasswords = true;
+    private string currentPassword = "";
+
+    private bool autoConfirm = true;
+    private int pollIntervalSeconds = 3;
+    private int pollTimeoutSeconds = 60;
+    private string sendEmailFilter = "";
+    private string subjectFilter = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        cloudMailBaseUrl = Configuration["CloudMail:BaseUrl"] ?? "";
+        cloudMailToken = Configuration["CloudMail:Token"] ?? "";
+        domain = (Configuration["CloudMail:Domain"] ?? "").Trim().TrimStart('@');
+
+        var ids = AccountIds?.Distinct().Where(x => x > 0).ToList() ?? new List<int>();
+        if (ids.Count == 0)
+            return;
+
+        var all = await AccountManagement.GetAllAccountsAsync();
+        accounts.AddRange(all.Where(a => ids.Contains(a.Id)).OrderBy(a => a.Id));
+    }
+
+    private async Task Start()
+    {
+        if (running)
+            return;
+
+        if (accounts.Count == 0)
+        {
+            Snackbar.Add("未选择账号", Severity.Warning);
+            return;
+        }
+
+        cloudMailBaseUrl = (cloudMailBaseUrl ?? string.Empty).Trim();
+        cloudMailToken = (cloudMailToken ?? string.Empty).Trim();
+        domain = (domain ?? string.Empty).Trim().TrimStart('@');
+
+        if (string.IsNullOrWhiteSpace(cloudMailBaseUrl) || string.IsNullOrWhiteSpace(cloudMailToken))
+        {
+            Snackbar.Add("请先在系统设置里配置 Cloud Mail URL/Token（或在此对话框中填写）", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            Snackbar.Add("请填写邮箱域名", Severity.Warning);
+            return;
+        }
+
+        bool? confirm = await DialogService.ShowMessageBox(
+            "确认批量换绑",
+            $"将对 {accounts.Count} 个账号批量换绑找回邮箱，邮箱格式为：{{手机号数字}}@{domain}。是否继续？",
+            yesText: "继续", cancelText: "取消");
+
+        if (confirm != true)
+            return;
+
+        running = true;
+        processed = 0;
+        success = 0;
+        failed = 0;
+        results.Clear();
+
+        try
+        {
+            foreach (var a in accounts)
+            {
+                var phoneDigits = PhoneNumberFormatter.NormalizeToDigits(a.Phone);
+                var email = string.IsNullOrWhiteSpace(phoneDigits) ? "" : $"{phoneDigits}@{domain}";
+
+                var (ok, msg) = await ProcessOneAsync(a, email);
+                processed++;
+                if (ok) success++; else failed++;
+                results.Add(new ResultRow(a.DisplayPhone, email, ok, msg));
+                StateHasChanged();
+            }
+
+            Snackbar.Add($"批量换绑完成：成功 {success}/{accounts.Count}，失败 {failed}/{accounts.Count}", failed == 0 ? Severity.Success : Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"执行失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private async Task<(bool Ok, string? Message)> ProcessOneAsync(Account account, string email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return (false, "手机号无效，无法生成邮箱");
+
+        var effectivePassword = useStoredPasswords
+            ? (!string.IsNullOrWhiteSpace(account.TwoFactorPassword) ? account.TwoFactorPassword : currentPassword)
+            : currentPassword;
+
+        effectivePassword = (effectivePassword ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(effectivePassword))
+            return (false, "未提供原二级密码（数据库未保存且未填写统一密码）");
+
+        if (createUsers)
+        {
+            try
+            {
+                await CloudMail.AddUsersAsync(cloudMailBaseUrl, cloudMailToken, new[] { email }, cancellationToken: CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                return (false, $"创建邮箱用户失败：{ex.Message}");
+            }
+        }
+
+        var startUtc = DateTimeOffset.UtcNow;
+        var (sent, err, _) = await AccountTelegramTools.SetTwoFactorRecoveryEmailAsync(
+            accountId: account.Id,
+            currentPassword: effectivePassword,
+            email: email,
+            cancellationToken: CancellationToken.None);
+
+        if (!sent)
+        {
+            if (autoConfirm && (err ?? "").Contains("EMAIL_UNCONFIRMED", StringComparison.OrdinalIgnoreCase))
+            {
+                var pendingCode = await TryWaitTelegramCodeAsync(email, startUtc, CancellationToken.None, allowOlder: true);
+                if (string.IsNullOrWhiteSpace(pendingCode))
+                {
+                    var diag = await TryBuildReceiveDiagAsync(email, CancellationToken.None);
+                    return (false, $"邮箱未确认但收码超时（{pollTimeoutSeconds}s）：{err}{(string.IsNullOrWhiteSpace(diag) ? "" : "；" + diag)}");
+                }
+
+                var (pendingConfirmed, pendingConfirmErr) = await AccountTelegramTools.ConfirmTwoFactorRecoveryEmailAsync(
+                    accountId: account.Id,
+                    code: pendingCode,
+                    cancellationToken: CancellationToken.None);
+
+                if (!pendingConfirmed)
+                {
+                    if ((pendingConfirmErr ?? "").Contains("CODE_INVALID", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _ = await AccountTelegramTools.ResendTwoFactorRecoveryEmailAsync(account.Id, CancellationToken.None);
+                        var retryCode = await TryWaitTelegramCodeAsync(email, DateTimeOffset.UtcNow, CancellationToken.None, allowOlder: true);
+                        if (!string.IsNullOrWhiteSpace(retryCode))
+                        {
+                            var (retryOk, retryErr) = await AccountTelegramTools.ConfirmTwoFactorRecoveryEmailAsync(
+                                accountId: account.Id,
+                                code: retryCode,
+                                cancellationToken: CancellationToken.None);
+                            if (retryOk)
+                                return (true, "已确认绑定（之前存在待确认邮箱，重发后重试成功）");
+
+                            return (false, $"确认失败：{retryErr}");
+                        }
+                    }
+
+                    return (false, $"确认失败：{pendingConfirmErr}");
+                }
+
+                return (true, "已确认绑定（之前存在待确认邮箱）");
+            }
+
+            return (false, err);
+        }
+
+        if (!autoConfirm)
+            return (true, "已发送验证码（未自动确认）");
+
+        var code = await TryWaitTelegramCodeAsync(email, startUtc, CancellationToken.None);
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            var diag = await TryBuildReceiveDiagAsync(email, CancellationToken.None);
+            return (false, $"收码超时（{pollTimeoutSeconds}s）{(string.IsNullOrWhiteSpace(diag) ? "" : "：" + diag)}");
+        }
+
+        var (confirmed, confirmErr) = await AccountTelegramTools.ConfirmTwoFactorRecoveryEmailAsync(
+            accountId: account.Id,
+            code: code,
+            cancellationToken: CancellationToken.None);
+
+        if (!confirmed)
+        {
+            if ((confirmErr ?? "").Contains("CODE_INVALID", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = await AccountTelegramTools.ResendTwoFactorRecoveryEmailAsync(account.Id, CancellationToken.None);
+                var retryCode = await TryWaitTelegramCodeAsync(email, DateTimeOffset.UtcNow, CancellationToken.None);
+                if (!string.IsNullOrWhiteSpace(retryCode))
+                {
+                    var (retryOk, retryErr) = await AccountTelegramTools.ConfirmTwoFactorRecoveryEmailAsync(
+                        accountId: account.Id,
+                        code: retryCode,
+                        cancellationToken: CancellationToken.None);
+                    if (retryOk)
+                        return (true, "已确认绑定（重发后重试成功）");
+
+                    return (false, $"确认失败：{retryErr}");
+                }
+            }
+
+            return (false, $"确认失败：{confirmErr}");
+        }
+
+        return (true, "已确认绑定");
+    }
+
+    private async Task<string?> TryWaitTelegramCodeAsync(string toEmail, DateTimeOffset startUtc, CancellationToken cancellationToken, bool allowOlder = false)
+    {
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(pollTimeoutSeconds, 10, 300));
+        var interval = TimeSpan.FromSeconds(Math.Clamp(pollIntervalSeconds, 2, 30));
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        var allowOldBeforeUtc = allowOlder ? DateTimeOffset.UtcNow.AddHours(-24) : startUtc.AddMinutes(-10);
+        var useFilters = !string.IsNullOrWhiteSpace(sendEmailFilter) || !string.IsNullOrWhiteSpace(subjectFilter);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            List<TelegramPanel.Web.Services.CloudMailEmail> emails = new();
+            try
+            {
+                TelegramPanel.Web.Services.CloudMailEmailListRequest BuildReq(string? recipient) => new TelegramPanel.Web.Services.CloudMailEmailListRequest
+                {
+                    ToEmail = string.IsNullOrWhiteSpace(recipient) ? null : recipient,
+                    SendEmail = useFilters && !string.IsNullOrWhiteSpace(sendEmailFilter) ? sendEmailFilter.Trim() : null,
+                    Subject = useFilters && !string.IsNullOrWhiteSpace(subjectFilter) ? subjectFilter.Trim() : null,
+                    TimeSort = "desc",
+                    Type = null,
+                    IsDel = null,
+                    Num = 1,
+                    Size = 50
+                };
+
+                // 1) 服务端按收件人精确过滤
+                emails = await CloudMail.GetEmailListAsync(cloudMailBaseUrl, cloudMailToken, BuildReq(toEmail), cancellationToken);
+
+                // 2) 兼容：服务端 toEmail 过滤可能只对模糊生效
+                if (emails.Count == 0)
+                    emails = await CloudMail.GetEmailListAsync(cloudMailBaseUrl, cloudMailToken, BuildReq("%" + toEmail + "%"), cancellationToken);
+
+                // 3) 过滤条件过严时：去掉过滤再试
+                if (useFilters && emails.Count == 0)
+                {
+                    emails = await CloudMail.GetEmailListAsync(cloudMailBaseUrl, cloudMailToken, BuildReq(toEmail) with { SendEmail = null, Subject = null }, cancellationToken);
+                    if (emails.Count == 0)
+                        emails = await CloudMail.GetEmailListAsync(cloudMailBaseUrl, cloudMailToken, BuildReq("%" + toEmail + "%") with { SendEmail = null, Subject = null }, cancellationToken);
+                }
+
+                // 4) 最后兜底：拉取最近邮件并在本地匹配收件人
+                if (emails.Count == 0)
+                    emails = await CloudMail.GetEmailListAsync(cloudMailBaseUrl, cloudMailToken, BuildReq(null) with { SendEmail = null, Subject = null }, cancellationToken);
+            }
+            catch
+            {
+                await Task.Delay(interval, cancellationToken);
+                continue;
+            }
+
+            foreach (var mail in FilterCandidates(emails, toEmail))
+            {
+                var createdUtc = TryParseUtc(mail.CreateTime);
+                if (createdUtc.HasValue && createdUtc.Value < allowOldBeforeUtc)
+                    continue;
+
+                var code = TryExtractCode(mail);
+                if (!string.IsNullOrWhiteSpace(code))
+                    return code;
+            }
+
+            await Task.Delay(interval, cancellationToken);
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<TelegramPanel.Web.Services.CloudMailEmail> FilterCandidates(
+        IEnumerable<TelegramPanel.Web.Services.CloudMailEmail> emails,
+        string toEmail)
+    {
+        var target = (toEmail ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(target))
+            return emails ?? Array.Empty<TelegramPanel.Web.Services.CloudMailEmail>();
+
+        return (emails ?? Array.Empty<TelegramPanel.Web.Services.CloudMailEmail>())
+            .Where(m =>
+            {
+                var e = (m.ToEmail ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(e)) return false;
+                return string.Equals(e, target, StringComparison.OrdinalIgnoreCase)
+                       || e.EndsWith(target, StringComparison.OrdinalIgnoreCase)
+                       || e.Contains(target, StringComparison.OrdinalIgnoreCase);
+            });
+    }
+
+    private async Task<string?> TryBuildReceiveDiagAsync(string toEmail, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var req = new TelegramPanel.Web.Services.CloudMailEmailListRequest
+            {
+                ToEmail = null,
+                SendEmail = null,
+                Subject = null,
+                TimeSort = "desc",
+                Type = null,
+                IsDel = null,
+                Num = 1,
+                Size = 10
+            };
+
+            var all = await CloudMail.GetEmailListAsync(cloudMailBaseUrl, cloudMailToken, req, cancellationToken);
+            var matched = FilterCandidates(all, toEmail).ToList();
+            if (matched.Count > 0)
+            {
+                var top = matched[0];
+                return $"Cloud Mail 已拉到 {matched.Count} 封匹配邮件（最近主题：{(top.Subject ?? "").Trim()}，时间：{(top.CreateTime ?? "").Trim()}），但未能解析出验证码";
+            }
+
+            var any = all.FirstOrDefault();
+            if (any == null)
+                return "Cloud Mail emailList 返回空列表（可能是 Token/权限/收件箱同步问题）";
+
+            return $"Cloud Mail 拉到 {all.Count} 封最近邮件，但未匹配到收件人 {toEmail}（最近一封收件人：{(any.ToEmail ?? "").Trim()}）";
+        }
+        catch (Exception ex)
+        {
+            return $"收码诊断失败：{ex.Message}";
+        }
+    }
+
+    private static DateTimeOffset? TryParseUtc(string? createTime)
+    {
+        createTime = (createTime ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(createTime))
+            return null;
+
+        if (DateTime.TryParse(createTime, out var dt))
+        {
+            if (dt.Kind == DateTimeKind.Unspecified)
+                dt = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+            else
+                dt = dt.ToUniversalTime();
+
+            return new DateTimeOffset(dt);
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractCode(TelegramPanel.Web.Services.CloudMailEmail mail)
+    {
+        var subject = mail.Subject ?? "";
+        var text = mail.Text ?? "";
+        var html = mail.Content ?? "";
+        var merged = $"{subject}\n{text}\n{StripHtml(html)}";
+
+        // Telegram 常见邮件模板：
+        // - "Your Code - 164581"
+        // - "Your code is: 164581."
+        var m = Regex.Match(merged, "(?i)your\\s+code\\s*[-–—]\\s*(\\d{5,6})");
+        if (m.Success) return m.Groups[1].Value;
+        m = Regex.Match(merged, "(?i)your\\s+code\\s+is\\s*[:：]?\\s*(\\d{5,6})");
+        if (m.Success) return m.Groups[1].Value;
+
+        var matches = Regex.Matches(merged, "\\b\\d{5,6}\\b");
+        if (matches.Count == 0)
+            return null;
+
+        return matches[^1].Value;
+    }
+
+    private static string StripHtml(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+            return string.Empty;
+
+        return Regex.Replace(html, "<.*?>", " ").Replace("&nbsp;", " ").Trim();
+    }
+
+    private void Cancel() => MudDialog.Close();
+
+    private sealed record ResultRow(string Phone, string Email, bool Success, string? Message);
+}
