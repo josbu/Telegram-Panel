@@ -312,15 +312,31 @@ public class ChannelService : IChannelService
             if (string.IsNullOrEmpty(username))
                 throw new ArgumentException("Username is required for public channels");
 
+            username = username.Trim().TrimStart('@');
+            var current = (channel.MainUsername ?? string.Empty).Trim();
+            if (string.Equals(current, username, StringComparison.OrdinalIgnoreCase))
+                return true;
+
             // 检查用户名是否可用
             var available = await client.Channels_CheckUsername(channel, username);
             if (!available)
                 throw new InvalidOperationException($"Username '{username}' is not available");
 
-            await client.Channels_UpdateUsername(channel, username);
+            try
+            {
+                await client.Channels_UpdateUsername(channel, username);
+            }
+            catch (RpcException ex) when (ex.Message.Contains("USERNAME_NOT_MODIFIED", StringComparison.OrdinalIgnoreCase))
+            {
+                // 有些情况下虽然 username 相同，Telegram 仍会返回该错误；视为成功即可
+                return true;
+            }
         }
         else
         {
+            if (string.IsNullOrWhiteSpace(channel.MainUsername))
+                return true;
+
             // 移除用户名使频道变为私密
             await client.Channels_UpdateUsername(channel, string.Empty);
         }

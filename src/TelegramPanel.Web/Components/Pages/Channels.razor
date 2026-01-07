@@ -56,6 +56,8 @@
     <MudMenu Label="批量操作" Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.MoreHoriz"
                Size="Size.Small" Disabled="@loading" Dense="true" EndIcon="@Icons.Material.Filled.KeyboardArrowDown">
         <MudMenuItem Disabled="@(selectedChannels.Count == 0)" OnClick="OpenBatchInviteSelected">批量邀请（已选）</MudMenuItem>
+        <MudMenuItem Disabled="@(selectedChannels.Count == 0)" OnClick="BatchCopyInvitesSelected">批量复制邀请链接（已选）</MudMenuItem>
+        <MudMenuItem Disabled="@(selectedChannels.Count == 0)" OnClick="BatchExportInvitesSelected">批量导出邀请链接（已选）</MudMenuItem>
         <MudMenuItem Disabled="@(selectedChannels.Count == 0)" OnClick="OpenBatchSetAdminsSelected">批量设置管理员（已选）</MudMenuItem>
         <MudMenuItem Disabled="@(selectedChannels.Count == 0)" OnClick="OpenBatchSetGroupSelected">批量修改分组（已选）</MudMenuItem>
     </MudMenu>
@@ -357,6 +359,108 @@
         }
 
         await OpenInvite(targets);
+    }
+
+    private async Task BatchCopyInvitesSelected()
+    {
+        if (loading)
+            return;
+
+        var targets = selectedChannels.ToList();
+        if (targets.Count == 0)
+        {
+            Snackbar.Add("未选择任何频道", Severity.Info);
+            return;
+        }
+
+        bool? result = await DialogService.ShowMessageBox(
+            "确认复制",
+            $"将为 {targets.Count} 个频道生成邀请链接并复制到剪贴板。是否继续？",
+            yesText: "继续", cancelText: "取消");
+
+        if (result != true)
+            return;
+
+        loading = true;
+        try
+        {
+            var lines = new List<string>
+            {
+                $"# ExportedAtUtc: {DateTime.UtcNow:O}",
+                "# Format: <TelegramId>\\t<Title>\\t<Link>",
+                ""
+            };
+
+            var ok = 0;
+            var skipped = 0;
+            var failed = 0;
+
+            foreach (var channel in targets)
+            {
+                var executeAccountId = await ChannelManagement.ResolveExecuteAccountIdAsync(
+                    channel,
+                    preferredAccountId: filterAccount > 0 ? filterAccount : null);
+                if (executeAccountId is not > 0)
+                {
+                    skipped++;
+                    lines.Add($"{channel.TelegramId}\t{channel.Title}\t(无可用执行账号)");
+                    continue;
+                }
+
+                try
+                {
+                    var link = await ChannelService.ExportJoinLinkAsync(executeAccountId.Value, channel.TelegramId);
+                    ok++;
+                    lines.Add($"{channel.TelegramId}\t{channel.Title}\t{link}");
+                }
+                catch
+                {
+                    failed++;
+                    lines.Add($"{channel.TelegramId}\t{channel.Title}\t(无法生成/不可见/无权限)");
+                }
+            }
+
+            var text = string.Join(Environment.NewLine, lines);
+            await JS.InvokeVoidAsync("telegramPanel.copyText", text);
+            Snackbar.Add($"已复制邀请链接：成功 {ok}/{targets.Count}，失败 {failed}/{targets.Count}，跳过 {skipped}/{targets.Count}", failed == 0 ? Severity.Success : Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"复制失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task BatchExportInvitesSelected()
+    {
+        if (loading)
+            return;
+
+        var targets = selectedChannels.ToList();
+        if (targets.Count == 0)
+        {
+            Snackbar.Add("未选择任何频道", Severity.Info);
+            return;
+        }
+
+        bool? result = await DialogService.ShowMessageBox(
+            "确认导出",
+            $"将为 {targets.Count} 个频道生成邀请链接并导出。是否继续？",
+            yesText: "继续", cancelText: "取消");
+
+        if (result != true)
+            return;
+
+        var ids = string.Join(",", targets.Select(x => x.TelegramId));
+        var url = $"/downloads/channels/invites.txt?ids={Uri.EscapeDataString(ids)}";
+        if (filterAccount > 0)
+            url += $"&accountId={filterAccount}";
+
+        Navigation.NavigateTo(url, forceLoad: true);
+        await Task.CompletedTask;
     }
 
     private async Task OpenBatchSetAdminsSelected()

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using System.Security.Claims;
 using Serilog;
 using TelegramPanel.Core;
+using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Services;
 using TelegramPanel.Core.Services.Telegram;
 using TelegramPanel.Data;
@@ -849,6 +850,78 @@ var botInvitesDownload = app.MapGet("/downloads/bots/{botId:int}/invites.txt", a
 }).DisableAntiforgery();
 if (adminAuthEnabled)
     botInvitesDownload.RequireAuthorization();
+
+// 下载：导出频道邀请链接（文本）
+var channelInvitesDownload = app.MapGet("/downloads/channels/invites.txt", async (
+    HttpContext http,
+    ChannelManagementService channelManagement,
+    IChannelService channelService,
+    CancellationToken cancellationToken) =>
+{
+    var idsRaw = http.Request.Query["ids"].ToString();
+    IReadOnlyList<long> telegramIds;
+    if (string.IsNullOrWhiteSpace(idsRaw))
+    {
+        telegramIds = (await channelManagement.GetAllChannelsAsync()).Select(x => x.TelegramId).Where(x => x > 0).Distinct().ToList();
+    }
+    else
+    {
+        telegramIds = idsRaw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => long.TryParse(s, out var x) ? x : 0)
+            .Where(x => x > 0)
+            .Distinct()
+            .ToList();
+    }
+
+    var preferredAccountIdRaw = http.Request.Query["accountId"].ToString();
+    var preferredAccountId = int.TryParse(preferredAccountIdRaw, out var x) ? x : 0;
+    if (preferredAccountId <= 0)
+        preferredAccountId = 0;
+
+    var lines = new List<string>
+    {
+        $"# ExportedAtUtc: {DateTime.UtcNow:O}",
+        "# Format: <TelegramId>\\t<Title>\\t<Link>",
+        ""
+    };
+
+    foreach (var telegramId in telegramIds)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var ch = await channelManagement.GetChannelByTelegramIdAsync(telegramId);
+        if (ch == null)
+        {
+            lines.Add($"{telegramId}\t(unknown)\t(频道不存在)");
+            continue;
+        }
+
+        var executeAccountId = await channelManagement.ResolveExecuteAccountIdAsync(ch, preferredAccountId: preferredAccountId);
+        if (executeAccountId is not > 0)
+        {
+            lines.Add($"{telegramId}\t{ch.Title}\t(无可用执行账号)");
+            continue;
+        }
+
+        try
+        {
+            var link = await channelService.ExportJoinLinkAsync(executeAccountId.Value, telegramId);
+            lines.Add($"{telegramId}\t{ch.Title}\t{link}");
+        }
+        catch
+        {
+            lines.Add($"{telegramId}\t{ch.Title}\t(无法生成/不可见/无权限)");
+        }
+    }
+
+    var text = string.Join(Environment.NewLine, lines);
+    var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+    var fileName = $"telegram-panel-channel-invites-{DateTime.UtcNow:yyyyMMdd-HHmmss}.txt";
+    return Results.File(bytes, "text/plain; charset=utf-8", fileName);
+}).DisableAntiforgery();
+if (adminAuthEnabled)
+    channelInvitesDownload.RequireAuthorization();
 
 // Telegram Bot Webhook 端点
 // 接收 Telegram 服务器推送的更新，用于 Webhook 模式
