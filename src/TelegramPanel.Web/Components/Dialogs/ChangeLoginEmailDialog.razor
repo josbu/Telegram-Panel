@@ -1,0 +1,226 @@
+@namespace TelegramPanel.Web.Components.Dialogs
+@inject AccountManagementService AccountManagement
+@inject TelegramPanel.Core.Services.Telegram.AccountTelegramToolsService AccountTelegramTools
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using TelegramPanel.Data.Entities
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                这里修改的是 Telegram 的“登录邮箱”（用于接收登录确认邮件验证码）。部分账号可能不支持在已登录状态下新增登录邮箱。
+            </MudAlert>
+
+            @if (!loaded)
+            {
+                <MudProgressCircular Indeterminate="true" />
+            }
+            else if (account == null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">账号不存在</MudAlert>
+            }
+            else
+            {
+                <MudText Typo="Typo.subtitle2">账号：@account.DisplayPhone</MudText>
+
+                <MudStack direction="Row" Spacing="2" AlignItems="AlignItems.Center">
+                    <MudChip T="string" Size="Size.Small" Color="@(hasLoginEmail ? Color.Success : Color.Default)">
+                        @(hasLoginEmail ? "已启用登录邮箱" : "未启用登录邮箱")
+                    </MudChip>
+                    @if (!string.IsNullOrWhiteSpace(loginEmailPattern))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info">掩码：@loginEmailPattern</MudChip>
+                    }
+                </MudStack>
+
+                <MudTextField @bind-Value="email" Label="新登录邮箱" Variant="Variant.Outlined"
+                              HelperText="将会向该邮箱发送验证码（登录确认邮件）" Required="true" />
+
+                <MudStack direction="Row" Spacing="2" AlignItems="AlignItems.Center">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@running" OnClick="SendCode">
+                        @if (running)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            <span>发送中...</span>
+                        }
+                        else
+                        {
+                            <span>发送验证码</span>
+                        }
+                    </MudButton>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        如果提示不支持新增登录邮箱，将无法在该账号已登录状态下设置（通常需要登录流程触发设置）。
+                    </MudText>
+                </MudStack>
+
+                <MudDivider Class="my-2" />
+
+                <MudText Typo="Typo.subtitle2">输入验证码确认</MudText>
+
+                <MudTextField @bind-Value="code" Label="邮箱验证码" Variant="Variant.Outlined"
+                              HelperText="请到邮箱中查看验证码（注意垃圾箱/延迟）。如提示过期，请先重发并使用最新验证码。"
+                              Required="true" />
+
+                <MudStack direction="Row" Spacing="2">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Default" Disabled="@running" OnClick="Resend">
+                        重发验证码
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@running" OnClick="Confirm">
+                        @if (running)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            <span>确认中...</span>
+                        }
+                        else
+                        {
+                            <span>确认</span>
+                        }
+                    </MudButton>
+                </MudStack>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" Disabled="@running" OnClick="Close">关闭</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code
+{
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int AccountId { get; set; }
+
+    private bool loaded;
+    private Account? account;
+
+    private bool hasLoginEmail;
+    private string? loginEmailPattern;
+
+    private bool running;
+    private string email = "";
+    private string code = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadStatus();
+        loaded = true;
+    }
+
+    private async Task ReloadStatus(bool silent = false)
+    {
+        account = await AccountManagement.GetAccountAsync(AccountId);
+        if (account == null)
+            return;
+
+        var (ok, err, has, pattern) = await AccountTelegramTools.GetLoginEmailStatusAsync(AccountId, CancellationToken.None);
+        if (!ok)
+        {
+            hasLoginEmail = false;
+            loginEmailPattern = null;
+            if (!silent)
+                Snackbar.Add($"获取登录邮箱状态失败：{err}", Severity.Warning);
+            return;
+        }
+
+        hasLoginEmail = has;
+        loginEmailPattern = pattern;
+    }
+
+    private static bool IsEmailNotSetup(string? message)
+        => (message ?? "").Contains("EMAIL_NOT_SETUP", StringComparison.OrdinalIgnoreCase);
+
+    private async Task SendCode()
+    {
+        if (running)
+            return;
+
+        if (account == null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            Snackbar.Add("请填写新登录邮箱", Severity.Warning);
+            return;
+        }
+
+        bool? confirm = await DialogService.ShowMessageBox(
+            "确认发送验证码",
+            "将向新邮箱发送验证码，用于设置/变更登录邮箱。是否继续？",
+            yesText: "继续", cancelText: "取消");
+
+        if (confirm != true)
+            return;
+
+        running = true;
+        try
+        {
+            var (ok, err, pattern) = await AccountTelegramTools.SetLoginEmailAsync(
+                accountId: AccountId,
+                email: email,
+                cancellationToken: CancellationToken.None);
+
+            if (!ok)
+            {
+                if (IsEmailNotSetup(err))
+                {
+                    Snackbar.Add("该账号不支持新增登录邮箱（需要登录流程触发设置），已跳过。", Severity.Info);
+                }
+                else
+                {
+                    Snackbar.Add($"发送失败：{err}", Severity.Error);
+                }
+
+                await ReloadStatus(silent: true);
+                return;
+            }
+
+            loginEmailPattern = pattern ?? loginEmailPattern;
+            code = "";
+            Snackbar.Add("验证码已发送，请到邮箱中查看并输入验证码确认。", Severity.Success);
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private async Task Confirm()
+    {
+        if (running)
+            return;
+
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            Snackbar.Add("请填写邮箱验证码", Severity.Warning);
+            return;
+        }
+
+        running = true;
+        try
+        {
+            var (ok, err) = await AccountTelegramTools.ConfirmLoginEmailAsync(AccountId, code, CancellationToken.None);
+            if (!ok)
+            {
+                Snackbar.Add($"确认失败：{err}", Severity.Error);
+                return;
+            }
+
+            Snackbar.Add("登录邮箱已确认。", Severity.Success);
+            await ReloadStatus();
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private async Task Resend()
+    {
+        // 登录邮箱没有专门的 resend API：再次调用 send 即可
+        await SendCode();
+    }
+
+    private void Close() => MudDialog.Close();
+}
+

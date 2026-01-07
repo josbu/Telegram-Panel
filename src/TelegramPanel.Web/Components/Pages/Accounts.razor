@@ -164,13 +164,14 @@
                              <MudMenuItem Icon="@Icons.Material.Filled.ExitToApp" Disabled="@loading" OnClick="@(() => OpenLeaveUnsubscribe(context))">退群/退订</MudMenuItem>
                              <MudMenuItem Icon="@Icons.Material.Filled.MarkEmailUnread" Disabled="@loading" OnClick="@(() => OpenSystemInbox(context))">系统通知（验证码）</MudMenuItem>
                              <MudMenuItem Icon="@Icons.Material.Filled.Devices" Disabled="@loading" OnClick="@(() => OpenDevices(context))">在线设备</MudMenuItem>
-                             <MudDivider />
-                             <MudMenuItem Icon="@Icons.Material.Filled.Password" Disabled="@loading" OnClick="@(() => OpenChangeTwoFactorPassword(context))">修改二级密码</MudMenuItem>
-                             <MudMenuItem Icon="@Icons.Material.Filled.AlternateEmail" Disabled="@loading" OnClick="@(() => OpenChangeTwoFactorRecoveryEmail(context))">绑定/换绑找回邮箱</MudMenuItem>
-                             <MudDivider />
-                              <MudMenuItem Icon="@(context.IsActive ? Icons.Material.Filled.Stop : Icons.Material.Filled.PlayArrow)"
-                                           Disabled="@loading"
-                                           OnClick="@(() => ToggleActive(context))">
+                              <MudDivider />
+                              <MudMenuItem Icon="@Icons.Material.Filled.Password" Disabled="@loading" OnClick="@(() => OpenChangeTwoFactorPassword(context))">修改二级密码</MudMenuItem>
+                              <MudMenuItem Icon="@Icons.Material.Filled.AlternateEmail" Disabled="@loading" OnClick="@(() => OpenChangeTwoFactorRecoveryEmail(context))">绑定/换绑找回邮箱</MudMenuItem>
+                              <MudMenuItem Icon="@Icons.Material.Filled.Email" Disabled="@loading" OnClick="@(() => OpenChangeLoginEmail(context))">绑定/换绑登录邮箱</MudMenuItem>
+                              <MudDivider />
+                               <MudMenuItem Icon="@(context.IsActive ? Icons.Material.Filled.Stop : Icons.Material.Filled.PlayArrow)"
+                                            Disabled="@loading"
+                                            OnClick="@(() => ToggleActive(context))">
                                   @(context.IsActive ? "停用" : "启用")
                               </MudMenuItem>
                               <MudMenuItem Icon="@Icons.Material.Filled.Delete" Disabled="@loading" OnClick="@(() => DeleteAccount(context))">删除账号</MudMenuItem>
@@ -340,6 +341,20 @@
         };
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
         DialogService.Show<TelegramPanel.Web.Components.Dialogs.ChangeTwoFactorRecoveryEmailDialog>("绑定/换绑找回邮箱", parameters, options);
+        await Task.CompletedTask;
+    }
+
+    private async Task OpenChangeLoginEmail(Account account)
+    {
+        if (loading)
+            return;
+
+        var parameters = new DialogParameters
+        {
+            ["AccountId"] = account.Id
+        };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        DialogService.Show<TelegramPanel.Web.Components.Dialogs.ChangeLoginEmailDialog>("绑定/换绑登录邮箱", parameters, options);
         await Task.CompletedTask;
     }
 
