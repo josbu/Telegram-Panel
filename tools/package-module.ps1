@@ -16,10 +16,26 @@ param(
     # 更激进的轻量打包：额外剔除宿主已内置的第三方依赖（EFCore/Sqlite/WTelegramClient 等）与多平台 native runtimes。
     # 适用场景：目标宿主就是 TelegramPanel 主程序（必带这些依赖），并且部署环境固定（例如 Docker linux-x64）。
     [Parameter(Mandatory = $false)]
-    [switch]$SlimHost
+    [switch]$SlimHost,
+
+    # 完整打包：不做任何剔除（体积更大，通常不推荐）。
+    # 说明：也可用 -Slim:$false -SlimHost:$false 达到同样效果。
+    [Parameter(Mandatory = $false)]
+    [switch]$Full
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Full)
+{
+    $Slim = $false
+    $SlimHost = $false
+}
+elseif (-not $PSBoundParameters.ContainsKey("Slim") -and -not $PSBoundParameters.ContainsKey("SlimHost"))
+{
+    # 默认轻量化：未显式指定时，按宿主内置依赖（SlimHost）打包。
+    $SlimHost = $true
+}
 
 $repoRoot = (Resolve-Path ".").Path
 $projectPath = Join-Path $repoRoot $Project
@@ -66,7 +82,12 @@ docker run --rm `
     -w "/src" `
     mcr.microsoft.com/dotnet/sdk:8.0 `
     dotnet publish "$projectContainer" -c Release -o "$publishContainer" /p:UseAppHost=false
-if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败（退出码：$LASTEXITCODE）" }
+if ($LASTEXITCODE -ne 0)
+{
+    Write-Warning "Docker publish 失败（退出码：$LASTEXITCODE），将回退到本机 dotnet publish（需本机已安装 dotnet）。"
+    dotnet publish "$projectPath" -c Release -o "$publishHost" /p:UseAppHost=false
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败（退出码：$LASTEXITCODE）" }
+}
 
 $stagingLib = Join-Path $stagingHost "lib"
 New-Item -ItemType Directory -Force -Path $stagingLib | Out-Null

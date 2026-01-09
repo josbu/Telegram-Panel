@@ -121,6 +121,8 @@ public void ConfigureServices(IServiceCollection services, ModuleHostContext con
 powershell tools/package-module.ps1 -Project "src/YourModule/YourModule.csproj" -Manifest "src/YourModule/manifest.json"
 ```
 
+> 默认会按宿主内置依赖做“轻量化打包”（等价于 `-SlimHost`）。如确需完整包可传 `-Full`（或 `-Slim:$false -SlimHost:$false`）。
+
 产物默认输出到：`artifacts/modules/<moduleId>-<version>.tpm`
 
 > 说明：该脚本依赖 Docker（会拉取/使用 `mcr.microsoft.com/dotnet/sdk:8.0` 镜像）。首次执行会比较慢属正常现象。
