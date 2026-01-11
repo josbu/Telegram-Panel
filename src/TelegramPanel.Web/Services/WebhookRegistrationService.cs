@@ -25,38 +25,51 @@ public sealed class WebhookRegistrationService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // 等待应用完全启动
-        await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
-
-        // 检查是否启用 Webhook 模式
-        var webhookEnabled = string.Equals(
-            _configuration["Telegram:WebhookEnabled"]?.Trim(),
-            "true",
-            StringComparison.OrdinalIgnoreCase);
-
-        if (!webhookEnabled)
+        try
         {
-            _logger.LogInformation("Webhook mode disabled, using polling mode");
-            return;
-        }
+            // 等待应用完全启动
+            await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
 
-        var baseUrl = (_configuration["Telegram:WebhookBaseUrl"] ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(baseUrl))
+            // 检查是否启用 Webhook 模式
+            var webhookEnabled = string.Equals(
+                _configuration["Telegram:WebhookEnabled"]?.Trim(),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+
+            if (!webhookEnabled)
+            {
+                _logger.LogInformation("Webhook mode disabled, using polling mode");
+                return;
+            }
+
+            var baseUrl = (_configuration["Telegram:WebhookBaseUrl"] ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                _logger.LogWarning("Webhook enabled but WebhookBaseUrl not configured, skipping webhook registration");
+                return;
+            }
+
+            var secretToken = (_configuration["Telegram:WebhookSecretToken"] ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(secretToken))
+            {
+                _logger.LogWarning("Webhook enabled but WebhookSecretToken not configured, skipping webhook registration");
+                return;
+            }
+
+            _logger.LogInformation("Webhook mode enabled, registering webhooks for all active bots...");
+
+            await RegisterWebhooksAsync(baseUrl, secretToken, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            _logger.LogWarning("Webhook enabled but WebhookBaseUrl not configured, skipping webhook registration");
-            return;
+            // ignore
         }
-
-        var secretToken = (_configuration["Telegram:WebhookSecretToken"] ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(secretToken))
+        catch (Exception ex)
         {
-            _logger.LogWarning("Webhook enabled but WebhookSecretToken not configured, skipping webhook registration");
-            return;
+            // 默认 HostOptions: BackgroundServiceExceptionBehavior=StopHost
+            // 这里兜底防止“注册 webhook 失败”把整个站点带崩导致需要重启才能访问。
+            _logger.LogError(ex, "Webhook registration background service failed");
         }
-
-        _logger.LogInformation("Webhook mode enabled, registering webhooks for all active bots...");
-
-        await RegisterWebhooksAsync(baseUrl, secretToken, stoppingToken);
     }
 
     private async Task RegisterWebhooksAsync(string baseUrl, string secretToken, CancellationToken cancellationToken)

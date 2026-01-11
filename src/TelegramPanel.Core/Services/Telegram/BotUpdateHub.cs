@@ -720,7 +720,9 @@ public sealed class BotUpdateHub : IAsyncDisposable
     {
         private static readonly BoundedChannelOptions SubscriberChannelOptions = new(512)
         {
-            SingleWriter = true,
+            // Webhook 端点可能并发调用 Inject，因此这里必须允许多写入者；
+            // 否则 SingleWriter=true 会触发 Channel 的非线程安全路径，导致偶发异常/卡死。
+            SingleWriter = false,
             SingleReader = true,
             FullMode = BoundedChannelFullMode.DropOldest
         };
@@ -737,6 +739,10 @@ public sealed class BotUpdateHub : IAsyncDisposable
 
         private readonly object _pendingLock = new();
         private readonly Queue<JsonElement> _pendingMyChatMember = new();
+
+        private long _latestUpdateId = -1;
+        private long _lastPersistedUpdateId = -1;
+        private int _persistLoopRunning = 0;
 
         public int BotId => _botId;
 
@@ -767,24 +773,8 @@ public sealed class BotUpdateHub : IAsyncDisposable
             // 保存 update_id 到数据库
             if (update.TryGetProperty("update_id", out var updateIdEl) && updateIdEl.TryGetInt64(out var updateId))
             {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        using var scope = _scopeFactory.CreateScope();
-                        var botRepo = scope.ServiceProvider.GetRequiredService<IBotRepository>();
-                        var bot = await botRepo.GetByIdAsync(_botId);
-                        if (bot != null && (!bot.LastUpdateId.HasValue || updateId > bot.LastUpdateId.Value))
-                        {
-                            bot.LastUpdateId = updateId;
-                            await botRepo.UpdateAsync(bot);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to save webhook update_id: {UpdateId}", updateId);
-                    }
-                });
+                UpdateLatestUpdateId(updateId);
+                EnsurePersistLoopRunning();
             }
 
             // 广播给订阅者
@@ -865,6 +855,73 @@ public sealed class BotUpdateHub : IAsyncDisposable
                     catch { /* ignore */ }
                 }
                 _subscribers.Clear();
+            }
+        }
+
+        private void UpdateLatestUpdateId(long updateId)
+        {
+            while (true)
+            {
+                var current = Interlocked.Read(ref _latestUpdateId);
+                if (updateId <= current)
+                    return;
+                if (Interlocked.CompareExchange(ref _latestUpdateId, updateId, current) == current)
+                    return;
+            }
+        }
+
+        private void EnsurePersistLoopRunning()
+        {
+            if (Interlocked.CompareExchange(ref _persistLoopRunning, 1, 0) != 0)
+                return;
+            _ = PersistLatestUpdateIdLoopAsync();
+        }
+
+        private async Task PersistLatestUpdateIdLoopAsync()
+        {
+            try
+            {
+                while (true)
+                {
+                    // 合并短时间内的多条 update：避免每条 update 都触发一次写库（线程池/SQLite 锁竞争）
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+
+                    var latest = Interlocked.Read(ref _latestUpdateId);
+                    if (latest <= _lastPersistedUpdateId)
+                        break;
+
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var botRepo = scope.ServiceProvider.GetRequiredService<IBotRepository>();
+                        var bot = await botRepo.GetByIdAsync(_botId);
+                        if (bot != null && (!bot.LastUpdateId.HasValue || latest > bot.LastUpdateId.Value))
+                        {
+                            bot.LastUpdateId = latest;
+                            await botRepo.UpdateAsync(bot);
+                        }
+                        _lastPersistedUpdateId = latest;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to save webhook update_id: botId={BotId} update_id={UpdateId}", _botId, latest);
+                    }
+
+                    // 若这段时间又来了新 update，则继续下一轮（保持单个循环，不扩散任务数）
+                    if (Interlocked.Read(ref _latestUpdateId) <= _lastPersistedUpdateId)
+                        break;
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _persistLoopRunning, 0);
+
+                // 处理竞态：若在“准备退出”期间又来了新 update，则再次启动循环
+                if (Interlocked.Read(ref _latestUpdateId) > _lastPersistedUpdateId
+                    && Interlocked.CompareExchange(ref _persistLoopRunning, 1, 0) == 0)
+                {
+                    _ = PersistLatestUpdateIdLoopAsync();
+                }
             }
         }
     }
