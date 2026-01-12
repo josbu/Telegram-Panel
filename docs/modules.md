@@ -12,6 +12,25 @@
 - 兼容性：模块声明宿主版本区间（`host.min/host.max`）
 - 失败自动兜底：模块加载失败时自动尝试回滚到 `LastGoodVersion`，否则自动禁用以避免拖垮系统
 
+## 面板入口
+
+- 「模块管理」：安装/启用/停用/卸载模块（通常需重启生效）
+- 「API 管理」：基于已启用模块，创建对应的外部 API 配置项（`X-API-Key` 鉴权）
+- 「任务中心」：基于已启用模块，动态展示任务类型与分类
+
+## 示例扩展（可选）
+
+- 外部 API：踢人/封禁（示例模块 `builtin.kick-api`，接口：`POST /api/kick`，配置入口：面板左侧菜单「API 管理」）
+- 模块打包脚本：`powershell tools/package-module.ps1 -Project <csproj> -Manifest <manifest.json>`（产物默认输出到 `artifacts/modules/`）
+
+## 付费扩展模块（不免费开放）
+
+以下模块为扩展能力示例的“增强版/商业版”，默认不免费开放；如需获取请联系：TG `@SNINKBOT`。
+
+- 频道同步转发：按配置将来源频道/群组消息同步转发到目标（更适合多频道矩阵运营）
+- 监控频道更新通知：持续监控指定频道更新并向目标 ID 推送通知（支持通知冷却，避免刷屏）
+- 验证码 URL 登录：生成可外部访问的验证码获取页面，按需读取账号系统通知（777000）并展示验证码（接码/卖号场景常见用法）
+
 ## 扩展点一览（任务 / API / UI）
 
 模块除 `ConfigureServices` / `MapEndpoints` 外，还可以选择性实现以下接口（位于 `TelegramPanel.Modules.Abstractions`）：
