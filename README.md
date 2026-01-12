@@ -63,6 +63,7 @@ docker compose up -d --build
 到 https://my.telegram.org/apps **用任意一个 Telegram 账号申请一次** `api_id` / `api_hash`，然后在面板「系统设置」里保存即可。
 
 > 说明：**不需要每个账号都申请**，全站共用这一对 `api_id` / `api_hash` 就能工作。
+> 提示：`api_hash` 是 **32 位十六进制字符串（0-9a-f）**，请不要填 Token/用户名/URL 等其它值。
 
 🏪 推荐 Telegram 开发者 API 购买：  
 https://faka.boxmoe.eu.org/

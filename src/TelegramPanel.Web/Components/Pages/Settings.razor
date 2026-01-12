@@ -14,6 +14,7 @@
 @inject NavigationManager Navigation
 @inject CloudMailClient CloudMail
 @using TelegramPanel.Web.Services
+@using TelegramPanel.Core.Utils
 
 <PageTitle>系统设置 - Telegram Panel</PageTitle>
 
@@ -29,7 +30,7 @@
                 <MudTextField @bind-Value="apiId" Label="默认 API ID" Variant="Variant.Outlined"
                               HelperText="从 https://my.telegram.org 获取" />
                 <MudTextField @bind-Value="apiHash" Label="默认 API Hash" Variant="Variant.Outlined" Class="mt-3"
-                              HelperText="用于新账号登录和导入" />
+                              HelperText="用于新账号登录和导入（32 位十六进制字符串）" />
                 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-3">
                     <MudText Typo="Typo.body2"><strong>写入位置：</strong>@LocalConfigPath</MudText>
                     <MudText Typo="Typo.body2" Class="mt-1"><strong>文件存在：</strong>@(LocalConfigExists ? "是" : "否")</MudText>
@@ -315,13 +316,19 @@
             return;
         }
 
+        if (!TelegramApiConfigValidator.TryNormalizeApiHash(apiHash, out var normalizedApiHash, out var apiHashReason))
+        {
+            Snackbar.Add($"默认 API Hash 无效：{apiHashReason}", Severity.Error);
+            return;
+        }
+
         try
         {
             var localConfigPath = LocalConfigPath;
             var root = await LoadOrCreateLocalConfigAsync();
             var telegram = EnsureObject(root, "Telegram");
             telegram["ApiId"] = parsedApiId;
-            telegram["ApiHash"] = apiHash.Trim();
+            telegram["ApiHash"] = normalizedApiHash;
             await SaveLocalConfigAsync(root);
 
             // 配置变更后清理客户端缓存，确保后续操作使用新 ApiId/ApiHash

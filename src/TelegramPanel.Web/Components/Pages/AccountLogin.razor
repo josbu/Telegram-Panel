@@ -233,6 +233,11 @@
                 }
 
                 Snackbar.Add(result.Message ?? "发送验证码失败", Severity.Error);
+                if (accountId != 0)
+                {
+                    try { await AccountService.ReleaseClientAsync(accountId); } catch { }
+                    accountId = 0;
+                }
                 return;
             }
 
@@ -298,6 +303,11 @@
         catch (Exception ex)
         {
             Snackbar.Add($"操作失败：{ex.Message}", Severity.Error);
+            if (currentStep == LoginStep.Phone && accountId != 0)
+            {
+                try { await AccountService.ReleaseClientAsync(accountId); } catch { }
+                accountId = 0;
+            }
         }
         finally
         {

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Models;
+using TelegramPanel.Core.Utils;
 using AccountStatus = TelegramPanel.Core.Interfaces.AccountStatus;
 
 namespace TelegramPanel.Core.Services.Telegram;
@@ -27,13 +28,16 @@ public class AccountService : IAccountService
 
     public async Task<LoginResult> StartLoginAsync(int accountId, string phone)
     {
-        if (!int.TryParse(_configuration["Telegram:ApiId"], out var apiId) || apiId <= 0
-            || string.IsNullOrWhiteSpace(_configuration["Telegram:ApiHash"]))
+        if (!int.TryParse(_configuration["Telegram:ApiId"], out var apiId) || apiId <= 0)
         {
             return new LoginResult(false, null, "请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）");
         }
 
-        var apiHash = _configuration["Telegram:ApiHash"]!.Trim();
+        if (!TelegramApiConfigValidator.TryNormalizeApiHash(_configuration["Telegram:ApiHash"], out var apiHash, out var apiHashReason))
+        {
+            return new LoginResult(false, null, $"全局 Telegram API 配置无效：{apiHashReason}");
+        }
+
         var sessionsPath = _configuration["Telegram:SessionsPath"] ?? "sessions";
         Directory.CreateDirectory(sessionsPath);
         var normalizedPhone = NormalizePhoneForLogin(phone);
@@ -45,35 +49,102 @@ public class AccountService : IAccountService
 
         _logger.LogInformation("Starting login for phone {Phone}", normalizedPhone);
 
-        var client = await _clientPool.GetOrCreateClientAsync(accountId, apiId, apiHash, sessionPath, sessionKey: apiHash, phoneNumber: normalizedPhone, userId: null);
+        WTelegram.Client? client = null;
 
-        string result;
         try
         {
-            result = await client.Login(normalizedPhone);
+            client = await _clientPool.GetOrCreateClientAsync(
+                accountId,
+                apiId,
+                apiHash,
+                sessionPath,
+                sessionKey: apiHash,
+                phoneNumber: normalizedPhone,
+                userId: null);
+
+            string result;
+            try
+            {
+                result = await client.Login(normalizedPhone);
+            }
+            catch (Exception ex) when (LooksLikeSessionApiMismatchOrCorrupted(ex))
+            {
+                // session 与 ApiId/ApiHash 不匹配或损坏，备份后重新开始登录流程
+                TryBackupCorruptedSessionIfExists(sessionPath);
+                await _clientPool.RemoveClientAsync(accountId);
+
+                client = await _clientPool.GetOrCreateClientAsync(
+                    accountId,
+                    apiId,
+                    apiHash,
+                    sessionPath,
+                    sessionKey: apiHash,
+                    phoneNumber: normalizedPhone,
+                    userId: null);
+
+                result = await client.Login(normalizedPhone);
+            }
+
+            _logger.LogInformation("Login flow next step for {Phone}: {Step}", normalizedPhone, result);
+
+            var loginResult = result switch
+            {
+                "verification_code" => new LoginResult(false, "code", "请输入验证码"),
+                "password" => new LoginResult(false, "password", "请输入两步验证密码"),
+                "name" => new LoginResult(false, "signup", "需要注册新账号"),
+                "email" => new LoginResult(false, "email", "该账号需要邮箱验证（请按提示填写邮箱并完成验证）"),
+                "email_verification_code" => new LoginResult(false, "email_code", "请输入邮箱验证码"),
+                _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client)),
+                _ => new LoginResult(false, null, $"未知状态: {result}")
+            };
+
+            if (!loginResult.Success && string.IsNullOrWhiteSpace(loginResult.NextStep))
+            {
+                try { await _clientPool.RemoveClientAsync(accountId); } catch { }
+            }
+
+            return loginResult;
         }
-        catch (Exception ex) when (LooksLikeSessionApiMismatchOrCorrupted(ex))
+        catch (Exception ex)
         {
-            // session 与 ApiId/ApiHash 不匹配或损坏，备份后重新开始登录流程
-            TryBackupCorruptedSessionIfExists(sessionPath);
-            await _clientPool.RemoveClientAsync(accountId);
+            try
+            {
+                await _clientPool.RemoveClientAsync(accountId);
+            }
+            catch
+            {
+            }
 
-            client = await _clientPool.GetOrCreateClientAsync(accountId, apiId, apiHash, sessionPath, sessionKey: apiHash, phoneNumber: normalizedPhone, userId: null);
-            result = await client.Login(normalizedPhone);
+            var hint = BuildFriendlyStartLoginError(ex);
+            _logger.LogWarning(ex, "StartLogin failed for phone {Phone} (accountId={AccountId}): {Hint}", normalizedPhone, accountId, hint);
+            return new LoginResult(false, null, hint);
+        }
+    }
+
+    private static string BuildFriendlyStartLoginError(Exception ex)
+    {
+        var msg = ex.Message ?? string.Empty;
+
+        if (ex is FormatException
+            || msg.Contains("hex", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("hexadecimal", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("十六进制", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("16进制", StringComparison.OrdinalIgnoreCase))
+        {
+            return "发送验证码失败：检测到 ApiHash 格式异常。请到【系统设置】重新填写 Telegram ApiHash（my.telegram.org 获取的 32 位十六进制字符串）。";
         }
 
-        _logger.LogInformation("Login flow next step for {Phone}: {Step}", normalizedPhone, result);
-
-        return result switch
+        if (ex is IOException
+            || msg.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("used by another process", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("process cannot access", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("被另一进程使用", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("被另一个进程使用", StringComparison.OrdinalIgnoreCase))
         {
-            "verification_code" => new LoginResult(false, "code", "请输入验证码"),
-            "password" => new LoginResult(false, "password", "请输入两步验证密码"),
-            "name" => new LoginResult(false, "signup", "需要注册新账号"),
-            "email" => new LoginResult(false, "email", "该账号需要邮箱验证（请按提示填写邮箱并完成验证）"),
-            "email_verification_code" => new LoginResult(false, "email_code", "请输入邮箱验证码"),
-            _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client)),
-            _ => new LoginResult(false, null, $"未知状态: {result}")
-        };
+            return "发送验证码失败：session 文件被占用。请稍后重试；若你部署了多个实例共享同一 sessions 目录，请改为单实例或为每个实例使用独立 sessions 目录。";
+        }
+
+        return $"发送验证码失败：{ex.GetType().Name}: {ex.Message}";
     }
 
     public async Task<LoginResult> ResendCodeAsync(int accountId)
