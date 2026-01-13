@@ -17,6 +17,17 @@
   👥 <b><a href="https://t.me/vpsbbq">站长交流群</a></b>
 </p>
 
+## v1.30 重要更新
+
+本次版本主要更新：
+
+- ✨ 废号判定补全：`AUTH_KEY_DUPLICATED`（Session 冲突）与 `SESSION_REVOKED`（Session 已撤销）计入废号（影响“只看废号”筛选与清理逻辑）
+- ✨ 一键清理筛选废号：账号页在勾选“只看废号”后提供“清理废号（筛选）”，按当前筛选结果直接批量清理
+- ⚡ 自动同步调度优化：记录上次自动同步时间，避免重启即跑一轮导致限流
+- ⚡ 批量任务配置落地：支持保存默认间隔/最大并发/重试开关，并默认更保守（降低风控风险）
+- 🐛 日志降噪与限流降速：减少刷屏日志与高频请求
+- 📚 新增文档站：更易维护与检索（https://moeacgx.github.io/Telegram-Panel/）
+
 ## 功能概览
 
 - 📥 多账号批量导入/登录：压缩包导入；手机号验证码登录；2FA 密码
@@ -53,7 +64,7 @@ docker compose up -d --build
 
 登录后到「修改密码」页面改掉即可。
 
-> 更完整的安装、更新、导入与生产部署建议：见 `docs/getting-started/installation.md`。
+> 更完整的安装、更新、导入与生产部署建议：见 https://moeacgx.github.io/Telegram-Panel/ 。
 
 ## 截图
 
