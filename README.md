@@ -87,6 +87,14 @@ docker compose up -d --build
 
 ---
 
+## Roadmap（计划）
+
+- 批量清空联系人、批量退出所有频道和群组
+- 批量手机验证码重新登录，用于刷新会话 session
+- 手机号注册：未注册号支持完整注册流程（姓名/可选邮箱/邮箱验证码等）
+- 注册通用接码 API：抽象接口 + 主程序只依赖抽象
+- 对接不同 API 厂商：通过“厂商适配模块”实现，无需改动主程序代码
+
 ## ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=moeacgx/Telegram-Panel&type=Date)](https://star-history.com/#moeacgx/Telegram-Panel&Date)
