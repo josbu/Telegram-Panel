@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  📦 <b><a href="docs/installation.md">安装部署</a></b> |
+  📦 <b><a href="docs/getting-started/installation.md">安装部署</a></b> |
   🏪 <b><a href="https://faka.boxmoe.eu.org/">API 账号购买</a></b> |
-  🧯 <b><a href="docs/anti-freeze.md">防冻结指南</a></b> |
+  🧯 <b><a href="docs/guides/anti-freeze.md">防冻结指南</a></b> |
   🖼️ <b><a href="screenshot/">截图</a></b> |
   💬 <b><a href="https://t.me/zhanzhangck">TG 频道</a></b> |
   👥 <b><a href="https://t.me/vpsbbq">站长交流群</a></b>
@@ -25,7 +25,7 @@
 - 📱 一键踢出其他设备：保留面板当前会话，清理其它在线设备
 - 🧹 废号检测与一键清理：封禁/受限/冻结/未登录/Session 失效等状态批量处理
 - 🔐 2FA 管理：单个/批量修改二级密码；绑定/换绑找回邮箱（支持对接 Cloud Mail 自动收码确认）
-- 🧩 模块化扩展：任务 / API / UI 可安装扩展（见 `docs/modules.md`）
+- 🧩 模块化扩展：任务 / API / UI 可安装扩展（见 `docs/developer/modules.md`）
 
 ## 快速开始
 
@@ -54,7 +54,7 @@ docker compose up -d --build
 
 登录后到「修改密码」页面改掉即可。
 
-> 更完整的安装、更新、导入与生产部署建议：见 `docs/installation.md`。
+> 更完整的安装、更新、导入与生产部署建议：见 `docs/getting-started/installation.md`。
 
 ## 截图
 
