@@ -958,7 +958,8 @@
             return;
 
         var qs = string.Join(",", ids);
-        Navigation.NavigateTo($"/downloads/accounts.zip?ids={qs}&format={format}", forceLoad: true);
+        var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        Navigation.NavigateTo($"/downloads/accounts.zip?ids={qs}&format={format}&ts={ts}", forceLoad: true);
     }
 
     private async Task<string?> SelectExportFormatAsync(int accountCount, string scopeLabel)
