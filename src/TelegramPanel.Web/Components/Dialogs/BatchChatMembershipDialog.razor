@@ -1,5 +1,6 @@
 @inject AccountManagementService AccountManagement
 @inject AccountTelegramToolsService AccountTelegramTools
+@inject BotManagementService BotManagement
 @inject TelegramPanel.Core.Services.AccountRiskService RiskService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -11,11 +12,11 @@
             <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
                 @if (IsJoin)
                 {
-                    <span>将使用所选账号订阅频道/加入群组。支持输入多个链接/用户名，换行分隔。</span>
+                    <span>将使用所选账号订阅频道/加入群组，并可选批量启用 Bot。</span>
                 }
                 else
                 {
-                    <span>将使用所选账号退出群组/取消订阅频道。支持输入多个链接/用户名，换行分隔。</span>
+                    <span>将使用所选账号退出群组/取消订阅频道，并可选批量停用 Bot。</span>
                 }
                 <MudText Typo="Typo.body2" Class="mt-1">
                     支持：<b>https://t.me/xxx</b>、<b>t.me/+hash</b>、<b>@@username</b>、<b>username</b>、<b>tg://join?invite=hash</b>
@@ -25,10 +26,64 @@
             <MudText Typo="Typo.subtitle2">选中账号：@accounts.Count 个</MudText>
 
             <MudTextField @bind-Value="linksText" Label="频道/群链接列表（换行分隔）" Variant="Variant.Outlined" Lines="8"
-                          HelperText="每行一个链接或用户名；将逐个账号依次执行。" />
+                          HelperText="每行一个链接或用户名；如仅执行 Bot 启停可留空。" />
 
             <MudNumericField @bind-Value="delayMs" Label="操作间隔（毫秒）" Variant="Variant.Outlined" Min="0" Max="10000"
                              HelperText="建议设置 1500-4000ms，避免触发风控（会额外加少量随机抖动）。" />
+
+            <MudDivider />
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.subtitle2">Bot 操作（可选）</MudText>
+                <MudChip T="string" Size="Size.Small" Color="@(IsJoin ? Color.Success : Color.Warning)">
+                    @(IsJoin ? "批量启用" : "批量停用")
+                </MudChip>
+            </MudStack>
+
+            @if (bots.Count == 0)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">暂无 Bot，已自动跳过 Bot 批量操作。</MudText>
+            }
+            else
+            {
+                <MudCheckBox T="bool"
+                             @bind-Value="enableBotOperation"
+                             Label="同时执行 Bot 批量操作"
+                             Disabled="@running" />
+
+                @if (enableBotOperation)
+                {
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap: wrap;">
+                        <MudText Typo="Typo.caption">已选 Bot：@selectedBotIds.Count / @bots.Count</MudText>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@running" OnClick="SelectRecommendedBots">选中推荐</MudButton>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@running" OnClick="SelectAllBots">全选</MudButton>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@running" OnClick="ClearSelectedBots">清空</MudButton>
+                    </MudStack>
+
+                    <MudPaper Outlined="true" Class="pa-2">
+                        <MudGrid>
+                            @foreach (var bot in orderedBots)
+                            {
+                                <MudItem xs="12" sm="6" md="4">
+                                    <MudCheckBox T="bool"
+                                                 Value="@selectedBotIds.Contains(bot.Id)"
+                                                 ValueChanged="@(v => SetBotSelection(bot.Id, v))"
+                                                 Disabled="@running"
+                                                 Label="@BuildBotLabel(bot)" />
+                                </MudItem>
+                            }
+                        </MudGrid>
+                    </MudPaper>
+
+                    @if (IsJoin)
+                    {
+                        <MudTextField @bind-Value="botStartParameters"
+                                      Label="Bot 启动参数（可选）"
+                                      Variant="Variant.Outlined"
+                                      HelperText="当前版本仅执行启用动作，启动参数暂不生效。"
+                                      Disabled="@running" />
+                    }
+                }
+            }
 
             @if (running)
             {
@@ -60,7 +115,12 @@
     [Parameter] public string Operation { get; set; } = "join"; // join|leave
 
     private List<Account> accounts = new();
+    private List<Bot> bots = new();
+    private List<Bot> orderedBots = new();
     private string linksText = "";
+    private string botStartParameters = "";
+    private bool enableBotOperation;
+    private HashSet<int> selectedBotIds = new();
     private int delayMs = 2000;
     private bool running;
     private int total;
@@ -76,11 +136,25 @@
     protected override async Task OnInitializedAsync()
     {
         var ids = (AccountIds ?? new List<int>()).Where(x => x > 0).Distinct().ToList();
-        if (ids.Count == 0)
-            return;
 
-        var all = (await AccountManagement.GetAllAccountsAsync()).ToList();
-        accounts = all.Where(a => ids.Contains(a.Id)).ToList();
+        var loadAccountsTask = AccountManagement.GetAllAccountsAsync();
+        var loadBotsTask = BotManagement.GetAllBotsAsync();
+
+        await Task.WhenAll(loadAccountsTask, loadBotsTask);
+
+        if (ids.Count > 0)
+        {
+            var all = loadAccountsTask.Result.ToList();
+            accounts = all.Where(a => ids.Contains(a.Id)).ToList();
+        }
+
+        bots = loadBotsTask.Result.ToList();
+        orderedBots = bots
+            .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(b => b.Id)
+            .ToList();
+
+        SelectRecommendedBots();
     }
 
     private async Task Submit()
@@ -89,52 +163,82 @@
             return;
 
         var links = ParseLines(linksText);
-        if (links.Count == 0)
+        var targetAccounts = accounts.ToList();
+        var runMembershipOps = links.Count > 0;
+        var selectedBots = GetSelectedBots();
+        var runBotOps = enableBotOperation && selectedBots.Count > 0;
+
+        if (enableBotOperation && bots.Count > 0 && selectedBots.Count == 0)
         {
-            Snackbar.Add("请至少输入一个频道/群链接", Severity.Warning);
+            Snackbar.Add("已启用 Bot 批量操作，请至少选择 1 个 Bot", Severity.Warning);
             return;
         }
 
-        // 风控检查：加群/退群 都是敏感操作
-        var batchCheck = RiskService.CheckBatchAccounts(accounts);
-        if (batchCheck.HasRiskyAccounts)
+        if (!runMembershipOps && !runBotOps)
         {
-            var parameters = new DialogParameters
-            {
-                ["Message"] = $"检测到 {batchCheck.RiskyCount} 个风险账号",
-                ["DetailedMessage"] = batchCheck.GetRiskySummary(),
-                ["ShowRecommendations"] = true,
-                ["ShowExcludeOption"] = true,
-                ["RiskyAccounts"] = batchCheck.RiskyAccounts.ToList()
-            };
-            var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Large };
-            var dialog = DialogService.Show<RiskWarningDialog>("批量操作风控警告", parameters, options);
-            var r = await dialog.Result;
-            if (r.Canceled)
-                return;
+            Snackbar.Add("请至少输入一个频道/群链接，或选择 Bot 批量操作", Severity.Warning);
+            return;
+        }
 
-            if (r.Data is TelegramPanel.Core.Services.RiskWarningAction action
-                && action == TelegramPanel.Core.Services.RiskWarningAction.ExcludeRisky)
+        // 风控检查：加群/退群是敏感操作（仅在执行账号加入/退出时检查）
+        if (runMembershipOps)
+        {
+            var batchCheck = RiskService.CheckBatchAccounts(targetAccounts);
+            if (batchCheck.HasRiskyAccounts)
             {
-                accounts = batchCheck.SafeAccounts.ToList();
-                if (accounts.Count == 0)
+                var parameters = new DialogParameters
                 {
-                    Snackbar.Add("排除风险账号后无剩余账号", Severity.Info);
+                    ["Message"] = $"检测到 {batchCheck.RiskyCount} 个风险账号",
+                    ["DetailedMessage"] = batchCheck.GetRiskySummary(),
+                    ["ShowRecommendations"] = true,
+                    ["ShowExcludeOption"] = true,
+                    ["RiskyAccounts"] = batchCheck.RiskyAccounts.ToList()
+                };
+                var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Large };
+                var dialog = DialogService.Show<RiskWarningDialog>("批量操作风控警告", parameters, options);
+                var r = await dialog.Result;
+                if (r is null || r.Canceled)
                     return;
+
+                if (r.Data is TelegramPanel.Core.Services.RiskWarningAction action
+                    && action == TelegramPanel.Core.Services.RiskWarningAction.ExcludeRisky)
+                {
+                    targetAccounts = batchCheck.SafeAccounts.ToList();
+                    if (targetAccounts.Count == 0)
+                    {
+                        Snackbar.Add("排除风险账号后无剩余账号", Severity.Info);
+                        return;
+                    }
                 }
             }
         }
 
+        var membershipTotal = runMembershipOps ? targetAccounts.Count * links.Count : 0;
+        var botTotal = runBotOps ? selectedBots.Count : 0;
+        var confirmLines = new List<string>();
+
+        if (membershipTotal > 0)
+            confirmLines.Add($"{(IsJoin ? "加群/订阅" : "退群/退订")}：{targetAccounts.Count} 个账号 × {links.Count} 个目标（共 {membershipTotal} 次操作）");
+
+        if (botTotal > 0)
+            confirmLines.Add($"{(IsJoin ? "启用" : "停用")} Bot：{selectedBots.Count} 个");
+
+        if (IsJoin && runBotOps && !string.IsNullOrWhiteSpace(botStartParameters))
+            confirmLines.Add($"启动参数：{botStartParameters.Trim()}（当前版本暂不生效）");
+
         bool? confirm = await DialogService.ShowMessageBox(
             "确认执行",
-            $"{(IsJoin ? "加群/订阅" : "退群/退订")}：{accounts.Count} 个账号 × {links.Count} 个目标（共 {accounts.Count * links.Count} 次操作）。是否继续？",
+            $"{string.Join(Environment.NewLine, confirmLines)}{Environment.NewLine}{Environment.NewLine}是否继续？",
             yesText: "继续", cancelText: "取消");
 
         if (confirm != true)
             return;
 
+        if (IsJoin && runBotOps && !string.IsNullOrWhiteSpace(botStartParameters))
+            Snackbar.Add("已填写启动参数，但当前版本仅执行 Bot 启用，参数暂不生效。", Severity.Info);
+
         running = true;
-        total = accounts.Count * links.Count;
+        total = membershipTotal + botTotal;
         done = 0;
         failed = 0;
         currentHint = null;
@@ -144,35 +248,65 @@
 
         try
         {
-            foreach (var a in accounts)
+            if (runMembershipOps)
             {
-                foreach (var link in links)
+                foreach (var a in targetAccounts)
+                {
+                    foreach (var link in links)
+                    {
+                        _cts.Token.ThrowIfCancellationRequested();
+
+                        currentHint = $"{a.DisplayPhone} => {link}";
+                        StateHasChanged();
+
+                        (bool Success, string? Error, string? Title) result;
+                        if (IsJoin)
+                            result = await AccountTelegramTools.JoinChatOrChannelAsync(a.Id, link, _cts.Token);
+                        else
+                            result = await AccountTelegramTools.LeaveChatOrChannelAsync(a.Id, link, _cts.Token);
+
+                        done++;
+                        if (!result.Success)
+                        {
+                            failed++;
+                            failures.Add($"{a.DisplayPhone} => {link}：{result.Error}");
+                        }
+
+                        StateHasChanged();
+
+                        var wait = delayMs;
+                        if (wait < 0) wait = 0;
+                        if (wait > 10000) wait = 10000;
+                        var jitter = _rand.Next(0, 350);
+                        await Task.Delay(TimeSpan.FromMilliseconds(wait + jitter), _cts.Token);
+                    }
+                }
+            }
+
+            if (runBotOps)
+            {
+                foreach (var bot in selectedBots)
                 {
                     _cts.Token.ThrowIfCancellationRequested();
 
-                    currentHint = $"{a.DisplayPhone} => {link}";
+                    currentHint = $"{(IsJoin ? "启用" : "停用")} Bot => {bot.Name}";
                     StateHasChanged();
 
-                    (bool Success, string? Error, string? Title) result;
-                    if (IsJoin)
-                        result = await AccountTelegramTools.JoinChatOrChannelAsync(a.Id, link, _cts.Token);
-                    else
-                        result = await AccountTelegramTools.LeaveChatOrChannelAsync(a.Id, link, _cts.Token);
-
-                    done++;
-                    if (!result.Success)
+                    try
+                    {
+                        await BotManagement.SetBotActiveStatusAsync(bot.Id, IsJoin);
+                    }
+                    catch (Exception ex)
                     {
                         failed++;
-                        failures.Add($"{a.DisplayPhone} => {link}：{result.Error}");
+                        failures.Add($"{(IsJoin ? "启用" : "停用")} Bot {bot.Name} 失败：{ex.Message}");
+                    }
+                    finally
+                    {
+                        done++;
                     }
 
                     StateHasChanged();
-
-                    var wait = delayMs;
-                    if (wait < 0) wait = 0;
-                    if (wait > 10000) wait = 10000;
-                    var jitter = _rand.Next(0, 350);
-                    await Task.Delay(TimeSpan.FromMilliseconds(wait + jitter), _cts.Token);
                 }
             }
 
@@ -216,6 +350,57 @@
         MudDialog.Close();
     }
 
+    private List<Bot> GetSelectedBots()
+    {
+        if (selectedBotIds.Count == 0 || bots.Count == 0)
+            return new List<Bot>();
+
+        return bots
+            .Where(b => selectedBotIds.Contains(b.Id))
+            .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(b => b.Id)
+            .ToList();
+    }
+
+    private void SelectRecommendedBots()
+    {
+        if (bots.Count == 0)
+        {
+            selectedBotIds.Clear();
+            return;
+        }
+
+        selectedBotIds = bots
+            .Where(b => IsJoin ? !b.IsActive : b.IsActive)
+            .Select(b => b.Id)
+            .ToHashSet();
+    }
+
+    private void SelectAllBots()
+    {
+        selectedBotIds = bots.Select(b => b.Id).ToHashSet();
+    }
+
+    private void ClearSelectedBots()
+    {
+        selectedBotIds.Clear();
+    }
+
+    private void SetBotSelection(int botId, bool selected)
+    {
+        if (selected)
+            selectedBotIds.Add(botId);
+        else
+            selectedBotIds.Remove(botId);
+    }
+
+    private static string BuildBotLabel(Bot bot)
+    {
+        var username = string.IsNullOrWhiteSpace(bot.Username) ? "-" : $"@{bot.Username}";
+        var status = bot.IsActive ? "启用" : "停用";
+        return $"{bot.Name}（{username}，当前{status}）";
+    }
+
     private static List<string> ParseLines(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -229,4 +414,3 @@
             .ToList();
     }
 }
-
