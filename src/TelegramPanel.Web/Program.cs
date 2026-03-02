@@ -856,8 +856,19 @@ var accountsZipDownload = app.MapGet("/downloads/accounts.zip", async (
     var all = (await accountManagement.GetAllAccountsAsync()).ToList();
     var accounts = ids == null ? all : all.Where(a => ids.Contains(a.Id)).ToList();
 
-    var zipBytes = await exporter.BuildAccountsZipAsync(accounts, cancellationToken);
-    var fileName = $"telegram-panel-accounts-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip";
+    var formatRaw = (http.Request.Query["format"].ToString() ?? string.Empty).Trim();
+    var format = string.Equals(formatRaw, "tdata", StringComparison.OrdinalIgnoreCase)
+        ? AccountExportFormat.Tdata
+        : AccountExportFormat.Telethon;
+
+    var zipBytes = await exporter.BuildAccountsZipAsync(accounts, cancellationToken, format);
+    var formatName = format == AccountExportFormat.Tdata ? "tdata" : "telethon";
+    var fileName = $"telegram-panel-accounts-{formatName}-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip";
+
+    // 下载文件禁止缓存，避免浏览器复用旧的 accounts.zip 导致“重复拿到旧导出包”。
+    http.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate, max-age=0";
+    http.Response.Headers.Pragma = "no-cache";
+    http.Response.Headers.Expires = "0";
     return Results.File(zipBytes, "application/zip", fileName);
 }).DisableAntiforgery();
 if (adminAuthEnabled)
