@@ -55,57 +55,59 @@
 
 ### Docker 一键部署（推荐）
 
+环境要求：Docker（Windows 推荐 Docker Desktop + WSL2；Linux 直接装 Docker Engine）
+
+#### 第一步：准备项目
+
 ```bash
 git clone https://github.com/moeacgx/Telegram-Panel
 cd Telegram-Panel
 cp .env.example .env
 ```
 
-### 环境要求
+#### 第二步：选择镜像版本
 
-Docker（Windows 推荐 Docker Desktop + WSL2；Linux 直接装 Docker Engine）
-
-### 稳定版（默认）
+默认是稳定版（无需改动）：
 
 ```bash
-docker compose pull
-docker compose up -d
+TP_IMAGE=ghcr.io/moeacgx/telegram-panel:latest
 ```
 
-### 开发版
-
-先把 `.env` 里的 `TP_IMAGE` 改成：
+如果你要开发版，改 `.env` 为：
 
 ```bash
 TP_IMAGE=ghcr.io/moeacgx/telegram-panel:dev-latest
 ```
 
-然后执行：
+#### 第三步：启动
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-启动后访问：`http://localhost:5000`
+访问：`http://localhost:5000`
 
-### 默认后台账号（首次登录）
+#### 默认后台账号（首次登录）
 
 用户名：`admin`  
 密码：`admin123`
 
 登录后到「修改密码」页面改掉即可。
 
-## Docker 镜像（只看命令）
+#### 常用命令
 
 ```bash
-# 稳定版：拉取 + 运行
-docker pull ghcr.io/moeacgx/telegram-panel:latest
-docker run -d --name telegram-panel --restart unless-stopped -p 5000:5000 -v ./docker-data:/data ghcr.io/moeacgx/telegram-panel:latest
+# 查看日志
+docker compose logs -f
 
-# 开发版：拉取 + 运行
-docker pull ghcr.io/moeacgx/telegram-panel:dev-latest
-docker run -d --name telegram-panel --restart unless-stopped -p 5000:5000 -v ./docker-data:/data ghcr.io/moeacgx/telegram-panel:dev-latest
+# 更新到当前 .env 指定的镜像版本
+docker compose pull
+docker compose up -d
+
+# 重启 / 停止
+docker compose restart
+docker compose down
 ```
 
 ## Docker 一键更新（面板内）
