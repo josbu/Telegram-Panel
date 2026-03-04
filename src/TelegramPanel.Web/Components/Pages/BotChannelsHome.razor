@@ -88,7 +88,7 @@
         <MudMenuItem Disabled="@(selected.Count == 0)" OnClick="OpenSetAdmins">批量设置管理员（机器人/ID）</MudMenuItem>
         <MudMenuItem Disabled="@(selected.Count == 0)" OnClick="OpenBatchSetCategory">批量设置分类（已选）</MudMenuItem>
         <MudMenuItem Disabled="@(selected.Count == 0)" OnClick="OpenBanMember">踢出用户（已选）</MudMenuItem>
-        <MudMenuItem Disabled="@(selected.Count == 0)" OnClick="DeleteSelectedChannelsAsync">全局删除频道（已选）</MudMenuItem>
+        <MudMenuItem Disabled="@(selected.Count == 0)" OnClick="DeleteSelectedChannelsAsync">删除频道（已选）</MudMenuItem>
     </MudMenu>
 
     @if (selected.Count > 0)
@@ -157,7 +157,7 @@
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
                                        OnClick="@(async () => await EditChannelAsync(context))" Title="编辑频道" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                       OnClick="@(async () => await DeleteSingleChannelAsync(context))" title="全局删除频道" />
+                                       OnClick="@(async () => await DeleteSingleChannelAsync(context))" title="删除频道" />
                     </MudStack>
                 </MudTd>
             </RowTemplate>
@@ -484,19 +484,18 @@
             return;
 
         var channelName = string.IsNullOrWhiteSpace(channel.Title) ? channel.TelegramId.ToString() : channel.Title;
-        bool? ok = await DialogService.ShowMessageBox(
-            "确认删除",
-            $"确定全局删除频道“{channelName}”吗？该频道会从所有 Bot 的频道列表中移除。",
-            yesText: "删除", cancelText: "取消");
-
-        if (ok != true)
+        var selectedBotIds = await SelectBotsForDeleteAsync(new[] { channel.TelegramId }, channelName);
+        if (selectedBotIds == null || selectedBotIds.Count == 0)
             return;
 
         loading = true;
         try
         {
-            await BotManagement.DeleteChannelGloballyByTelegramIdAsync(channel.TelegramId);
-            Snackbar.Add($"已全局删除频道：{channelName}", Severity.Success);
+            var removed = await BotManagement.DeleteChannelBindingsByBotIdsAsync(channel.TelegramId, selectedBotIds);
+            if (removed > 0)
+                Snackbar.Add($"已删除频道绑定：{channelName}（删除 {removed} 条绑定）", Severity.Success);
+            else
+                Snackbar.Add($"未删除任何绑定：{channelName}（所选 Bot 可能未绑定该频道）", Severity.Info);
             await ReloadTable();
         }
         catch (Exception ex)
@@ -520,26 +519,24 @@
             return;
         }
 
-        bool? ok = await DialogService.ShowMessageBox(
-            "确认批量删除",
-            $"确定全局删除已选 {selected.Count} 个频道吗？这些频道会从所有 Bot 的频道列表中移除。",
-            yesText: "删除", cancelText: "取消");
-
-        if (ok != true)
+        var ids = selected.Select(x => x.TelegramId).Distinct().ToList();
+        var selectedBotIds = await SelectBotsForDeleteAsync(ids, null);
+        if (selectedBotIds == null || selectedBotIds.Count == 0)
             return;
 
         loading = true;
         try
         {
-            var ids = selected.Select(x => x.TelegramId).Distinct().ToList();
             var success = 0;
             var failed = 0;
+            var removedTotal = 0;
 
             foreach (var chatId in ids)
             {
                 try
                 {
-                    await BotManagement.DeleteChannelGloballyByTelegramIdAsync(chatId);
+                    var removed = await BotManagement.DeleteChannelBindingsByBotIdsAsync(chatId, selectedBotIds);
+                    removedTotal += removed;
                     success++;
                 }
                 catch
@@ -550,11 +547,11 @@
 
             if (failed == 0)
             {
-                Snackbar.Add($"批量删除完成：成功 {success} 个频道", Severity.Success);
+                Snackbar.Add($"批量删除完成：处理 {success} 个频道，删除绑定 {removedTotal} 条", Severity.Success);
             }
             else
             {
-                Snackbar.Add($"批量删除完成：成功 {success} 个，失败 {failed} 个", Severity.Warning);
+                Snackbar.Add($"批量删除完成：处理成功 {success} 个，失败 {failed} 个，删除绑定 {removedTotal} 条", Severity.Warning);
             }
 
             await ReloadTable();
@@ -567,6 +564,53 @@
         {
             loading = false;
         }
+    }
+
+    private async Task<List<int>?> SelectBotsForDeleteAsync(IReadOnlyCollection<long> channelTelegramIds, string? singleChannelName)
+    {
+        var ids = channelTelegramIds.Where(x => x != 0).Distinct().ToList();
+        if (ids.Count == 0)
+            return null;
+
+        var botMap = new Dictionary<int, Bot>();
+        foreach (var telegramId in ids)
+        {
+            var boundBots = await BotManagement.GetChannelBoundBotsAsync(telegramId);
+            foreach (var bot in boundBots)
+            {
+                if (bot.Id > 0 && !botMap.ContainsKey(bot.Id))
+                    botMap[bot.Id] = bot;
+            }
+        }
+
+        if (botMap.Count == 0)
+        {
+            Snackbar.Add("未找到可删除的 Bot 绑定", Severity.Info);
+            return null;
+        }
+
+        var prompt = ids.Count == 1
+            ? $"频道“{singleChannelName ?? ids[0].ToString()}”当前绑定了以下 Bot，请勾选要删除的绑定："
+            : $"已选 {ids.Count} 个频道。请勾选要批量删除的 Bot 绑定（未绑定的频道会自动跳过）。";
+
+        var parameters = new DialogParameters
+        {
+            ["Prompt"] = prompt,
+            ["Bots"] = botMap.Values.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            ["CurrentBotId"] = selectedBotId
+        };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = DialogService.Show<BotChannelDeleteBindingsDialog>("选择要删除的 Bot 绑定", parameters, options);
+        var result = await dialog.Result;
+        if (result.Canceled)
+            return null;
+
+        if (result.Data is List<int> selectedIds)
+            return selectedIds.Where(x => x > 0).Distinct().ToList();
+        if (result.Data is IReadOnlyList<int> selectedReadOnlyIds)
+            return selectedReadOnlyIds.Where(x => x > 0).Distinct().ToList();
+
+        return null;
     }
 
     private async Task OpenCreateCategoryDialog()
