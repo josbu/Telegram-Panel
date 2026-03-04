@@ -207,8 +207,8 @@
 
                 <MudMenu Label="批量操作" Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.MoreHoriz"
                          Size="Size.Small" Disabled="@(Busy || selectedAccounts.Count == 0)" Dense="true" EndIcon="@Icons.Material.Filled.KeyboardArrowDown">
-                    <MudMenuItem OnClick="OpenBatchJoinSubscribe">批量加群/订阅（已选）</MudMenuItem>
-                    <MudMenuItem OnClick="OpenBatchLeaveUnsubscribe">批量退群/退订（已选）</MudMenuItem>
+                    <MudMenuItem OnClick="OpenBatchJoinSubscribe">批量加群/订阅/启用Bot（已选）</MudMenuItem>
+                    <MudMenuItem OnClick="OpenBatchLeaveUnsubscribe">批量退群/退订/停用Bot（已选）</MudMenuItem>
                     <MudMenuItem OnClick="OpenBatchChangeTwoFactorPassword">修改二级密码（已选）</MudMenuItem>
                     <MudMenuItem OnClick="OpenBatchChangeTwoFactorRecoveryEmail">批量换绑邮箱（找回+登录）（Cloud Mail）（已选）</MudMenuItem>
                     <MudMenuItem OnClick="OpenBatchSetAccountCategory">批量修改分类（已选）</MudMenuItem>
@@ -746,7 +746,7 @@
             ["Operation"] = "join"
         };
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
-        DialogService.Show<TelegramPanel.Web.Components.Dialogs.BatchChatMembershipDialog>("批量加群/订阅", parameters, options);
+        DialogService.Show<TelegramPanel.Web.Components.Dialogs.BatchChatMembershipDialog>("批量加群/订阅/启用Bot", parameters, options);
         await Task.CompletedTask;
     }
 
@@ -768,7 +768,7 @@
             ["Operation"] = "leave"
         };
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
-        DialogService.Show<TelegramPanel.Web.Components.Dialogs.BatchChatMembershipDialog>("批量退群/退订", parameters, options);
+        DialogService.Show<TelegramPanel.Web.Components.Dialogs.BatchChatMembershipDialog>("批量退群/退订/停用Bot", parameters, options);
         await Task.CompletedTask;
     }
 
