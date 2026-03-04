@@ -26,6 +26,7 @@ public sealed class BotUpdateHub : IAsyncDisposable
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, BotPoller> _pollersByToken = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _pollingWebhookClearedTokens = new(StringComparer.Ordinal);
 
     // Webhook 模式下的接收器（token -> receiver），不启动轮询
     private readonly ConcurrentDictionary<string, BotWebhookReceiver> _webhookReceivers = new(StringComparer.Ordinal);
@@ -224,6 +225,10 @@ public sealed class BotUpdateHub : IAsyncDisposable
             if (string.IsNullOrWhiteSpace(token))
                 throw new InvalidOperationException("Bot Token 为空");
 
+            // 重要：切回 Long Polling 时，Telegram 侧若残留 webhook，会导致 getUpdates 持续 409。
+            // 这里在首次订阅时兜底删一次 webhook（不丢 pending updates），避免“切模式后一直收不到更新”。
+            await EnsurePollingModeReadyAsync(token, cancellationToken);
+
             if (!_pollersByToken.TryGetValue(token, out var poller))
             {
                 poller = await BotPoller.CreateAsync(botId, token, bot.LastUpdateId, _scopeFactory, _botApi, _logger, cancellationToken);
@@ -248,6 +253,7 @@ public sealed class BotUpdateHub : IAsyncDisposable
         {
             pollers = _pollersByToken.Values.ToList();
             _pollersByToken.Clear();
+            _pollingWebhookClearedTokens.Clear();
 
             receivers = _webhookReceivers.Values.ToList();
             _webhookReceivers.Clear();
@@ -268,6 +274,33 @@ public sealed class BotUpdateHub : IAsyncDisposable
             try { r.Dispose(); }
             catch (Exception ex) { _logger.LogWarning(ex, "Dispose webhook receiver failed: {BotId}", r.BotId); }
         }
+    }
+
+    private async Task EnsurePollingModeReadyAsync(string token, CancellationToken cancellationToken)
+    {
+        if (_pollingWebhookClearedTokens.Contains(token))
+            return;
+
+        try
+        {
+            await _botApi.DeleteWebhookAsync(token, dropPendingUpdates: false, cancellationToken);
+            _pollingWebhookClearedTokens.Add(token);
+            _logger.LogInformation("Polling mode ensured: webhook deleted for bot token {TokenHint}", MaskToken(token));
+        }
+        catch (Exception ex)
+        {
+            // 不中断订阅流程：即使删 webhook 失败，也允许继续尝试轮询；
+            // 下次订阅会再次尝试，便于网络抖动后的自恢复。
+            _logger.LogWarning(ex, "Failed to delete webhook before polling (token={TokenHint}), will retry later", MaskToken(token));
+        }
+    }
+
+    private static string MaskToken(string token)
+    {
+        token = (token ?? string.Empty).Trim();
+        if (token.Length <= 8)
+            return "***";
+        return $"{token[..4]}...{token[^4..]}";
     }
 
     public sealed class BotUpdateSubscription : IAsyncDisposable
