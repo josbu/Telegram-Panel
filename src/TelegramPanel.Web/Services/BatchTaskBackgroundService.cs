@@ -160,9 +160,9 @@ public sealed class BatchTaskBackgroundService : BackgroundService
                 if (latest != null && latest.Status != "running")
                     return;
 
-                await taskManagement.CompleteTaskAsync(pending.Id, success: failed == 0);
-                _logger.LogInformation("Batch task completed: {TaskId} {TaskType} (ok={Ok}, completed={Completed}, failed={Failed})",
-                    pending.Id, pending.TaskType, failed == 0, completed, failed);
+                await taskManagement.CompleteTaskAsync(pending.Id, success: true);
+                _logger.LogInformation("Batch task completed: {TaskId} {TaskType} (completed={Completed}, failed={Failed})",
+                    pending.Id, pending.TaskType, completed, failed);
             }
             catch (Exception ex)
             {
