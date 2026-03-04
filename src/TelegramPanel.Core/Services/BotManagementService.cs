@@ -350,6 +350,18 @@ public class BotManagementService
             await _botChannelRepository.DeleteAsync(ch);
     }
 
+    /// <summary>
+    /// 按 TelegramId 全局删除频道：会移除该频道本体及所有 Bot 绑定关系。
+    /// </summary>
+    public async Task DeleteChannelGloballyByTelegramIdAsync(long telegramId)
+    {
+        var ch = await _botChannelRepository.GetGlobalByTelegramIdAsync(telegramId);
+        if (ch == null)
+            return;
+
+        await _botChannelRepository.DeleteAsync(ch);
+    }
+
     public async Task UpdateChannelStatusAsync(int botId, long telegramId, bool ok, string? error, DateTime checkedAtUtc)
     {
         var ch = await _botChannelRepository.GetByTelegramIdAsync(botId, telegramId);
