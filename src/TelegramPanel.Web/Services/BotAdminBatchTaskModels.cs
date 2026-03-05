@@ -44,23 +44,6 @@ public sealed class BotSetAdminsTaskConfig
     public string? Error { get; set; }
 }
 
-public sealed class BotChannelBanTaskConfig
-{
-    public int BotId { get; set; }
-    public bool UseAccountExecution { get; set; }
-    public int SelectedAccountId { get; set; }
-    public long? UserId { get; set; }
-    public string? Username { get; set; }
-    public bool PermanentBan { get; set; }
-    public int DelayMs { get; set; } = 1500;
-    public List<BotTaskChannelItem> Channels { get; set; } = new();
-    public DateTime RequestedAtUtc { get; set; } = DateTime.UtcNow;
-    public List<BotAdminTaskFailureItem>? Failures { get; set; }
-    public List<string>? FailureLines { get; set; }
-    public bool Canceled { get; set; }
-    public string? Error { get; set; }
-}
-
 public sealed class BotSetAdminsRightsPayload
 {
     public bool ManageChat { get; set; }

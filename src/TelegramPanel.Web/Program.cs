@@ -417,7 +417,6 @@ builder.Services.Configure<PanelTimeZoneOptions>(builder.Configuration.GetSectio
 builder.Services.AddSingleton<PanelTimeZoneService>();
 builder.Services.AddScoped<IModuleTaskHandler, BotChannelSetAdminsByAccountTaskHandler>();
 builder.Services.AddScoped<IModuleTaskHandler, BotSetAdminsTaskHandler>();
-builder.Services.AddScoped<IModuleTaskHandler, BotChannelBanTaskHandler>();
 builder.Services.AddHostedService<BatchTaskBackgroundService>();
 builder.Services.AddHostedService<AccountDataAutoSyncBackgroundService>();
 builder.Services.AddHostedService<BotAutoSyncBackgroundService>();
