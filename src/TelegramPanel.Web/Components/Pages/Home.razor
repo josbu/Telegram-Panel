@@ -237,6 +237,7 @@
     private Color GetStatusColor(string status) => status switch
     {
         "运行中" => Color.Info,
+        "已暂停" => Color.Warning,
         "已完成" => Color.Success,
         "失败" => Color.Error,
         _ => Color.Default
@@ -245,6 +246,7 @@
     private static string MapTaskStatus(string status) => status switch
     {
         "running" => "运行中",
+        "paused" => "已暂停",
         "completed" => "已完成",
         "failed" => "失败",
         "pending" => "等待中",

@@ -91,6 +91,35 @@ public class BatchTaskManagementService
         }
     }
 
+    public async Task PauseTaskAsync(int taskId)
+    {
+        var task = await _batchTaskRepository.GetByIdAsync(taskId);
+        if (task == null)
+            return;
+
+        if (task.Status is "running" or "pending")
+        {
+            task.Status = "paused";
+            task.CompletedAt = null;
+            await _batchTaskRepository.UpdateAsync(task);
+        }
+    }
+
+    public async Task ResumeTaskAsync(int taskId)
+    {
+        var task = await _batchTaskRepository.GetByIdAsync(taskId);
+        if (task == null)
+            return;
+
+        if (task.Status == "paused")
+        {
+            task.Status = "pending";
+            task.StartedAt = null;
+            task.CompletedAt = null;
+            await _batchTaskRepository.UpdateAsync(task);
+        }
+    }
+
     public async Task CompleteTaskAsync(int taskId, bool success = true)
     {
         var task = await _batchTaskRepository.GetByIdAsync(taskId);

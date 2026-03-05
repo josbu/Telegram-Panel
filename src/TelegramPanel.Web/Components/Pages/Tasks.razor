@@ -90,12 +90,22 @@
                 <MudTd DataLabel="操作">
                     <MudIconButton Icon="@Icons.Material.Filled.Info" Size="Size.Small" Color="Color.Info"
                                    OnClick="@(() => ShowTaskDetails(context))" />
+                    @if (CanPauseUserChatActiveTask(context))
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.PauseCircle" Size="Size.Small" Color="Color.Warning"
+                                       OnClick="@(() => PauseTask(context))" />
+                    }
+                    @if (CanResumeUserChatActiveTask(context))
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.PlayCircle" Size="Size.Small" Color="Color.Success"
+                                       OnClick="@(() => ResumeTask(context))" />
+                    }
                     @if (CanEditUserChatActiveTask(context))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
                                        OnClick="@(() => OpenEditUserChatActiveTask(context))" />
                     }
-                    @if (IsActiveStatus(GetDisplayStatus(context)))
+                    @if (CanCancelTask(context))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Cancel" Size="Size.Small" Color="Color.Warning"
                                        OnClick="@(() => CancelTask(context.Id))" />
@@ -340,6 +350,7 @@
     {
         "pending" => "待执行",
         "running" => "执行中",
+        "paused" => "已暂停",
         "completed" => "已完成",
         "failed" => "失败",
         _ => status
@@ -349,6 +360,7 @@
     {
         "completed" => Color.Success,
         "running" => Color.Info,
+        "paused" => Color.Warning,
         "pending" => Color.Default,
         "failed" => Color.Error,
         _ => Color.Default
@@ -358,6 +370,7 @@
     {
         "completed" => Color.Success,
         "running" => Color.Primary,
+        "paused" => Color.Warning,
         "failed" => Color.Error,
         _ => Color.Default
     };
@@ -371,7 +384,7 @@
     }
 
     private static bool IsActiveStatus(string status) =>
-        status is "pending" or "running";
+        status is "pending" or "running" or "paused";
 
     private static bool IsHistoryStatus(string status) =>
         status is "completed" or "failed";
@@ -413,6 +426,18 @@
     private static bool IsUserChatActiveTask(string taskType) =>
         taskType is BatchTaskTypes.UserChatActive;
 
+    private static bool CanPauseUserChatActiveTask(BatchTask task)
+    {
+        return IsUserChatActiveTask(task.TaskType)
+               && string.Equals(task.Status, "running", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool CanResumeUserChatActiveTask(BatchTask task)
+    {
+        return IsUserChatActiveTask(task.TaskType)
+               && string.Equals(task.Status, "paused", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool CanEditUserChatActiveTask(BatchTask task)
     {
         return IsUserChatActiveTask(task.TaskType)
@@ -423,6 +448,16 @@
     {
         return IsUserChatActiveTask(task.TaskType)
                && !string.Equals(task.Status, "running", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool CanCancelTask(BatchTask task)
+    {
+        var status = GetDisplayStatus(task);
+        if (status is not ("pending" or "running"))
+            return false;
+
+        // 持续活跃任务运行中优先使用“暂停”，避免直接进入历史任务导致不能快速调整配置。
+        return !CanPauseUserChatActiveTask(task);
     }
 
     private static List<string> ExtractBotAdminFailureLines(BatchTask task)
@@ -565,6 +600,54 @@
         };
     }
 
+    private async Task PauseTask(BatchTask task)
+    {
+        if (!CanPauseUserChatActiveTask(task))
+        {
+            Snackbar.Add("该任务当前不可暂停", Severity.Warning);
+            return;
+        }
+
+        bool? result = await DialogService.ShowMessageBox(
+            "确认暂停",
+            $"确定要暂停任务 #{task.Id} 吗？暂停后可直接编辑配置并继续运行。",
+            yesText: "暂停", cancelText: "返回");
+
+        if (result != true)
+            return;
+
+        try
+        {
+            await TaskManagement.PauseTaskAsync(task.Id);
+            await LoadTasks();
+            Snackbar.Add("任务已暂停，可编辑后继续运行", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"暂停失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ResumeTask(BatchTask task)
+    {
+        if (!CanResumeUserChatActiveTask(task))
+        {
+            Snackbar.Add("该任务当前不可继续运行", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await TaskManagement.ResumeTaskAsync(task.Id);
+            await LoadTasks();
+            Snackbar.Add("任务已恢复为待执行", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"继续运行失败：{ex.Message}", Severity.Error);
+        }
+    }
+
     private async Task CancelTask(int id)
     {
         bool? result = await DialogService.ShowMessageBox(
@@ -611,9 +694,9 @@
 
     private async Task ClearAllTasks()
     {
-        var hasActive = tasks.Any(t => t.Status is "pending" or "running");
+        var hasActive = tasks.Any(t => t.Status is "pending" or "running" or "paused");
         var message = hasActive
-            ? "将清理全部任务记录（包含进行中/待执行任务）。进行中的任务会先标记为失败再删除，是否继续？"
+            ? "将清理全部任务记录（包含进行中/待执行/暂停任务）。进行中的任务会先标记为失败再删除，是否继续？"
             : "确定要清理全部任务记录吗？此操作不可恢复。";
 
         bool? result = await DialogService.ShowMessageBox(
@@ -635,7 +718,7 @@
                 return;
             }
 
-            foreach (var activeTask in allTasks.Where(t => t.Status is "pending" or "running"))
+            foreach (var activeTask in allTasks.Where(t => t.Status is "pending" or "running" or "paused"))
                 await TaskManagement.CompleteTaskAsync(activeTask.Id, success: false);
 
             foreach (var task in allTasks)
