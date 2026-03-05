@@ -10,6 +10,7 @@ public static class BatchTaskTypes
     public const string SetAdmin = "set_admin";
     public const string BotChannelSetAdminsByAccount = "bot_channel_set_admins_by_account";
     public const string BotSetAdmins = "bot_set_admins";
+    public const string BotChannelBanMembers = "bot_channel_ban_members";
 
     // User 任务（新增）
     public const string UserJoinSubscribe = "user_join_subscribe";

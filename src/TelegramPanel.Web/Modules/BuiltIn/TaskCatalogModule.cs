@@ -34,6 +34,16 @@ public sealed class TaskCatalogModule : ITelegramPanelModule, IModuleTaskProvide
     {
         yield return new ModuleTaskDefinition
         {
+            Category = "bot",
+            TaskType = BatchTaskTypes.BotChannelBanMembers,
+            DisplayName = "Bot频道批量踢人/封禁",
+            Description = "由 Bot 频道页面触发并在后台执行。",
+            Icon = Icons.Material.Filled.PersonRemove,
+            Order = 320
+        };
+
+        yield return new ModuleTaskDefinition
+        {
             Category = "system",
             TaskType = BatchTaskTypes.ExternalApiKick,
             DisplayName = "外部 API：踢人/封禁",

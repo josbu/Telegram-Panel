@@ -1,5 +1,6 @@
 @inject AccountManagementService AccountManagement
 @inject BotTelegramService BotTelegram
+@inject ISnackbar Snackbar
 @namespace TelegramPanel.Web.Components.Dialogs
 @using TelegramPanel.Core.Services
 @using TelegramPanel.Core.Services.Telegram
@@ -11,6 +12,10 @@
             <MudAlert Severity="Severity.Info">
                 将从 <strong>@TargetChannelCount</strong> 个频道移除指定用户
             </MudAlert>
+
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                提交后会创建后台任务，关闭/刷新页面不影响执行。
+            </MudText>
 
             <MudSelect T="ExecuteMode" @bind-Value="executeMode" @bind-Value:after="OnExecuteModeChanged"
                        Label="执行方式" Variant="Variant.Outlined" Dense="true">
@@ -241,13 +246,13 @@
         var (userId, username) = ParseTargetInput(targetInput);
         if (executeMode == ExecuteMode.Bot && userId == null)
         {
-            MudDialog.Close(DialogResult.Cancel());
+            Snackbar.Add("机器人执行仅支持用户 ID（纯数字）", Severity.Warning);
             return;
         }
 
         if (executeMode == ExecuteMode.Account && userId == null && string.IsNullOrWhiteSpace(username))
         {
-            MudDialog.Close(DialogResult.Cancel());
+            Snackbar.Add("账号执行请填写 @username 或用户 ID", Severity.Warning);
             return;
         }
 
