@@ -169,10 +169,10 @@
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
                                        OnClick="@(() => OpenEditUserChatActiveTask(context))" />
                     }
-                    @if (CanRerunUserChatActiveTask(context))
+                    @if (CanRerunTask(context))
                     {
-                        <MudIconButton Icon="@Icons.Material.Filled.Replay" Size="Size.Small" Color="Color.Secondary"
-                                       OnClick="@(() => RerunUserChatActiveTask(context))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Replay" Size="Size.Small" Color="Color.Success"
+                                       OnClick="@(() => RerunTask(context))" />
                     }
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                    OnClick="@(() => DeleteTask(context.Id))" />
@@ -450,10 +450,13 @@
         return IsUserChatActiveTask(task.TaskType);
     }
 
-    private static bool CanRerunUserChatActiveTask(BatchTask task)
+    private bool CanRerunTask(BatchTask task)
     {
-        return IsUserChatActiveTask(task.TaskType)
-               && !string.Equals(task.Status, "running", StringComparison.OrdinalIgnoreCase);
+        if (!IsHistoryStatus(GetDisplayStatus(task)))
+            return false;
+
+        var taskType = (task.TaskType ?? string.Empty).Trim();
+        return taskType.Length > 0 && Contributions.TaskTypeToDefinition.ContainsKey(taskType);
     }
 
     private static bool CanCancelTask(BatchTask task)
@@ -715,7 +718,7 @@
         {
             ["HasActiveTasks"] = hasActive
         };
-        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
         var dialog = DialogService.Show<TelegramPanel.Web.Components.Dialogs.TaskCleanupDialog>("确认清理", parameters, options)!;
         var result = await dialog.Result;
         if (result.Canceled || result.Data is not string mode)
@@ -805,9 +808,9 @@
             await LoadTasks();
     }
 
-    private async Task RerunUserChatActiveTask(BatchTask task)
+    private async Task RerunTask(BatchTask task)
     {
-        if (!CanRerunUserChatActiveTask(task))
+        if (!CanRerunTask(task))
         {
             Snackbar.Add("该任务当前不可重新运行", Severity.Warning);
             return;
@@ -823,19 +826,7 @@
 
         try
         {
-            var rerunConfig = BuildRerunConfig(task.Config);
-            var total = rerunConfig.MaxMessages > 0 ? rerunConfig.MaxMessages : 0;
-            var configJson = JsonSerializer.Serialize(rerunConfig, new JsonSerializerOptions { WriteIndented = true });
-
-            var created = await TaskManagement.CreateTaskAsync(new BatchTask
-            {
-                TaskType = BatchTaskTypes.UserChatActive,
-                Total = total,
-                Completed = 0,
-                Failed = 0,
-                Config = configJson
-            });
-
+            var created = await TaskManagement.CreateTaskAsync(BuildRerunTask(task));
             Snackbar.Add($"已创建重跑任务 #{created.Id}", Severity.Success);
             await LoadTasks();
         }
@@ -843,6 +834,38 @@
         {
             Snackbar.Add($"重新运行失败：{ex.Message}", Severity.Error);
         }
+    }
+
+    private static BatchTask BuildRerunTask(BatchTask task)
+    {
+        var taskType = (task.TaskType ?? string.Empty).Trim();
+        if (taskType.Length == 0)
+            throw new InvalidOperationException("任务类型为空，无法重新运行");
+
+        if (IsUserChatActiveTask(taskType))
+        {
+            var rerunConfig = BuildRerunConfig(task.Config);
+            var total = rerunConfig.MaxMessages > 0 ? rerunConfig.MaxMessages : 0;
+            var configJson = JsonSerializer.Serialize(rerunConfig, new JsonSerializerOptions { WriteIndented = true });
+
+            return new BatchTask
+            {
+                TaskType = BatchTaskTypes.UserChatActive,
+                Total = total,
+                Completed = 0,
+                Failed = 0,
+                Config = configJson
+            };
+        }
+
+        return new BatchTask
+        {
+            TaskType = taskType,
+            Total = Math.Max(0, task.Total),
+            Completed = 0,
+            Failed = 0,
+            Config = string.IsNullOrWhiteSpace(task.Config) ? null : task.Config.Trim()
+        };
     }
 
     private static UserChatActiveTaskConfig BuildRerunConfig(string? rawConfig)

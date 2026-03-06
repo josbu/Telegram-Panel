@@ -11,12 +11,26 @@
                     清理全部会把进行中/待执行/暂停任务先标记为失败，再删除记录。
                 </MudAlert>
             }
+
+            <MudDivider />
+
+            <MudButton FullWidth="true" Variant="Variant.Outlined" Color="Color.Warning" OnClick="ClearHistoryOnly">
+                仅清理历史任务
+            </MudButton>
+            <MudText Typo="Typo.caption">
+                只删除已完成/失败记录，保留执行中、待执行、暂停任务。
+            </MudText>
+
+            <MudButton FullWidth="true" Variant="Variant.Filled" Color="Color.Error" OnClick="ClearAll">
+                清理全部任务
+            </MudButton>
+            <MudText Typo="Typo.caption">
+                删除所有任务记录；若存在活动任务，会先标记失败再删除。
+            </MudText>
         </MudStack>
     </DialogContent>
     <DialogActions>
         <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Cancel">取消</MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="ClearHistoryOnly">仅清理历史任务</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="ClearAll">清理全部</MudButton>
     </DialogActions>
 </MudDialog>
 
