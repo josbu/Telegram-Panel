@@ -1,4 +1,4 @@
-@namespace TelegramPanel.Web.Components.Dialogs
+﻿@namespace TelegramPanel.Web.Components.Dialogs
 @inject AccountCategoryManagementService CategoryManagement
 @using System.Text.Json
 @using TelegramPanel.Data.Entities
@@ -43,11 +43,11 @@
         <MudGrid>
             <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="delayMinMs" @bind-Value:after="OnInputsChanged"
-                                 Label="最小间隔(ms)" Variant="Variant.Outlined" Min="0" Max="600000" />
+                                 Label="最小间隔(秒)" Variant="Variant.Outlined" Min="0" Max="600" />
             </MudItem>
             <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="delayMaxMs" @bind-Value:after="OnInputsChanged"
-                                 Label="最大间隔(ms)" Variant="Variant.Outlined" Min="0" Max="600000" />
+                                 Label="最大间隔(秒)" Variant="Variant.Outlined" Min="0" Max="600" />
             </MudItem>
             <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="maxMessages" @bind-Value:after="OnInputsChanged"
@@ -94,8 +94,8 @@
     private int selectedCategoryId;
     private string targetsText = "";
     private string dictionaryText = "";
-    private int delayMinMs = 15000;
-    private int delayMaxMs = 45000;
+    private int delayMinMs = 15;
+    private int delayMaxMs = 45;
     private int maxMessages = 0;
 
     private string accountMode = UserChatActiveTaskModes.Random;
@@ -145,8 +145,8 @@
 
             targetsText = string.Join(Environment.NewLine, cfg.Targets ?? new List<string>());
             dictionaryText = string.Join(Environment.NewLine, cfg.Dictionary ?? new List<string>());
-            delayMinMs = cfg.DelayMinMs;
-            delayMaxMs = cfg.DelayMaxMs;
+            delayMinMs = ConvertMillisecondsToSeconds(cfg.DelayMinMs);
+            delayMaxMs = ConvertMillisecondsToSeconds(cfg.DelayMaxMs);
             maxMessages = cfg.MaxMessages;
             accountMode = NormalizeMode(cfg.AccountMode);
             targetMode = NormalizeMode(cfg.TargetMode);
@@ -229,8 +229,8 @@
             CategoryName = category.Name,
             Targets = targets,
             Dictionary = dictionary,
-            DelayMinMs = delayMinMs,
-            DelayMaxMs = delayMaxMs,
+            DelayMinMs = delayMinMs * 1000,
+            DelayMaxMs = delayMaxMs * 1000,
             MaxMessages = maxMessages,
             AccountMode = accountMode,
             TargetMode = targetMode,
@@ -240,6 +240,14 @@
         var total = maxMessages > 0 ? maxMessages : 0;
         var json = JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true });
         await DraftChanged.InvokeAsync(new ModuleTaskDraft(total, json, true, null));
+    }
+
+    private static int ConvertMillisecondsToSeconds(int value)
+    {
+        if (value <= 0)
+            return 0;
+
+        return Math.Max(1, (int)Math.Ceiling(value / 1000d));
     }
 
     private static bool IsValidMode(string? value)
@@ -280,3 +288,5 @@
             .ToList();
     }
 }
+
+
