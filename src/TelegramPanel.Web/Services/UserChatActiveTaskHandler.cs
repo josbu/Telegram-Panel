@@ -21,6 +21,7 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         var taskManagement = host.Services.GetRequiredService<BatchTaskManagementService>();
         var accountManagement = host.Services.GetRequiredService<AccountManagementService>();
         var accountTools = host.Services.GetRequiredService<AccountTelegramToolsService>();
+        var templateRendering = host.Services.GetRequiredService<TemplateRenderingService>();
 
         var config = DeserializeConfig(host.Config);
         ValidateAndNormalizeConfig(config);
@@ -116,12 +117,71 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                 var targetSlot = accountSlot.Targets[targetIdx];
 
                 var messageIdx = SelectIndex(config.MessageMode, config.Dictionary.Count, ref messageQueueIndex);
-                var text = config.Dictionary[messageIdx];
+                var textTemplate = config.Dictionary[messageIdx];
 
                 if (!await host.IsStillRunningAsync(cancellationToken))
                 {
                     config.Canceled = true;
                     break;
+                }
+
+                string text;
+                try
+                {
+                    text = (await templateRendering.RenderTextTemplateAsync(textTemplate, cancellationToken)).Trim();
+                }
+                catch (Exception ex)
+                {
+                    completed++;
+                    failed++;
+                    var hadTemplateFailure = true;
+                    AddFailure(config, accountSlot.Account, targetSlot.RawTarget, $"词典模板解析失败：{ex.Message}");
+                    await taskManagement.UpdateTaskConfigAsync(host.TaskId, SerializeIndented(config));
+
+                    if (ShouldPersistProgress(completed, hadTemplateFailure, lastProgressPersistAt))
+                    {
+                        await host.UpdateProgressAsync(completed, failed, cancellationToken);
+                        lastProgressPersistAt = DateTime.UtcNow;
+                    }
+
+                    if (config.MaxMessages > 0 && completed >= config.MaxMessages)
+                        break;
+
+                    var templateFailDelayMs = NextDelayMilliseconds(config.DelayMinMs, config.DelayMaxMs);
+                    if (templateFailDelayMs > 0 && !await DelayWithPauseCheckAsync(host, templateFailDelayMs, cancellationToken))
+                    {
+                        config.Canceled = true;
+                        break;
+                    }
+
+                    continue;
+                }
+
+                if (text.Length == 0)
+                {
+                    completed++;
+                    failed++;
+                    var hadEmptyMessageFailure = true;
+                    AddFailure(config, accountSlot.Account, targetSlot.RawTarget, "词典模板解析结果为空，无法发送");
+                    await taskManagement.UpdateTaskConfigAsync(host.TaskId, SerializeIndented(config));
+
+                    if (ShouldPersistProgress(completed, hadEmptyMessageFailure, lastProgressPersistAt))
+                    {
+                        await host.UpdateProgressAsync(completed, failed, cancellationToken);
+                        lastProgressPersistAt = DateTime.UtcNow;
+                    }
+
+                    if (config.MaxMessages > 0 && completed >= config.MaxMessages)
+                        break;
+
+                    var emptyDelayMs = NextDelayMilliseconds(config.DelayMinMs, config.DelayMaxMs);
+                    if (emptyDelayMs > 0 && !await DelayWithPauseCheckAsync(host, emptyDelayMs, cancellationToken))
+                    {
+                        config.Canceled = true;
+                        break;
+                    }
+
+                    continue;
                 }
 
                 var send = await accountTools.SendMessageToResolvedChatAsync(

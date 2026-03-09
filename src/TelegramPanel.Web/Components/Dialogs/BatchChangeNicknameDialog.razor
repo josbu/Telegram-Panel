@@ -13,20 +13,23 @@
     <DialogContent>
         <MudStack Spacing="2">
             <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
-                将对选中的账号批量修改昵称。支持两种模式：单个“批量昵称”或“昵称列表”。这两个输入都支持 `{time}` 和文本字典变量。
+                将对选中的账号批量修改昵称。只需要填写“昵称模板”，支持一行一个模板，并支持多个变量组合，例如：<b>{diqu}歌神{geshou}</b>。
             </MudAlert>
 
             <MudText Typo="Typo.subtitle2">账号数量：@accounts.Count</MudText>
 
-            <MudTextField @bind-Value="baseNickname" Label="批量昵称" Variant="Variant.Outlined" Required="true"
-                          HelperText="单昵称模式：例如“测试号{city}”。若填写了“昵称列表”，则优先使用昵称列表。" />
-            <MudSwitch @bind-Value="appendPhoneLast4" Label="自动追加手机号后 4 位（单昵称模式）" Color="Color.Primary" />
+            <MudTextField @bind-Value="nicknameTemplatesText"
+                          Label="昵称模板（换行分隔）"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          Lines="6"
+                          HelperText="每行一个昵称模板；按顺序分配给已选账号；用完后从头轮询。支持 {time} 和多个文本字典变量组合。" />
 
-            <MudTextField @bind-Value="nicknameLines" Label="昵称列表（换行分隔）" Variant="Variant.Outlined" Lines="6"
-                          HelperText="每行一个昵称模板；按顺序分配给已选账号；昵称用完后从头轮询。每行同样支持 `{time}` 和文本字典变量。" />
-            <MudSwitch @bind-Value="appendPhoneLast4WhenDuplicate" Label="昵称重复时追加手机号后 4 位（昵称列表模式）" Color="Color.Primary" />
+            <MudSwitch @bind-Value="appendPhoneLast4WhenDuplicate"
+                       Label="昵称重复时追加手机号后 4 位"
+                       Color="Color.Primary" />
             <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                例如：昵称列表只有 1 行或轮询后重复时，为避免重复昵称可追加手机号后 4 位。
+                当同一批次生成出重复昵称时，自动在后面追加该账号手机号后 4 位。
             </MudText>
 
             @if (textDictionaryNames.Count > 0)
@@ -96,9 +99,7 @@
     private List<Account> accounts = new();
     private List<string> textDictionaryNames = new();
 
-    private string baseNickname = "";
-    private bool appendPhoneLast4 = true;
-    private string nicknameLines = "";
+    private string nicknameTemplatesText = string.Empty;
     private bool appendPhoneLast4WhenDuplicate = true;
 
     private bool running;
@@ -139,16 +140,13 @@
             return;
         }
 
-        var nicknameList = ParseNicknameLines(nicknameLines);
-        var useList = nicknameList.Count > 0;
-
-        if (!useList && string.IsNullOrWhiteSpace(baseNickname))
+        var templates = ParseNicknameLines(nicknameTemplatesText);
+        if (templates.Count == 0)
         {
-            Snackbar.Add("批量昵称不能为空", Severity.Warning);
+            Snackbar.Add("请至少填写一行昵称模板", Severity.Warning);
             return;
         }
 
-        var templates = useList ? nicknameList : new List<string> { baseNickname };
         if (!ValidateTemplates(templates, out var templateError))
         {
             Snackbar.Add(templateError ?? "昵称模板不合法", Severity.Warning);
@@ -200,10 +198,10 @@
 
         try
         {
-            var baseUsedCount = new Dictionary<string, int>(StringComparer.Ordinal);
+            var usedNicknames = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var account in accounts)
             {
-                var nicknameTemplate = useList ? nicknameList[processed % nicknameList.Count] : baseNickname;
+                var nicknameTemplate = templates[processed % templates.Count];
                 string resolvedNickname;
                 try
                 {
@@ -218,15 +216,20 @@
                     continue;
                 }
 
-                var needAppend = appendPhoneLast4;
-                if (useList)
+                if (string.IsNullOrWhiteSpace(resolvedNickname))
                 {
-                    baseUsedCount.TryGetValue(resolvedNickname, out var used);
-                    baseUsedCount[resolvedNickname] = used + 1;
-                    needAppend = appendPhoneLast4WhenDuplicate && used > 0;
+                    processed++;
+                    failed++;
+                    results.Add(new ResultRow(account.DisplayPhone, string.Empty, false, "生成的昵称为空，请检查模板或字典内容"));
+                    StateHasChanged();
+                    continue;
                 }
 
-                var newNickname = BuildNickname(resolvedNickname, account.Phone, needAppend);
+                usedNicknames.TryGetValue(resolvedNickname, out var usedCount);
+                usedNicknames[resolvedNickname] = usedCount + 1;
+
+                var shouldAppendPhoneTail = appendPhoneLast4WhenDuplicate && usedCount > 0;
+                var newNickname = BuildNickname(resolvedNickname, account.Phone, shouldAppendPhoneTail);
 
                 var (ok, err) = await AccountTelegramTools.UpdateUserProfileAsync(
                     accountId: account.Id,

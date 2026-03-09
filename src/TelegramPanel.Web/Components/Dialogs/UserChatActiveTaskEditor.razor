@@ -1,4 +1,6 @@
 @inject AccountCategoryManagementService CategoryManagement
+@inject DataDictionaryService DictionaryService
+@inject TemplateRenderingService TemplateRendering
 @using System.Text.Json
 @using TelegramPanel.Data.Entities
 @using TelegramPanel.Modules
@@ -8,6 +10,7 @@
 <MudStack Spacing="2">
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
         持续活跃任务会在后台循环执行并按间隔发送内容。MaxMessages=0 表示持续运行，直到你在任务中心手动取消。
+        词典消息现在支持 <code>{time}</code> 和文本字典变量；任务仍会先按“随机 / 队列”模式选中一行，再解析其中变量后发送。
     </MudAlert>
 
     @if (loading)
@@ -36,14 +39,23 @@
                       Variant="Variant.Outlined"
                       Lines="5"
                       Immediate="true"
-                      HelperText="支持：用户名（可带 at 前缀）、https://t.me/xxx、频道ID（如 -1001234567890 或 1234567890），如私密群组无法复制链接可登录Telegram Web面板打开群组聊天界面查看链接，数字就是ID" />
+                      HelperText="支持：用户名（可带 at 前缀）、https://t.me/xxx、频道ID（如 -1001234567890 或 1234567890），如私密群组无法复制链接可登录 Telegram Web 面板打开群组聊天界面查看链接，数字就是 ID" />
 
         <MudTextField @bind-Value="dictionaryText" @bind-Value:after="OnInputsChanged"
                       Label="词典（每行一个）"
                       Variant="Variant.Outlined"
                       Lines="6"
                       Immediate="true"
-                      HelperText="任务会按“随机/队列”模式从词典中取一条消息发送。" />
+                      HelperText="支持 {time} 和文本字典变量。任务会先按“随机 / 队列”模式选中一行，再解析变量后发送。" />
+
+        @if (textDictionaryNames.Count > 0)
+        {
+            <MudText Typo="Typo.caption">可用文本变量：<code>{time}</code>、@string.Join("、", textDictionaryNames.Select(x => $"{{{x}}}"))</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.caption">当前可用内置变量：<code>{time}</code></MudText>
+        }
 
         <MudGrid>
             <MudItem xs="12" md="4">
@@ -93,15 +105,16 @@
     [Parameter] public string? InitialConfigJson { get; set; }
 
     private List<AccountCategory> categories = new();
+    private List<string> textDictionaryNames = new();
     private bool loading = true;
     private bool initializedFromConfig;
 
     private IEnumerable<int> selectedCategoryIds = Array.Empty<int>();
-    private string targetsText = "";
-    private string dictionaryText = "";
+    private string targetsText = string.Empty;
+    private string dictionaryText = string.Empty;
     private int delayMinMs = 15;
     private int delayMaxMs = 45;
-    private int maxMessages = 0;
+    private int maxMessages;
 
     private string accountMode = UserChatActiveTaskModes.Random;
     private string targetMode = UserChatActiveTaskModes.Queue;
@@ -118,17 +131,19 @@
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            if (!selectedCategoryIds.Any())
-            {
-                var firstCategoryId = categories.FirstOrDefault()?.Id ?? 0;
-                selectedCategoryIds = firstCategoryId > 0 ? new[] { firstCategoryId } : Array.Empty<int>();
-            }
+            textDictionaryNames = (await DictionaryService.GetAllAsync())
+                .Where(x => x.IsEnabled && string.Equals(x.Type, DataDictionaryTypes.Text, StringComparison.OrdinalIgnoreCase))
+                .Where(x => x.Items.Any(i => i.IsEnabled && !string.IsNullOrWhiteSpace(i.TextValue)))
+                .Select(x => x.Name)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
         finally
         {
             loading = false;
-            await PushDraftAsync();
         }
+
+        await PushDraftAsync();
     }
 
     private void ApplyInitialConfigIfNeeded()
@@ -148,10 +163,7 @@
             if (cfg == null)
                 return;
 
-            var categoryIds = NormalizeCategoryIds(cfg.CategoryIds, cfg.CategoryId);
-            if (categoryIds.Count > 0)
-                selectedCategoryIds = categoryIds;
-
+            selectedCategoryIds = NormalizeCategoryIds(cfg.CategoryIds, cfg.CategoryId);
             targetsText = string.Join(Environment.NewLine, cfg.Targets ?? new List<string>());
             dictionaryText = string.Join(Environment.NewLine, cfg.Dictionary ?? new List<string>());
             delayMinMs = ConvertMillisecondsToSeconds(cfg.DelayMinMs);
@@ -213,6 +225,19 @@
         {
             await DraftChanged.InvokeAsync(new ModuleTaskDraft(0, null, false, "请至少填写一条词典消息"));
             return;
+        }
+
+        foreach (var template in dictionary)
+        {
+            try
+            {
+                await TemplateRendering.ValidateTextTemplateAsync(template);
+            }
+            catch (Exception ex)
+            {
+                await DraftChanged.InvokeAsync(new ModuleTaskDraft(0, null, false, $"词典消息模板无效：{ex.Message}"));
+                return;
+            }
         }
 
         if (delayMinMs < 0 || delayMaxMs < 0)
