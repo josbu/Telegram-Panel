@@ -213,6 +213,7 @@
                     <MudMenuItem OnClick="OpenBatchChangeTwoFactorRecoveryEmail">批量换绑邮箱（找回+登录）（Cloud Mail）（已选）</MudMenuItem>
                     <MudMenuItem OnClick="OpenBatchSetAccountCategory">批量修改分类（已选）</MudMenuItem>
                     <MudMenuItem OnClick="OpenBatchChangeNickname">批量改昵称（已选）</MudMenuItem>
+                    <MudMenuItem OnClick="OpenBatchChangeAvatar">批量改头像（已选）</MudMenuItem>
                     <MudMenuItem OnClick="OpenBatchChangeUsername">批量改用户名（已选）</MudMenuItem>
                     <MudMenuItem OnClick="OpenBatchChangeBio">批量改Bio（已选）</MudMenuItem>
                 </MudMenu>
@@ -677,6 +678,29 @@
         };
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
         var dialog = DialogService.Show<TelegramPanel.Web.Components.Dialogs.BatchChangeNicknameDialog>("批量修改昵称", parameters, options)!;
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+            await ReloadImportedAccountsAsync();
+    }
+
+    private async Task OpenBatchChangeAvatar()
+    {
+        if (Busy)
+            return;
+
+        var ids = selectedAccounts.Select(a => a.Id).Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            Snackbar.Add("请先选择账号", Severity.Info);
+            return;
+        }
+
+        var parameters = new DialogParameters
+        {
+            ["AccountIds"] = ids
+        };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = DialogService.Show<TelegramPanel.Web.Components.Dialogs.BatchChangeAvatarDialog>("批量修改头像", parameters, options)!;
         var result = await dialog.Result;
         if (result is { Canceled: false })
             await ReloadImportedAccountsAsync();

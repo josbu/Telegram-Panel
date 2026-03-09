@@ -10,10 +10,11 @@
 @inject BatchTaskManagementService TaskManagement
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
-@inject IWebHostEnvironment Environment
+@inject IWebHostEnvironment HostEnvironment
 @inject PanelTimeZoneService TimeZone
 @inject NavigationManager Navigation
 @inject CloudMailClient CloudMail
+@inject TelegramPanelAiService PanelAiService
 @using TelegramPanel.Web.Services
 @using TelegramPanel.Core.Utils
 
@@ -78,6 +79,49 @@
                            Disabled="@cloudMailGeneratingToken"
                            OnClick="@(async (MouseEventArgs _) => await GenerateCloudMailToken())">
                     生成并填入 Token
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+
+        <MudCard Class="mb-4">
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">AI 设置</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField @bind-Value="aiEndpoint" Label="OpenAI 自定义端点" Variant="Variant.Outlined"
+                              HelperText="只填写 https://xxx.com/v1，程序会自动拼接 /chat/completions" />
+                <MudTextField @bind-Value="aiApiKey" Label="API Key" Variant="Variant.Outlined" Class="mt-3"
+                              InputType="InputType.Password"
+                              HelperText="后续任务和模块会复用这套全局 AI 配置。" />
+                <MudTextField @bind-Value="aiDefaultModel" Label="默认模型" Variant="Variant.Outlined" Class="mt-3"
+                              HelperText="任务里未单独选择模型时，回退使用这里的默认模型。" />
+                <MudTextField @bind-Value="aiPresetModelsText" Label="预设模型（每行一个）" Variant="Variant.Outlined" Class="mt-3"
+                              Lines="4"
+                              HelperText="例如：gpt-4o-mini、qwen-vl-plus；任务编辑器会直接复用这里的预设。" />
+                <MudNumericField @bind-Value="aiRetryCount" Label="AI 失败重试次数" Variant="Variant.Outlined" Class="mt-3"
+                                 Min="0" Max="5"
+                                 HelperText="0 表示不重试；实际最多请求次数 = 1 + 重试次数。建议 2。" />
+                <MudText Typo="Typo.caption" Class="mt-2 mud-text-secondary">
+                    测试连通会直接使用当前表单里的端点、Key、模型和重试次数，不必先保存。
+                </MudText>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="@(async (MouseEventArgs _) => await SaveAiConfig())">
+                    保存 AI 配置
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Info"
+                           Disabled="@aiTesting"
+                           OnClick="@(async (MouseEventArgs _) => await TestAiConnectionAsync())">
+                    @if (aiTesting)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        <span>测试中...</span>
+                    }
+                    else
+                    {
+                        <span>测试连通</span>
+                    }
                 </MudButton>
             </MudCardActions>
         </MudCard>
@@ -286,6 +330,12 @@
     private string cloudMailAdminEmail = "";
     private string cloudMailAdminPassword = "";
     private bool cloudMailGeneratingToken = false;
+    private string aiEndpoint = "";
+    private string aiApiKey = "";
+    private string aiDefaultModel = "";
+    private string aiPresetModelsText = "";
+    private int aiRetryCount = 2;
+    private bool aiTesting = false;
 
     private sealed record TimeZoneChoice(string Id, string Label);
 
@@ -308,7 +358,7 @@
         }
     }
 
-    private string LocalConfigPath => LocalConfigFile.ResolvePath(Configuration, Environment);
+    private string LocalConfigPath => LocalConfigFile.ResolvePath(Configuration, HostEnvironment);
     private bool LocalConfigExists => System.IO.File.Exists(LocalConfigPath);
 
     protected override void OnInitialized()
@@ -333,6 +383,11 @@
         cloudMailBaseUrl = Configuration["CloudMail:BaseUrl"] ?? "";
         cloudMailDomain = Configuration["CloudMail:Domain"] ?? "";
         cloudMailToken = Configuration["CloudMail:Token"] ?? "";
+        aiEndpoint = Configuration["AI:OpenAI:Endpoint"] ?? "";
+        aiApiKey = Configuration["AI:OpenAI:ApiKey"] ?? "";
+        aiDefaultModel = Configuration["AI:OpenAI:DefaultModel"] ?? "";
+        aiPresetModelsText = string.Join(System.Environment.NewLine, Configuration.GetSection("AI:OpenAI:PresetModels").GetChildren().Select(x => x.Value).Where(x => !string.IsNullOrWhiteSpace(x)));
+        aiRetryCount = AiOpenAiSettingsSnapshot.NormalizeRetryCount(Configuration.GetValue("AI:OpenAI:RetryCount", 2));
     }
 
     private async Task SaveApiConfig()
@@ -430,6 +485,112 @@
         {
             Snackbar.Add($"保存失败：{ex.Message}（路径：{LocalConfigPath}）", Severity.Error);
         }
+    }
+
+    private async Task SaveAiConfig()
+    {
+        if (aiRetryCount < 0 || aiRetryCount > 5)
+        {
+            Snackbar.Add("AI 失败重试次数范围应为 0-5", Severity.Error);
+            return;
+        }
+
+        try
+        {
+            var normalizedEndpoint = AiOpenAiSettingsSnapshot.NormalizeEndpoint(aiEndpoint);
+            var normalizedApiKey = AiOpenAiSettingsSnapshot.NormalizeApiKey(aiApiKey);
+            var normalizedDefaultModel = AiOpenAiSettingsSnapshot.NormalizeModel(aiDefaultModel);
+            var presetModels = AiOpenAiSettingsSnapshot.NormalizeModelEntries(ParseLines(aiPresetModelsText), normalizedDefaultModel);
+            var normalizedRetryCount = AiOpenAiSettingsSnapshot.NormalizeRetryCount(aiRetryCount);
+
+            var root = await LoadOrCreateLocalConfigAsync();
+            var ai = EnsureObject(root, "AI");
+            var openAi = EnsureObject(ai, "OpenAI");
+
+            openAi["Endpoint"] = normalizedEndpoint ?? string.Empty;
+            openAi["ApiKey"] = normalizedApiKey ?? string.Empty;
+            openAi["DefaultModel"] = normalizedDefaultModel ?? string.Empty;
+            openAi["RetryCount"] = normalizedRetryCount;
+
+            var modelsArray = new System.Text.Json.Nodes.JsonArray();
+            foreach (var model in presetModels)
+                modelsArray.Add(model);
+            openAi["PresetModels"] = modelsArray;
+
+            await SaveLocalConfigAsync(root);
+
+            aiEndpoint = normalizedEndpoint ?? string.Empty;
+            aiApiKey = normalizedApiKey ?? string.Empty;
+            aiDefaultModel = normalizedDefaultModel ?? string.Empty;
+            aiPresetModelsText = string.Join(System.Environment.NewLine, presetModels);
+            aiRetryCount = normalizedRetryCount;
+
+            Snackbar.Add("AI 配置已保存（配置热重载后生效）", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"保存失败：{ex.Message}（路径：{LocalConfigPath}）", Severity.Error);
+        }
+    }
+
+    private async Task TestAiConnectionAsync()
+    {
+        if (aiTesting)
+            return;
+
+        if (aiRetryCount < 0 || aiRetryCount > 5)
+        {
+            Snackbar.Add("AI 失败重试次数范围应为 0-5", Severity.Error);
+            return;
+        }
+
+        aiTesting = true;
+        try
+        {
+            var normalizedEndpoint = AiOpenAiSettingsSnapshot.NormalizeEndpoint(aiEndpoint);
+            var normalizedApiKey = AiOpenAiSettingsSnapshot.NormalizeApiKey(aiApiKey);
+            var normalizedDefaultModel = AiOpenAiSettingsSnapshot.NormalizeModel(aiDefaultModel);
+            var presetModels = AiOpenAiSettingsSnapshot.NormalizeModelEntries(ParseLines(aiPresetModelsText), normalizedDefaultModel);
+            var normalizedRetryCount = AiOpenAiSettingsSnapshot.NormalizeRetryCount(aiRetryCount);
+            var snapshot = new AiOpenAiSettingsSnapshot(normalizedEndpoint, normalizedApiKey, normalizedDefaultModel, presetModels, normalizedRetryCount);
+            var testModel = ResolveAiTestModel(snapshot);
+
+            if (!snapshot.TryValidateForTask(testModel, out var validateError))
+            {
+                Snackbar.Add($"AI 连通测试失败：{validateError}", Severity.Warning);
+                return;
+            }
+
+            var result = await PanelAiService.TestConnectionAsync(snapshot, testModel, CancellationToken.None);
+            if (!result.Success)
+            {
+                Snackbar.Add($"AI 连通测试失败：{result.Error}", Severity.Error);
+                return;
+            }
+
+            var modelName = result.Model ?? snapshot.ResolveModel(testModel) ?? "（未知模型）";
+            var preview = string.IsNullOrWhiteSpace(result.ResponseText) ? "（空响应）" : result.ResponseText;
+            Snackbar.Add($"AI 连通成功：模型 {modelName}，返回 {preview}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"AI 连通测试失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            aiTesting = false;
+            StateHasChanged();
+        }
+    }
+
+    private string? ResolveAiTestModel(AiOpenAiSettingsSnapshot snapshot)
+    {
+        var defaultModel = AiOpenAiSettingsSnapshot.NormalizeModel(aiDefaultModel);
+        if (!string.IsNullOrWhiteSpace(defaultModel))
+            return defaultModel;
+
+        return snapshot.PresetModels.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
     }
 
     private async Task GenerateCloudMailToken()
@@ -536,7 +697,7 @@
 
     private async Task SaveLocalConfigAsync(System.Text.Json.Nodes.JsonObject root)
     {
-        var json = root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        var json = LocalConfigFile.ToIndentedJson(root);
         var path = LocalConfigPath;
         await LocalConfigFile.EnsureExistsAsync(path);
         await LocalConfigFile.WriteJsonAtomicallyAsync(path, json);
@@ -550,6 +711,18 @@
         var created = new System.Text.Json.Nodes.JsonObject();
         root[key] = created;
         return created;
+    }
+
+    private static List<string> ParseLines(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return new List<string>();
+
+        return text
+            .Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => (x ?? string.Empty).Trim())
+            .Where(x => x.Length > 0)
+            .ToList();
     }
 
     private async Task SaveBatchConfig()

@@ -12,6 +12,19 @@ public class BatchTaskRepository : Repository<BatchTask>, IBatchTaskRepository
     {
     }
 
+    public async Task<BatchTask?> GetFreshByIdAsync(int id)
+    {
+        DetachTrackedEntity(id);
+        return await _dbSet.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id);
+    }
+
+    public async Task UpdateFreshAsync(BatchTask entity)
+    {
+        DetachTrackedEntity(entity.Id);
+        _dbSet.Update(entity);
+        await SaveChangesWithSqliteLockRetryAsync();
+    }
+
     public async Task<IEnumerable<BatchTask>> GetByStatusAsync(string status)
     {
         return await _dbSet
@@ -54,5 +67,14 @@ public class BatchTaskRepository : Repository<BatchTask>, IBatchTaskRepository
         _dbSet.RemoveRange(staleTasks);
         await SaveChangesWithSqliteLockRetryAsync(cancellationToken);
         return staleTasks.Count;
+    }
+
+    private void DetachTrackedEntity(int id)
+    {
+        foreach (var entry in _context.ChangeTracker.Entries<BatchTask>())
+        {
+            if (entry.Entity.Id == id)
+                entry.State = EntityState.Detached;
+        }
     }
 }

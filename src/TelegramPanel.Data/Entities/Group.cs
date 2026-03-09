@@ -15,6 +15,7 @@ public class Group
     public int? CreatorAccountId { get; set; }
     public int? CategoryId { get; set; }
     public DateTime? CreatedAt { get; set; }
+    public DateTime? SystemCreatedAtUtc { get; set; }
     public DateTime SyncedAt { get; set; } = DateTime.UtcNow;
 
     // 导航属性

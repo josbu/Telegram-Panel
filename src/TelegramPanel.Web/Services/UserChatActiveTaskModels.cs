@@ -46,6 +46,15 @@ public sealed class UserChatActiveTaskConfig
     [JsonPropertyName("max_messages")]
     public int MaxMessages { get; set; }
 
+    [JsonPropertyName("enable_ai_verification")]
+    public bool EnableAiVerification { get; set; }
+
+    [JsonPropertyName("ai_model")]
+    public string? AiModel { get; set; }
+
+    [JsonPropertyName("verification_timeout_seconds")]
+    public int VerificationTimeoutSeconds { get; set; } = 15;
+
     [JsonPropertyName("canceled")]
     public bool Canceled { get; set; }
 

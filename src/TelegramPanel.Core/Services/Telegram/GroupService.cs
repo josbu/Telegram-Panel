@@ -5,6 +5,7 @@ using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Models;
 using TelegramPanel.Core.Services;
 using TL;
+using WTelegram;
 
 namespace TelegramPanel.Core.Services.Telegram;
 
@@ -414,6 +415,121 @@ public class GroupService : IGroupService
     {
         var groups = await GetVisibleGroupsAsync(accountId);
         return groups.FirstOrDefault(g => g.TelegramId == groupId);
+    }
+
+    public async Task<bool> UpdateGroupInfoAsync(int accountId, long groupId, string title, string? about)
+    {
+        var client = await GetOrCreateConnectedClientAsync(accountId);
+        var group = await GetEditableMegaGroupAsync(accountId, client, groupId, CancellationToken.None);
+
+        title = (title ?? string.Empty).Trim();
+        about = string.IsNullOrWhiteSpace(about) ? null : about.Trim();
+        if (string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("群组标题不能为空", nameof(title));
+
+        await client.Channels_EditTitle(group, title);
+        if (about != null)
+            await client.Messages_EditChatAbout(group, about);
+
+        return true;
+    }
+
+    public async Task<bool> SetGroupVisibilityAsync(int accountId, long groupId, bool isPublic, string? username = null)
+    {
+        var client = await GetOrCreateConnectedClientAsync(accountId);
+        var group = await GetEditableMegaGroupAsync(accountId, client, groupId, CancellationToken.None);
+
+        if (isPublic)
+        {
+            username = (username ?? string.Empty).Trim().TrimStart('@');
+            if (string.IsNullOrWhiteSpace(username))
+                throw new InvalidOperationException("公开群组需要设置用户名");
+
+            var current = (group.MainUsername ?? string.Empty).Trim();
+            if (string.Equals(current, username, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var available = await client.Channels_CheckUsername(group, username);
+            if (!available)
+                throw new InvalidOperationException($"用户名 '{username}' 不可用");
+
+            try
+            {
+                await client.Channels_UpdateUsername(group, username);
+            }
+            catch (RpcException ex) when (ex.Message.Contains("USERNAME_NOT_MODIFIED", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(group.MainUsername))
+                return true;
+
+            await client.Channels_UpdateUsername(group, string.Empty);
+        }
+
+        return true;
+    }
+
+    public async Task<bool> SetGroupPhotoAsync(
+        int accountId,
+        long groupId,
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+        var group = await GetEditableMegaGroupAsync(accountId, client, groupId, cancellationToken);
+
+        if (fileStream == null)
+            throw new ArgumentException("头像文件为空", nameof(fileStream));
+
+        fileName = (fileName ?? "group_photo.jpg").Trim();
+        if (string.IsNullOrWhiteSpace(fileName))
+            fileName = "group_photo.jpg";
+
+        try
+        {
+            await using var encoded = await TelegramImageProcessor.PrepareAvatarJpegAsync(fileStream, cancellationToken);
+            var uploaded = await client.UploadFileAsync(encoded, fileName);
+            if (uploaded == null)
+                throw new InvalidOperationException("群组头像上传失败：上传结果为空");
+
+            await client.Channels_EditPhoto(group, new InputChatUploadedPhoto
+            {
+                flags = InputChatUploadedPhoto.Flags.has_file,
+                file = uploaded
+            });
+
+            return true;
+        }
+        catch (SixLabors.ImageSharp.UnknownImageFormatException)
+        {
+            throw new InvalidOperationException("不支持的图片格式（建议使用 JPG/PNG）");
+        }
+    }
+
+    private async Task<Channel> GetEditableMegaGroupAsync(int accountId, Client client, long groupId, CancellationToken cancellationToken)
+    {
+        var dialogs = await ExecuteTelegramRequestAsync(
+            accountId,
+            "拉取频道/群组对话列表",
+            () => client.Messages_GetAllDialogs(),
+            cancellationToken,
+            resetClientOnTimeout: true);
+
+        var normalizedId = groupId > 0 ? groupId : Math.Abs(groupId);
+        var mega = dialogs.chats.Values.OfType<Channel>()
+            .FirstOrDefault(x => x.IsActive && !x.IsChannel && x.id == normalizedId);
+        if (mega != null)
+            return mega;
+
+        if (dialogs.chats.Values.OfType<Chat>().Any(x => x.IsActive && x.id == normalizedId))
+            throw new InvalidOperationException("当前仅支持超级群组自动修改资料/公开状态");
+
+        throw new InvalidOperationException($"群组 {groupId} not found");
     }
 
     public async Task<bool> LeaveGroupAsync(int accountId, long groupId)

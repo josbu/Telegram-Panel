@@ -499,34 +499,7 @@ public class BotTelegramService
         if (string.IsNullOrWhiteSpace(fileName))
             fileName = "photo.jpg";
 
-        // Bot API setChatPhoto 需要 multipart 上传 InputFile。
-        // 为了提高成功率：做“居中裁剪为正方形 + 缩放到 512x512 + JPEG 压缩”，避免原图过大/比例异常导致失败。
-        await using var raw = new MemoryStream();
-        if (fileStream.CanSeek)
-            fileStream.Position = 0;
-        await fileStream.CopyToAsync(raw, cancellationToken);
-        raw.Position = 0;
-
-        await using var encoded = new MemoryStream();
-        try
-        {
-            using var image = await Image.LoadAsync(raw, cancellationToken);
-            image.Mutate(x => x.AutoOrient());
-
-            const int targetSize = 512;
-            image.Mutate(x => x.Resize(new ResizeOptions
-            {
-                Mode = ResizeMode.Crop,
-                Size = new Size(targetSize, targetSize)
-            }));
-
-            await image.SaveAsJpegAsync(encoded, new JpegEncoder { Quality = 85 }, cancellationToken);
-            encoded.Position = 0;
-        }
-        catch (UnknownImageFormatException)
-        {
-            throw new InvalidOperationException("不支持的图片格式（建议使用 JPG/PNG）");
-        }
+        await using var encoded = await TelegramImageProcessor.PrepareAvatarJpegAsync(fileStream, cancellationToken);
 
         _ = await _api.CallWithFileAsync(
             token: bot.Token,

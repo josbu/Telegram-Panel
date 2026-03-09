@@ -868,6 +868,45 @@ public class ChannelService : IChannelService
         return true;
     }
 
+    public async Task<bool> SetChannelPhotoAsync(
+        int accountId,
+        long channelId,
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+        var channel = await GetChannelByIdAsync(client, channelId)
+            ?? throw new InvalidOperationException($"Channel {channelId} not found");
+
+        if (fileStream == null)
+            throw new ArgumentException("头像文件为空", nameof(fileStream));
+
+        fileName = (fileName ?? "channel_photo.jpg").Trim();
+        if (string.IsNullOrWhiteSpace(fileName))
+            fileName = "channel_photo.jpg";
+
+        try
+        {
+            await using var encoded = await TelegramImageProcessor.PrepareAvatarJpegAsync(fileStream, cancellationToken);
+            var uploaded = await client.UploadFileAsync(encoded, fileName);
+            if (uploaded == null)
+                throw new InvalidOperationException("频道头像上传失败：上传结果为空");
+
+            await client.Channels_EditPhoto(channel, new InputChatUploadedPhoto
+            {
+                flags = InputChatUploadedPhoto.Flags.has_file,
+                file = uploaded
+            });
+
+            return true;
+        }
+        catch (SixLabors.ImageSharp.UnknownImageFormatException)
+        {
+            throw new InvalidOperationException("不支持的图片格式（建议使用 JPG/PNG）");
+        }
+    }
+
     public async Task<bool> KickUserAsync(int accountId, long channelId, string username, bool permanentBan = false)
     {
         var client = await GetOrCreateConnectedClientAsync(accountId);

@@ -1,4 +1,4 @@
-using TelegramPanel.Data.Entities;
+﻿using TelegramPanel.Data.Entities;
 using TelegramPanel.Data.Repositories;
 
 namespace TelegramPanel.Core.Services;
@@ -84,6 +84,8 @@ public class ChannelManagementService
                 existing.CreatorAccountId = channel.CreatorAccountId;
             if (channel.CreatedAt.HasValue)
                 existing.CreatedAt = channel.CreatedAt;
+            if (existing.SystemCreatedAtUtc == null && channel.SystemCreatedAtUtc != null)
+                existing.SystemCreatedAtUtc = channel.SystemCreatedAtUtc;
             existing.SyncedAt = DateTime.UtcNow;
 
             await _channelRepository.UpdateAsync(existing);
@@ -123,6 +125,8 @@ public class ChannelManagementService
                     legacy.GroupId = channel.GroupId;
                 if (channel.CreatedAt.HasValue)
                     legacy.CreatedAt = channel.CreatedAt;
+                if (legacy.SystemCreatedAtUtc == null && channel.SystemCreatedAtUtc != null)
+                    legacy.SystemCreatedAtUtc = channel.SystemCreatedAtUtc;
                 legacy.SyncedAt = DateTime.UtcNow;
 
                 await _channelRepository.UpdateAsync(legacy);
@@ -280,3 +284,5 @@ public class ChannelManagementService
         return await _accountChannelRepository.GetPreferredAdminAccountIdAsync(channel.Id);
     }
 }
+
+

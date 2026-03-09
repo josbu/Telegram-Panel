@@ -83,6 +83,11 @@ public interface IChannelService
     Task<bool> UpdateChannelInfoAsync(int accountId, long channelId, string title, string? about);
 
     /// <summary>
+    /// 设置频道头像。
+    /// </summary>
+    Task<bool> SetChannelPhotoAsync(int accountId, long channelId, Stream fileStream, string fileName, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 从频道踢出用户（通过 username），可选是否永久封禁
     /// </summary>
     Task<bool> KickUserAsync(int accountId, long channelId, string username, bool permanentBan = false);

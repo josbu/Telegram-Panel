@@ -46,4 +46,19 @@ public interface IGroupService
     /// 获取群组管理员列表（需要权限）
     /// </summary>
     Task<List<ChannelAdminInfo>> GetAdminsAsync(int accountId, long groupId);
+
+    /// <summary>
+    /// 更新群组标题与简介。
+    /// </summary>
+    Task<bool> UpdateGroupInfoAsync(int accountId, long groupId, string title, string? about);
+
+    /// <summary>
+    /// 设置群组公开用户名或切回私密。
+    /// </summary>
+    Task<bool> SetGroupVisibilityAsync(int accountId, long groupId, bool isPublic, string? username = null);
+
+    /// <summary>
+    /// 设置群组头像。
+    /// </summary>
+    Task<bool> SetGroupPhotoAsync(int accountId, long groupId, Stream fileStream, string fileName, CancellationToken cancellationToken = default);
 }

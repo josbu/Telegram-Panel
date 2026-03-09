@@ -26,7 +26,7 @@ public class BatchTaskManagementService
 
     public async Task<BatchTask?> GetTaskAsync(int id)
     {
-        return await _batchTaskRepository.GetByIdAsync(id);
+        return await _batchTaskRepository.GetFreshByIdAsync(id);
     }
 
     public async Task<IEnumerable<BatchTask>> GetAllTasksAsync()
@@ -63,51 +63,51 @@ public class BatchTaskManagementService
 
     public async Task UpdateTaskProgressAsync(int taskId, int completed, int failed)
     {
-        var task = await _batchTaskRepository.GetByIdAsync(taskId);
+        var task = await _batchTaskRepository.GetFreshByIdAsync(taskId);
         if (task != null)
         {
             task.Completed = completed;
             task.Failed = failed;
-            await _batchTaskRepository.UpdateAsync(task);
+            await _batchTaskRepository.UpdateFreshAsync(task);
         }
     }
 
     public async Task UpdateTaskConfigAsync(int taskId, string? config)
     {
-        var task = await _batchTaskRepository.GetByIdAsync(taskId);
+        var task = await _batchTaskRepository.GetFreshByIdAsync(taskId);
         if (task != null)
         {
             task.Config = config;
-            await _batchTaskRepository.UpdateAsync(task);
+            await _batchTaskRepository.UpdateFreshAsync(task);
         }
     }
 
     public async Task UpdateTaskDraftAsync(int taskId, int total, string? config)
     {
-        var task = await _batchTaskRepository.GetByIdAsync(taskId);
+        var task = await _batchTaskRepository.GetFreshByIdAsync(taskId);
         if (task != null)
         {
             if (total < 0) total = 0;
             task.Total = total;
             task.Config = config;
-            await _batchTaskRepository.UpdateAsync(task);
+            await _batchTaskRepository.UpdateFreshAsync(task);
         }
     }
 
     public async Task StartTaskAsync(int taskId)
     {
-        var task = await _batchTaskRepository.GetByIdAsync(taskId);
+        var task = await _batchTaskRepository.GetFreshByIdAsync(taskId);
         if (task != null)
         {
             task.Status = "running";
             task.StartedAt = DateTime.UtcNow;
-            await _batchTaskRepository.UpdateAsync(task);
+            await _batchTaskRepository.UpdateFreshAsync(task);
         }
     }
 
     public async Task PauseTaskAsync(int taskId)
     {
-        var task = await _batchTaskRepository.GetByIdAsync(taskId);
+        var task = await _batchTaskRepository.GetFreshByIdAsync(taskId);
         if (task == null)
             return;
 
@@ -115,13 +115,13 @@ public class BatchTaskManagementService
         {
             task.Status = "paused";
             task.CompletedAt = null;
-            await _batchTaskRepository.UpdateAsync(task);
+            await _batchTaskRepository.UpdateFreshAsync(task);
         }
     }
 
     public async Task ResumeTaskAsync(int taskId)
     {
-        var task = await _batchTaskRepository.GetByIdAsync(taskId);
+        var task = await _batchTaskRepository.GetFreshByIdAsync(taskId);
         if (task == null)
             return;
 
@@ -130,25 +130,25 @@ public class BatchTaskManagementService
             task.Status = "pending";
             task.StartedAt = null;
             task.CompletedAt = null;
-            await _batchTaskRepository.UpdateAsync(task);
+            await _batchTaskRepository.UpdateFreshAsync(task);
         }
     }
 
     public async Task CompleteTaskAsync(int taskId, bool success = true)
     {
-        var task = await _batchTaskRepository.GetByIdAsync(taskId);
+        var task = await _batchTaskRepository.GetFreshByIdAsync(taskId);
         if (task == null)
             return;
 
         task.Status = success ? "completed" : "failed";
         task.CompletedAt = DateTime.UtcNow;
-        await _batchTaskRepository.UpdateAsync(task);
+        await _batchTaskRepository.UpdateFreshAsync(task);
         await TrimHistoryTasksIfNeededAsync();
     }
 
     public async Task DeleteTaskAsync(int id)
     {
-        var task = await _batchTaskRepository.GetByIdAsync(id);
+        var task = await _batchTaskRepository.GetFreshByIdAsync(id);
         if (task != null)
         {
             await _batchTaskRepository.DeleteAsync(task);

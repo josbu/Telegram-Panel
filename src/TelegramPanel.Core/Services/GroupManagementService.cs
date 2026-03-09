@@ -1,4 +1,4 @@
-using TelegramPanel.Data.Entities;
+﻿using TelegramPanel.Data.Entities;
 using TelegramPanel.Data.Repositories;
 
 namespace TelegramPanel.Core.Services;
@@ -69,6 +69,8 @@ public class GroupManagementService
                 existing.CreatorAccountId = group.CreatorAccountId;
             if (group.CreatedAt.HasValue)
                 existing.CreatedAt = group.CreatedAt;
+            if (existing.SystemCreatedAtUtc == null && group.SystemCreatedAtUtc != null)
+                existing.SystemCreatedAtUtc = group.SystemCreatedAtUtc;
             existing.SyncedAt = DateTime.UtcNow;
 
             await _groupRepository.UpdateAsync(existing);
@@ -223,3 +225,5 @@ public class GroupManagementService
         return await _accountGroupRepository.GetPreferredAdminAccountIdAsync(group.Id);
     }
 }
+
+

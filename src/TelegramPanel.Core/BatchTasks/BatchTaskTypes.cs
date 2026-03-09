@@ -14,6 +14,8 @@ public static class BatchTaskTypes
     // User 任务（新增）
     public const string UserJoinSubscribe = "user_join_subscribe";
     public const string UserChatActive = "user_chat_active";
+    public const string ChannelGroupPrivateCreate = "channel_group_private_create";
+    public const string ChannelGroupPublicize = "channel_group_publicize";
 
     // System 任务（记录到任务中心）
     public const string AccountAutoSync = "account_auto_sync";

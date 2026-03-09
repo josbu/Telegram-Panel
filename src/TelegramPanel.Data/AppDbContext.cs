@@ -22,6 +22,9 @@ public class AppDbContext : DbContext
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupCategory> GroupCategories => Set<GroupCategory>();
     public DbSet<BatchTask> BatchTasks => Set<BatchTask>();
+    public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
+    public DbSet<DataDictionary> DataDictionaries => Set<DataDictionary>();
+    public DbSet<DataDictionaryItem> DataDictionaryItems => Set<DataDictionaryItem>();
     public DbSet<Bot> Bots => Set<Bot>();
     public DbSet<BotChannel> BotChannels => Set<BotChannel>();
     public DbSet<BotChannelCategory> BotChannelCategories => Set<BotChannelCategory>();
@@ -72,6 +75,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
             entity.Property(e => e.Username).HasMaxLength(100);
             entity.Property(e => e.About).HasMaxLength(1000);
+            entity.Property(e => e.SystemCreatedAtUtc);
 
             entity.HasIndex(e => e.TelegramId).IsUnique();
             entity.HasIndex(e => e.Username);
@@ -126,6 +130,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
             entity.Property(e => e.Username).HasMaxLength(100);
             entity.Property(e => e.About).HasMaxLength(1000);
+            entity.Property(e => e.SystemCreatedAtUtc);
 
             entity.HasIndex(e => e.TelegramId).IsUnique();
             entity.HasIndex(e => e.Username);
@@ -182,6 +187,52 @@ public class AppDbContext : DbContext
 
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // ScheduledTask配置
+        modelBuilder.Entity<ScheduledTask>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TaskType).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.CronExpression).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.OwnedAssetScopeId).HasMaxLength(120);
+
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.NextRunAtUtc);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // DataDictionary配置
+        modelBuilder.Entity<DataDictionary>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.Type).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.ReadMode).IsRequired().HasMaxLength(20);
+
+            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasIndex(e => e.Type);
+            entity.HasIndex(e => e.IsEnabled);
+        });
+
+        // DataDictionaryItem配置
+        modelBuilder.Entity<DataDictionaryItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TextValue).HasMaxLength(4000);
+            entity.Property(e => e.AssetPath).HasMaxLength(500);
+            entity.Property(e => e.FileName).HasMaxLength(255);
+
+            entity.HasIndex(e => e.DataDictionaryId);
+            entity.HasIndex(e => new { e.DataDictionaryId, e.SortOrder });
+
+            entity.HasOne(e => e.Dictionary)
+                .WithMany(d => d.Items)
+                .HasForeignKey(e => e.DataDictionaryId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Bot配置

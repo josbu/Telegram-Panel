@@ -1,4 +1,4 @@
-@page "/groups/create"
+﻿@page "/groups/create"
 @inject IGroupService GroupService
 @inject AccountManagementService AccountManagement
 @inject TelegramPanel.Core.Services.AccountRiskService RiskService
@@ -180,7 +180,8 @@
                 CreatorAccountId = selectedAccountId,
                 CategoryId = selectedCategoryId > 0 ? selectedCategoryId : null,
                 CreatedAt = groupInfo.CreatedAt ?? now,
-                SyncedAt = now
+                SyncedAt = now,
+                SystemCreatedAtUtc = now
             };
 
             var savedGroup = await GroupManagement.CreateOrUpdateGroupAsync(group);
@@ -222,3 +223,5 @@
         return namePart;
     }
 }
+
+

@@ -24,17 +24,20 @@ public class AccountTelegramToolsService
     private readonly ITelegramClientPool _clientPool;
     private readonly IConfiguration _configuration;
     private readonly ILogger<AccountTelegramToolsService> _logger;
+    private readonly TelegramAccountUpdateHub _updateHub;
 
     public AccountTelegramToolsService(
         AccountManagementService accountManagement,
         ITelegramClientPool clientPool,
         IConfiguration configuration,
-        ILogger<AccountTelegramToolsService> logger)
+        ILogger<AccountTelegramToolsService> logger,
+        TelegramAccountUpdateHub updateHub)
     {
         _accountManagement = accountManagement;
         _clientPool = clientPool;
         _configuration = configuration;
         _logger = logger;
+        _updateHub = updateHub;
     }
 
     /// <summary>
@@ -1112,22 +1115,109 @@ public class AccountTelegramToolsService
     /// <summary>
     /// 向已解析的群组/频道目标发送文本消息。
     /// </summary>
-    public async Task<(bool Success, string? Error)> SendMessageToResolvedChatAsync(
+    public async Task<(bool Success, string? Error, int? MessageId)> SendMessageToResolvedChatAsync(
         int accountId,
         ResolvedChatTarget target,
         string message,
+        int? replyToMessageId = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var text = (message ?? string.Empty).Trim();
             if (text.Length == 0)
-                return (false, "消息内容为空");
+                return (false, "消息内容为空", null);
 
             var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
-            _ = await client.SendMessageAsync(target.Peer, text);
+            var sent = await client.SendMessageAsync(target.Peer, text, null, replyToMessageId ?? 0);
+            return (true, null, sent.id);
+        }
+        catch (Exception ex)
+        {
+            var (summary, details) = MapTelegramException(ex);
+            var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
+            return (false, msg, null);
+        }
+    }
+
+    public async Task<(bool Success, string? Error, TelegramVerificationMessageCandidate? Candidate)> WaitForBotVerificationMessageAsync(
+        int accountId,
+        ResolvedChatTarget target,
+        int sentMessageId,
+        string? currentUsername,
+        int timeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        if (timeoutSeconds < 3)
+            timeoutSeconds = 3;
+        if (timeoutSeconds > 300)
+            timeoutSeconds = 300;
+
+        try
+        {
+            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+            var waitStartedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
+            var update = await _updateHub.WaitForAsync(
+                accountId,
+                x => IsCandidateVerificationMessage(x, target, currentUsername, sentMessageId),
+                waitStartedAt,
+                TimeSpan.FromSeconds(timeoutSeconds),
+                cancellationToken);
+
+            if (update == null)
+                return (false, $"等待验证消息超时（{timeoutSeconds} 秒）", null);
+
+            var candidate = await BuildVerificationCandidateAsync(
+                client,
+                update.Message,
+                currentUsername,
+                sentMessageId,
+                cancellationToken);
+
+            return candidate == null
+                ? (false, "匹配到的验证消息为空，无法执行 AI 识别", null)
+                : (true, null, candidate);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var (summary, details) = MapTelegramException(ex);
+            var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
+            return (false, msg, null);
+        }
+    }
+
+    public async Task<(bool Success, string? Error)> ClickInlineButtonAsync(
+        int accountId,
+        ResolvedChatTarget target,
+        int messageId,
+        byte[] callbackData,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (callbackData == null || callbackData.Length == 0)
+                return (false, "按钮缺少 callback_data");
+
+            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            _ = await client.Messages_GetBotCallbackAnswer(target.Peer, messageId, callbackData, null, false);
+            return (true, null);
+        }
+        catch (Exception ex) when (IsBotCallbackTimeout(ex))
+        {
+            _logger.LogInformation(
+                ex,
+                "Telegram bot callback timed out after click, treat as delivered: accountId={AccountId}, chat={ChatId}, messageId={MessageId}",
+                accountId,
+                target.CanonicalId,
+                messageId);
             return (true, null);
         }
         catch (Exception ex)
@@ -1178,6 +1268,223 @@ public class AccountTelegramToolsService
         }
 
         return null;
+    }
+
+    private bool IsCandidateVerificationMessage(
+        TelegramAccountMessageUpdate update,
+        ResolvedChatTarget target,
+        string? currentUsername,
+        int sentMessageId)
+    {
+        if (!update.SenderIsBot)
+            return false;
+
+        if (!IsSamePeer(target.Peer, update.Message.peer_id))
+            return false;
+
+        var mentionsAccount = ContainsUsernameMention(update.Message.message, currentUsername);
+        var replyToSent = update.ReplyToMessageId == sentMessageId;
+        if (!mentionsAccount && !replyToSent)
+            return false;
+
+        return LooksLikeVerificationChallenge(update);
+    }
+
+    private async Task<TelegramVerificationMessageCandidate?> BuildVerificationCandidateAsync(
+        Client client,
+        Message message,
+        string? currentUsername,
+        int sentMessageId,
+        CancellationToken cancellationToken)
+    {
+        var buttons = ExtractInlineButtons(message);
+        var imageJpegBytes = await TryDownloadVerificationImageAsync(client, message, cancellationToken);
+        var text = (message.message ?? string.Empty).Trim();
+
+        if (buttons.Count == 0 && text.Length == 0 && (imageJpegBytes == null || imageJpegBytes.Length == 0))
+            return null;
+
+        return new TelegramVerificationMessageCandidate(
+            MessageId: message.id,
+            Text: text.Length == 0 ? null : text,
+            ImageJpegBytes: imageJpegBytes,
+            Buttons: buttons,
+            MentionsAccount: ContainsUsernameMention(message.message, currentUsername),
+            IsReplyToSentMessage: message.ReplyHeader?.reply_to_msg_id == sentMessageId,
+            DateUtc: message.Date.ToUniversalTime());
+    }
+
+    private static bool IsSamePeer(InputPeer targetPeer, Peer actualPeer)
+    {
+        return (targetPeer, actualPeer) switch
+        {
+            (InputPeerChannel targetChannel, PeerChannel actualChannel) => targetChannel.channel_id == actualChannel.channel_id,
+            (InputPeerChat targetChat, PeerChat actualChat) => targetChat.chat_id == actualChat.chat_id,
+            (InputPeerUser targetUser, PeerUser actualUser) => targetUser.user_id == actualUser.user_id,
+            _ => false
+        };
+    }
+
+    private static bool ContainsUsernameMention(string? text, string? currentUsername)
+    {
+        var username = (currentUsername ?? string.Empty).Trim().TrimStart('@');
+        if (username.Length == 0)
+            return false;
+
+        var messageText = (text ?? string.Empty).Trim();
+        if (messageText.Length == 0)
+            return false;
+
+        return messageText.Contains($"@{username}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeVerificationChallenge(TelegramAccountMessageUpdate update)
+    {
+        if (update.Buttons.Count > 0 || update.HasVisualMedia)
+            return true;
+
+        var text = update.Text;
+        if (text.Length == 0)
+            return false;
+
+        if (ContainsAny(text, "垃圾广告", "广告", "不予处理", "已删除", "违规", "封禁")
+            && !ContainsAny(text, "验证", "验证码", "校验", "captcha"))
+        {
+            return false;
+        }
+
+        if (ContainsAny(text,
+                "验证",
+                "验证码",
+                "校验",
+                "请选择",
+                "点击",
+                "按钮",
+                "完成验证",
+                "请回复",
+                "答案",
+                "算式",
+                "等于多少",
+                "reply",
+                "captcha"))
+        {
+            return true;
+        }
+
+        return LooksLikeMathChallenge(text);
+    }
+
+    private static bool LooksLikeMathChallenge(string text)
+    {
+        var digitCount = 0;
+        foreach (var ch in text)
+        {
+            if (char.IsDigit(ch))
+                digitCount++;
+        }
+
+        if (digitCount < 2)
+            return false;
+
+        return text.IndexOf('+') >= 0
+               || text.IndexOf('-') >= 0
+               || text.IndexOf('*') >= 0
+               || text.IndexOf('/') >= 0
+               || text.Contains("×", StringComparison.Ordinal)
+               || text.Contains("÷", StringComparison.Ordinal)
+               || text.Contains("＝", StringComparison.Ordinal)
+               || text.IndexOf('=') >= 0;
+    }
+
+    private static bool ContainsAny(string text, params string[] keywords)
+    {
+        foreach (var keyword in keywords)
+        {
+            if (!string.IsNullOrWhiteSpace(keyword)
+                && text.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static List<TelegramInlineButtonOption> ExtractInlineButtons(Message message)
+    {
+        if (message.reply_markup is not ReplyInlineMarkup markup)
+            return new List<TelegramInlineButtonOption>();
+
+        var result = new List<TelegramInlineButtonOption>();
+        var index = 0;
+        foreach (var row in markup.rows ?? Array.Empty<KeyboardButtonRow>())
+        {
+            var buttons = row?.buttons;
+            if (buttons == null || buttons.Length == 0)
+                continue;
+
+            foreach (var button in buttons)
+            {
+                if (button is KeyboardButtonCallback callback && callback.data is { Length: > 0 })
+                {
+                    result.Add(new TelegramInlineButtonOption(index, callback.text ?? string.Empty, callback.data));
+                    index++;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<byte[]?> TryDownloadVerificationImageAsync(Client client, Message message, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return message.media switch
+            {
+                MessageMediaPhoto { photo: Photo photo } => await DownloadPhotoAsJpegAsync(client, photo, cancellationToken),
+                MessageMediaDocument { document: Document document } => await DownloadDocumentPreviewAsJpegAsync(client, document, cancellationToken),
+                _ => null
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to download verification image from Telegram message {MessageId}", message.id);
+            return null;
+        }
+    }
+
+    private async Task<byte[]?> DownloadPhotoAsJpegAsync(Client client, Photo photo, CancellationToken cancellationToken)
+    {
+        await using var raw = new MemoryStream();
+        await client.DownloadFileAsync(photo, raw, (PhotoSizeBase?)null);
+        raw.Position = 0;
+
+        await using var jpeg = await TelegramImageProcessor.PrepareStoredImageJpegAsync(raw, cancellationToken: cancellationToken);
+        return jpeg.ToArray();
+    }
+
+    private async Task<byte[]?> DownloadDocumentPreviewAsJpegAsync(Client client, Document document, CancellationToken cancellationToken)
+    {
+        await using var raw = new MemoryStream();
+
+        var thumb = document.thumbs?.OfType<PhotoSizeBase>().LastOrDefault();
+        if (thumb != null)
+        {
+            await client.DownloadFileAsync(document, raw, thumb);
+        }
+        else if ((document.mime_type ?? string.Empty).StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            await client.DownloadFileAsync(document, raw, (PhotoSizeBase?)null);
+        }
+        else
+        {
+            return null;
+        }
+
+        raw.Position = 0;
+        await using var jpeg = await TelegramImageProcessor.PrepareStoredImageJpegAsync(raw, cancellationToken: cancellationToken);
+        return jpeg.ToArray();
     }
 
     private static bool TryParseChatIdCandidate(string raw, out long normalizedId)
@@ -1403,29 +1710,7 @@ public class AccountTelegramToolsService
             var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
-            // 先把原图读入内存，然后做“居中裁剪为正方形 + 缩放到 512x512 + JPEG 压缩”，再上传给 Telegram。
-            // 这样可以避免：原图过大、长宽比异常、某些上传流读取不稳定等问题。
-            await using var raw = new MemoryStream();
-            if (fileStream.CanSeek)
-                fileStream.Position = 0;
-
-            await fileStream.CopyToAsync(raw, cancellationToken);
-            raw.Position = 0;
-
-            using var image = await Image.LoadAsync(raw, cancellationToken);
-            image.Mutate(x => x.AutoOrient());
-
-            const int targetSize = 512;
-            image.Mutate(x => x.Resize(new ResizeOptions
-            {
-                Mode = ResizeMode.Crop,
-                Size = new Size(targetSize, targetSize)
-            }));
-
-            await using var encoded = new MemoryStream();
-            await image.SaveAsJpegAsync(encoded, new JpegEncoder { Quality = 85 }, cancellationToken);
-            encoded.Position = 0;
-
+            await using var encoded = await TelegramImageProcessor.PrepareAvatarJpegAsync(fileStream, cancellationToken);
             var inputFile = await client.UploadFileAsync(encoded, "avatar.jpg");
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -1744,6 +2029,12 @@ public class AccountTelegramToolsService
     /// <summary>
     /// 将 Telegram 异常映射为可读的摘要和详情。
     /// </summary>
+    private static bool IsBotCallbackTimeout(Exception ex)
+    {
+        var msg = ex.Message ?? string.Empty;
+        return msg.Contains("BOT_RESPONSE_TIMEOUT", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static (string summary, string details) MapTelegramException(Exception ex)
     {
         var msg = ex.Message ?? string.Empty;

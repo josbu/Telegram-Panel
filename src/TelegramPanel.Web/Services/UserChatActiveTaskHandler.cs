@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using TelegramPanel.Core.BatchTasks;
 using TelegramPanel.Core.Services;
 using TelegramPanel.Core.Services.Telegram;
@@ -21,9 +22,21 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         var taskManagement = host.Services.GetRequiredService<BatchTaskManagementService>();
         var accountManagement = host.Services.GetRequiredService<AccountManagementService>();
         var accountTools = host.Services.GetRequiredService<AccountTelegramToolsService>();
+        var templateRendering = host.Services.GetRequiredService<TemplateRenderingService>();
+        var aiVerification = host.Services.GetRequiredService<UserChatActiveAiVerificationService>();
+        var aiOptions = host.Services.GetRequiredService<IOptionsMonitor<AiOpenAiOptions>>();
 
         var config = DeserializeConfig(host.Config);
         ValidateAndNormalizeConfig(config);
+        config.Canceled = false;
+        config.Error = null;
+
+        if (config.EnableAiVerification)
+        {
+            var settings = aiOptions.CurrentValue.ToSnapshot();
+            if (!settings.TryValidateForTask(config.AiModel, out var aiError))
+                throw new InvalidOperationException($"AI 验证已启用，但全局 AI 配置无效：{aiError}");
+        }
 
         var selectedCategoryIds = NormalizeSelectedCategoryIds(config).ToHashSet();
         var allAccounts = (await accountManagement.GetAllAccountsAsync())
@@ -114,13 +127,78 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                 var targetSlot = accountSlot.Targets[targetIdx];
 
                 var messageIdx = SelectIndex(config.MessageMode, config.Dictionary.Count, ref messageQueueIndex);
-                var text = config.Dictionary[messageIdx];
+                var textTemplate = config.Dictionary[messageIdx];
+
+                if (!await host.IsStillRunningAsync(cancellationToken))
+                {
+                    config.Canceled = true;
+                    break;
+                }
+
+                string text;
+                try
+                {
+                    text = (await templateRendering.RenderTextTemplateAsync(textTemplate, cancellationToken)).Trim();
+                }
+                catch (Exception ex)
+                {
+                    completed++;
+                    failed++;
+                    var hadTemplateFailure = true;
+                    AddFailure(config, accountSlot.Account, targetSlot.RawTarget, $"词典模板解析失败：{ex.Message}");
+                    await taskManagement.UpdateTaskConfigAsync(host.TaskId, SerializeIndented(config));
+
+                    if (ShouldPersistProgress(completed, hadTemplateFailure, lastProgressPersistAt))
+                    {
+                        await host.UpdateProgressAsync(completed, failed, cancellationToken);
+                        lastProgressPersistAt = DateTime.UtcNow;
+                    }
+
+                    if (config.MaxMessages > 0 && completed >= config.MaxMessages)
+                        break;
+
+                    var templateFailDelayMs = NextDelayMilliseconds(config.DelayMinMs, config.DelayMaxMs);
+                    if (templateFailDelayMs > 0 && !await DelayWithPauseCheckAsync(host, templateFailDelayMs, cancellationToken))
+                    {
+                        config.Canceled = true;
+                        break;
+                    }
+
+                    continue;
+                }
+
+                if (text.Length == 0)
+                {
+                    completed++;
+                    failed++;
+                    var hadEmptyMessageFailure = true;
+                    AddFailure(config, accountSlot.Account, targetSlot.RawTarget, "词典模板解析结果为空，无法发送");
+                    await taskManagement.UpdateTaskConfigAsync(host.TaskId, SerializeIndented(config));
+
+                    if (ShouldPersistProgress(completed, hadEmptyMessageFailure, lastProgressPersistAt))
+                    {
+                        await host.UpdateProgressAsync(completed, failed, cancellationToken);
+                        lastProgressPersistAt = DateTime.UtcNow;
+                    }
+
+                    if (config.MaxMessages > 0 && completed >= config.MaxMessages)
+                        break;
+
+                    var emptyDelayMs = NextDelayMilliseconds(config.DelayMinMs, config.DelayMaxMs);
+                    if (emptyDelayMs > 0 && !await DelayWithPauseCheckAsync(host, emptyDelayMs, cancellationToken))
+                    {
+                        config.Canceled = true;
+                        break;
+                    }
+
+                    continue;
+                }
 
                 var send = await accountTools.SendMessageToResolvedChatAsync(
                     accountSlot.Account.Id,
                     targetSlot.Resolved,
                     text,
-                    cancellationToken);
+                    cancellationToken: cancellationToken);
 
                 completed++;
                 var hadFailureThisRound = false;
@@ -144,6 +222,42 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
 
                     await taskManagement.UpdateTaskConfigAsync(host.TaskId, SerializeIndented(config));
                 }
+                else if (config.EnableAiVerification)
+                {
+                    if (!send.MessageId.HasValue || send.MessageId.Value <= 0)
+                    {
+                        failed++;
+                        hadFailureThisRound = true;
+                        AddFailure(config, accountSlot.Account, targetSlot.RawTarget, "消息已发送，但未获取到消息 ID，无法执行 AI 验证");
+                        await taskManagement.UpdateTaskConfigAsync(host.TaskId, SerializeIndented(config));
+                    }
+                    else
+                    {
+                        var verification = await aiVerification.TryHandleAsync(
+                            accountSlot.Account,
+                            targetSlot.Resolved,
+                            send.MessageId.Value,
+                            config,
+                            cancellationToken);
+
+                        if (!verification.Success)
+                        {
+                            failed++;
+                            hadFailureThisRound = true;
+                            AddFailure(config, accountSlot.Account, targetSlot.RawTarget, NormalizeReason(verification.Error));
+                            await taskManagement.UpdateTaskConfigAsync(host.TaskId, SerializeIndented(config));
+                        }
+                        else
+                        {
+                            logger.LogInformation(
+                                "UserChatActive AI verification completed: taskId={TaskId}, accountId={AccountId}, target={Target}, action={Action}",
+                                host.TaskId,
+                                accountSlot.Account.Id,
+                                targetSlot.RawTarget,
+                                verification.ActionSummary ?? "(none)");
+                        }
+                    }
+                }
 
                 if (ShouldPersistProgress(completed, hadFailureThisRound, lastProgressPersistAt))
                 {
@@ -155,8 +269,11 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                     break;
 
                 var delayMs = NextDelayMilliseconds(config.DelayMinMs, config.DelayMaxMs);
-                if (delayMs > 0)
-                    await Task.Delay(delayMs, cancellationToken);
+                if (delayMs > 0 && !await DelayWithPauseCheckAsync(host, delayMs, cancellationToken))
+                {
+                    config.Canceled = true;
+                    break;
+                }
             }
         }
         catch (Exception ex)
@@ -229,6 +346,10 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         if (config.DelayMaxMs < config.DelayMinMs) config.DelayMaxMs = config.DelayMinMs;
 
         if (config.MaxMessages < 0) config.MaxMessages = 0;
+        if (config.VerificationTimeoutSeconds < 3) config.VerificationTimeoutSeconds = 15;
+        if (config.VerificationTimeoutSeconds > 300) config.VerificationTimeoutSeconds = 300;
+
+        config.AiModel = AiOpenAiSettingsSnapshot.NormalizeModel(config.AiModel);
 
         config.AccountMode = NormalizeMode(config.AccountMode);
         config.TargetMode = NormalizeMode(config.TargetMode);
@@ -296,6 +417,29 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
             return minMs;
 
         return Random.Shared.Next(minMs, maxMs + 1);
+    }
+
+    private static async Task<bool> DelayWithPauseCheckAsync(
+        IModuleTaskExecutionHost host,
+        int delayMs,
+        CancellationToken cancellationToken)
+    {
+        if (delayMs <= 0)
+            return true;
+
+        var remaining = delayMs;
+        while (remaining > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!await host.IsStillRunningAsync(cancellationToken))
+                return false;
+
+            var chunk = Math.Min(remaining, 1000);
+            await Task.Delay(chunk, cancellationToken);
+            remaining -= chunk;
+        }
+
+        return true;
     }
 
     private static bool ShouldPersistProgress(int completed, bool hadFailureThisRound, DateTime lastPersistAt)

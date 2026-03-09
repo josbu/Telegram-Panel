@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace TelegramPanel.Modules;
 
@@ -132,7 +132,17 @@ public sealed class ModuleTaskCenterCapabilities
     public bool AutoPauseBeforeEdit { get; set; }
 }
 
-public readonly record struct ModuleTaskDraft(int Total, string? Config, bool CanSubmit, string? ValidationError);
+public readonly record struct ModuleTaskDraft(int Total, string? Config, bool CanSubmit, string? ValidationError)
+{
+    [JsonPropertyName("submissionMode")]
+    public string? SubmissionMode { get; init; }
+
+    [JsonPropertyName("cronExpression")]
+    public string? CronExpression { get; init; }
+
+    [JsonPropertyName("scheduledStatus")]
+    public string? ScheduledStatus { get; init; }
+}
 
 public sealed class ModuleTaskSnapshot
 {
@@ -217,3 +227,5 @@ public interface IModuleTaskExecutionHost
     Task<bool> IsStillRunningAsync(CancellationToken cancellationToken);
     Task UpdateProgressAsync(int completed, int failed, CancellationToken cancellationToken);
 }
+
+

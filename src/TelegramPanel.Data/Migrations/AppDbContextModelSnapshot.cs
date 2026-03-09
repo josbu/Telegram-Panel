@@ -439,6 +439,9 @@ namespace TelegramPanel.Data.Migrations
                     b.Property<DateTime>("SyncedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("SystemCreatedAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("TelegramId")
                         .HasColumnType("INTEGER");
 
@@ -493,6 +496,99 @@ namespace TelegramPanel.Data.Migrations
                     b.ToTable("ChannelGroups");
                 });
 
+            modelBuilder.Entity("TelegramPanel.Data.Entities.DataDictionary", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("NextIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ReadMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsEnabled");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("Type");
+
+                    b.ToTable("DataDictionaries");
+                });
+
+            modelBuilder.Entity("TelegramPanel.Data.Entities.DataDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AssetPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DataDictionaryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TextValue")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DataDictionaryId");
+
+                    b.HasIndex("DataDictionaryId", "SortOrder");
+
+                    b.ToTable("DataDictionaryItems");
+                });
+
             modelBuilder.Entity("TelegramPanel.Data.Entities.Group", b =>
                 {
                     b.Property<int>("Id")
@@ -519,6 +615,9 @@ namespace TelegramPanel.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("SyncedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("SystemCreatedAtUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<long>("TelegramId")
@@ -573,6 +672,63 @@ namespace TelegramPanel.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("GroupCategories");
+                });
+
+            modelBuilder.Entity("TelegramPanel.Data.Entities.ScheduledTask", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ConfigJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CronExpression")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LastBatchTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastRunAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NextRunAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnedAssetScopeId")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaskType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Total")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("NextRunAtUtc");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("ScheduledTasks");
                 });
 
             modelBuilder.Entity("TelegramPanel.Data.Entities.Account", b =>
@@ -669,6 +825,17 @@ namespace TelegramPanel.Data.Migrations
                     b.Navigation("Group");
                 });
 
+            modelBuilder.Entity("TelegramPanel.Data.Entities.DataDictionaryItem", b =>
+                {
+                    b.HasOne("TelegramPanel.Data.Entities.DataDictionary", "Dictionary")
+                        .WithMany("Items")
+                        .HasForeignKey("DataDictionaryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Dictionary");
+                });
+
             modelBuilder.Entity("TelegramPanel.Data.Entities.Group", b =>
                 {
                     b.HasOne("TelegramPanel.Data.Entities.GroupCategory", "Category")
@@ -725,6 +892,11 @@ namespace TelegramPanel.Data.Migrations
             modelBuilder.Entity("TelegramPanel.Data.Entities.ChannelGroup", b =>
                 {
                     b.Navigation("Channels");
+                });
+
+            modelBuilder.Entity("TelegramPanel.Data.Entities.DataDictionary", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("TelegramPanel.Data.Entities.Group", b =>
