@@ -71,6 +71,10 @@ public sealed class UserChatActiveTaskRerunBuilder : IModuleTaskRerunBuilder
         if (cfg.DelayMaxMs > 600000) cfg.DelayMaxMs = 600000;
         if (cfg.DelayMaxMs < cfg.DelayMinMs) cfg.DelayMaxMs = cfg.DelayMinMs;
         if (cfg.MaxMessages < 0) cfg.MaxMessages = 0;
+        if (cfg.VerificationTimeoutSeconds < 3) cfg.VerificationTimeoutSeconds = 15;
+        if (cfg.VerificationTimeoutSeconds > 300) cfg.VerificationTimeoutSeconds = 300;
+
+        cfg.AiModel = AiOpenAiSettingsSnapshot.NormalizeModel(cfg.AiModel);
 
         cfg.AccountMode = NormalizeModeValue(cfg.AccountMode);
         cfg.TargetMode = NormalizeModeValue(cfg.TargetMode);

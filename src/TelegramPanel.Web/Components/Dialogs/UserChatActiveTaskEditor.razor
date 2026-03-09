@@ -1,6 +1,7 @@
 @inject AccountCategoryManagementService CategoryManagement
 @inject DataDictionaryService DictionaryService
 @inject TemplateRenderingService TemplateRendering
+@inject Microsoft.Extensions.Options.IOptionsMonitor<AiOpenAiOptions> AiOptionsMonitor
 @using System.Text.Json
 @using TelegramPanel.Data.Entities
 @using TelegramPanel.Modules
@@ -50,7 +51,7 @@
 
         @if (textDictionaryNames.Count > 0)
         {
-            <MudText Typo="Typo.caption">可用文本变量：<code>{time}</code>、@string.Join("、", textDictionaryNames.Select(x => $"{{{x}}}"))</MudText>
+            <MudText Typo="Typo.caption">可用文本变量：<code>{time}</code>、@(string.Join("、", textDictionaryNames.Select(x => $"{{{x}}}")))</MudText>
         }
         else
         {
@@ -96,6 +97,46 @@
                 </MudSelect>
             </MudItem>
         </MudGrid>
+
+        <MudDivider Class="my-2" />
+
+        <MudSwitch T="bool" @bind-Value="enableAiVerification" @bind-Value:after="OnInputsChanged"
+                   Label="启用 AI 验证消息识别" Color="Color.Primary" />
+
+        @if (enableAiVerification)
+        {
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" @bind-Value="selectedAiModelOption" @bind-Value:after="OnInputsChanged"
+                               Label="任务模型" Variant="Variant.Outlined" Dense="true"
+                               HelperText="可使用全局默认模型，也可以为当前任务单独指定模型。">
+                        <MudSelectItem Value="@UseGlobalDefaultModelOption">@UseGlobalDefaultModelLabel</MudSelectItem>
+                        @foreach (var model in selectableAiModels)
+                        {
+                            <MudSelectItem Value="@model">@model</MudSelectItem>
+                        }
+                        <MudSelectItem Value="@CustomModelOption">自定义模型</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudNumericField T="int" @bind-Value="verificationTimeoutSeconds" @bind-Value:after="OnInputsChanged"
+                                     Label="验证等待超时(秒)" Variant="Variant.Outlined" Min="3" Max="300"
+                                     HelperText="发送活跃消息后，在此时间窗口内等待验证机器人消息。" />
+                </MudItem>
+            </MudGrid>
+
+            @if (IsCustomAiModelSelected)
+            {
+                <MudTextField @bind-Value="customAiModel" @bind-Value:after="OnInputsChanged"
+                              Label="自定义模型名" Variant="Variant.Outlined"
+                              HelperText="例如：gpt-4o-mini、qwen-vl-plus、glm-4.5v。" />
+            }
+
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                仅处理同一目标群里的 <strong>bot</strong> 验证消息，并要求它 <strong>&#64;当前执行账号</strong> 或 <strong>直接回复刚发出的消息</strong>。
+                有按钮时会优先让 AI 决定点击哪个按钮；没有按钮时会让 AI 直接生成回复文本。
+            </MudAlert>
+        }
     }
 </MudStack>
 
@@ -104,8 +145,12 @@
     [Parameter] public EventCallback<ModuleTaskDraft> DraftChanged { get; set; }
     [Parameter] public string? InitialConfigJson { get; set; }
 
+    private const string UseGlobalDefaultModelOption = "__use_global_default__";
+    private const string CustomModelOption = "__custom_model__";
+
     private List<AccountCategory> categories = new();
     private List<string> textDictionaryNames = new();
+    private List<string> selectableAiModels = new();
     private bool loading = true;
     private bool initializedFromConfig;
 
@@ -115,10 +160,19 @@
     private int delayMinMs = 15;
     private int delayMaxMs = 45;
     private int maxMessages;
+    private bool enableAiVerification;
+    private int verificationTimeoutSeconds = 15;
+    private string? initialAiModel;
+    private string selectedAiModelOption = UseGlobalDefaultModelOption;
+    private string customAiModel = string.Empty;
+    private string globalDefaultAiModelLabel = "使用全局默认（未配置）";
 
     private string accountMode = UserChatActiveTaskModes.Random;
     private string targetMode = UserChatActiveTaskModes.Queue;
     private string messageMode = UserChatActiveTaskModes.Random;
+
+    private bool IsCustomAiModelSelected => string.Equals(selectedAiModelOption, CustomModelOption, StringComparison.Ordinal);
+    private string UseGlobalDefaultModelLabel => globalDefaultAiModelLabel;
 
     protected override async Task OnInitializedAsync()
     {
@@ -137,6 +191,8 @@
                 .Select(x => x.Name)
                 .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            LoadAiSettings();
         }
         finally
         {
@@ -172,11 +228,58 @@
             accountMode = NormalizeMode(cfg.AccountMode);
             targetMode = NormalizeMode(cfg.TargetMode);
             messageMode = NormalizeMode(cfg.MessageMode);
+            enableAiVerification = cfg.EnableAiVerification;
+            verificationTimeoutSeconds = cfg.VerificationTimeoutSeconds < 3 ? 15 : cfg.VerificationTimeoutSeconds;
+            initialAiModel = AiOpenAiSettingsSnapshot.NormalizeModel(cfg.AiModel);
         }
         catch
         {
             // 忽略旧配置解析失败，回退到默认值。
         }
+    }
+
+    private void LoadAiSettings()
+    {
+        var snapshot = AiOptionsMonitor.CurrentValue.ToSnapshot();
+        selectableAiModels = snapshot.GetSelectableModels().ToList();
+        var defaultModel = AiOpenAiSettingsSnapshot.NormalizeModel(snapshot.DefaultModel);
+        globalDefaultAiModelLabel = string.IsNullOrWhiteSpace(defaultModel)
+            ? "使用全局默认（未配置）"
+            : $"使用全局默认（{defaultModel}）";
+
+        ApplyAiModelSelection(initialAiModel);
+    }
+
+    private void ApplyAiModelSelection(string? model)
+    {
+        var normalized = AiOpenAiSettingsSnapshot.NormalizeModel(model);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            selectedAiModelOption = UseGlobalDefaultModelOption;
+            customAiModel = string.Empty;
+            return;
+        }
+
+        if (selectableAiModels.Any(x => string.Equals(x, normalized, StringComparison.OrdinalIgnoreCase)))
+        {
+            selectedAiModelOption = selectableAiModels.First(x => string.Equals(x, normalized, StringComparison.OrdinalIgnoreCase));
+            customAiModel = string.Empty;
+            return;
+        }
+
+        selectedAiModelOption = CustomModelOption;
+        customAiModel = normalized;
+    }
+
+    private string? ResolveSelectedAiModel()
+    {
+        if (string.Equals(selectedAiModelOption, UseGlobalDefaultModelOption, StringComparison.Ordinal))
+            return null;
+
+        if (string.Equals(selectedAiModelOption, CustomModelOption, StringComparison.Ordinal))
+            return AiOpenAiSettingsSnapshot.NormalizeModel(customAiModel);
+
+        return AiOpenAiSettingsSnapshot.NormalizeModel(selectedAiModelOption);
     }
 
     private async Task OnSelectedCategoriesChanged(IEnumerable<int> values)
@@ -264,6 +367,22 @@
             return;
         }
 
+        var resolvedAiModel = ResolveSelectedAiModel();
+        if (enableAiVerification)
+        {
+            if (verificationTimeoutSeconds < 3 || verificationTimeoutSeconds > 300)
+            {
+                await DraftChanged.InvokeAsync(new ModuleTaskDraft(0, null, false, "验证等待超时范围应为 3-300 秒"));
+                return;
+            }
+
+            if (IsCustomAiModelSelected && string.IsNullOrWhiteSpace(resolvedAiModel))
+            {
+                await DraftChanged.InvokeAsync(new ModuleTaskDraft(0, null, false, "请选择有效的自定义模型名"));
+                return;
+            }
+        }
+
         var categoryNames = selectedCategories.Select(x => x.Name).ToList();
         var cfg = new UserChatActiveTaskConfig
         {
@@ -278,7 +397,10 @@
             MaxMessages = maxMessages,
             AccountMode = accountMode,
             TargetMode = targetMode,
-            MessageMode = messageMode
+            MessageMode = messageMode,
+            EnableAiVerification = enableAiVerification,
+            AiModel = resolvedAiModel,
+            VerificationTimeoutSeconds = enableAiVerification ? verificationTimeoutSeconds : 15
         };
 
         var total = maxMessages > 0 ? maxMessages : 0;

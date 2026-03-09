@@ -10,7 +10,7 @@
 @inject BatchTaskManagementService TaskManagement
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
-@inject IWebHostEnvironment Environment
+@inject IWebHostEnvironment HostEnvironment
 @inject PanelTimeZoneService TimeZone
 @inject NavigationManager Navigation
 @inject CloudMailClient CloudMail
@@ -78,6 +78,30 @@
                            Disabled="@cloudMailGeneratingToken"
                            OnClick="@(async (MouseEventArgs _) => await GenerateCloudMailToken())">
                     生成并填入 Token
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+
+        <MudCard Class="mb-4">
+            <MudCardHeader>
+                <MudText Typo="Typo.h6">AI 设置</MudText>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField @bind-Value="aiEndpoint" Label="OpenAI 自定义端点" Variant="Variant.Outlined"
+                              HelperText="只填写 https://xxx.com/v1，程序会自动拼接 /chat/completions" />
+                <MudTextField @bind-Value="aiApiKey" Label="API Key" Variant="Variant.Outlined" Class="mt-3"
+                              InputType="InputType.Password"
+                              HelperText="后续任务和模块会复用这套全局 AI 配置。" />
+                <MudTextField @bind-Value="aiDefaultModel" Label="默认模型" Variant="Variant.Outlined" Class="mt-3"
+                              HelperText="任务里未单独选择模型时，回退使用这里的默认模型。" />
+                <MudTextField @bind-Value="aiPresetModelsText" Label="预设模型（每行一个）" Variant="Variant.Outlined" Class="mt-3"
+                              Lines="4"
+                              HelperText="例如：gpt-4o-mini、qwen-vl-plus；任务编辑器会直接复用这里的预设。" />
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="@(async (MouseEventArgs _) => await SaveAiConfig())">
+                    保存 AI 配置
                 </MudButton>
             </MudCardActions>
         </MudCard>
@@ -286,6 +310,10 @@
     private string cloudMailAdminEmail = "";
     private string cloudMailAdminPassword = "";
     private bool cloudMailGeneratingToken = false;
+    private string aiEndpoint = "";
+    private string aiApiKey = "";
+    private string aiDefaultModel = "";
+    private string aiPresetModelsText = "";
 
     private sealed record TimeZoneChoice(string Id, string Label);
 
@@ -308,7 +336,7 @@
         }
     }
 
-    private string LocalConfigPath => LocalConfigFile.ResolvePath(Configuration, Environment);
+    private string LocalConfigPath => LocalConfigFile.ResolvePath(Configuration, HostEnvironment);
     private bool LocalConfigExists => System.IO.File.Exists(LocalConfigPath);
 
     protected override void OnInitialized()
@@ -333,6 +361,10 @@
         cloudMailBaseUrl = Configuration["CloudMail:BaseUrl"] ?? "";
         cloudMailDomain = Configuration["CloudMail:Domain"] ?? "";
         cloudMailToken = Configuration["CloudMail:Token"] ?? "";
+        aiEndpoint = Configuration["AI:OpenAI:Endpoint"] ?? "";
+        aiApiKey = Configuration["AI:OpenAI:ApiKey"] ?? "";
+        aiDefaultModel = Configuration["AI:OpenAI:DefaultModel"] ?? "";
+        aiPresetModelsText = string.Join(System.Environment.NewLine, Configuration.GetSection("AI:OpenAI:PresetModels").GetChildren().Select(x => x.Value).Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
     private async Task SaveApiConfig()
@@ -424,6 +456,44 @@
             await SaveLocalConfigAsync(root);
 
             Snackbar.Add("Cloud Mail 配置已保存（配置热重载后生效）", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"保存失败：{ex.Message}（路径：{LocalConfigPath}）", Severity.Error);
+        }
+    }
+
+    private async Task SaveAiConfig()
+    {
+        try
+        {
+            var normalizedEndpoint = AiOpenAiSettingsSnapshot.NormalizeEndpoint(aiEndpoint);
+            var normalizedApiKey = AiOpenAiSettingsSnapshot.NormalizeApiKey(aiApiKey);
+            var normalizedDefaultModel = AiOpenAiSettingsSnapshot.NormalizeModel(aiDefaultModel);
+            var presetModels = AiOpenAiSettingsSnapshot.NormalizeModelEntries(ParseLines(aiPresetModelsText), normalizedDefaultModel);
+
+            var root = await LoadOrCreateLocalConfigAsync();
+            var ai = EnsureObject(root, "AI");
+            var openAi = EnsureObject(ai, "OpenAI");
+
+            openAi["Endpoint"] = normalizedEndpoint ?? string.Empty;
+            openAi["ApiKey"] = normalizedApiKey ?? string.Empty;
+            openAi["DefaultModel"] = normalizedDefaultModel ?? string.Empty;
+
+            var modelsArray = new System.Text.Json.Nodes.JsonArray();
+            foreach (var model in presetModels)
+                modelsArray.Add(model);
+            openAi["PresetModels"] = modelsArray;
+
+            await SaveLocalConfigAsync(root);
+
+            aiEndpoint = normalizedEndpoint ?? string.Empty;
+            aiApiKey = normalizedApiKey ?? string.Empty;
+            aiDefaultModel = normalizedDefaultModel ?? string.Empty;
+            aiPresetModelsText = string.Join(System.Environment.NewLine, presetModels);
+
+            Snackbar.Add("AI 配置已保存（配置热重载后生效）", Severity.Success);
             StateHasChanged();
         }
         catch (Exception ex)
@@ -550,6 +620,18 @@
         var created = new System.Text.Json.Nodes.JsonObject();
         root[key] = created;
         return created;
+    }
+
+    private static List<string> ParseLines(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return new List<string>();
+
+        return text
+            .Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => (x ?? string.Empty).Trim())
+            .Where(x => x.Length > 0)
+            .ToList();
     }
 
     private async Task SaveBatchConfig()
