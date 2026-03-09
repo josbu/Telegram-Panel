@@ -8,6 +8,12 @@
 
 <MudText Typo="Typo.h4" Class="mb-4">数据字典管理</MudText>
 
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-4">
+    当前系统内置变量：<code>{time}</code>，格式为 <code>yyyyMMddHHmmss</code>，例如 <code>20260310143059</code>。
+    它不是 Unix 时间戳，而是可直接阅读的时间字符串。
+    文本字段通常支持 <code>{time}</code> 和 <code>{字典名}</code>；图片字段通常只能使用单个图片字典变量，例如 <code>{avatar}</code>。
+</MudAlert>
+
 <MudCard>
     <MudCardContent>
         <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">

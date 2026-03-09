@@ -1,0 +1,13 @@
+{
+  "id": "task.message-report",
+  "name": "任务：消息举报",
+  "version": "1.0.0",
+  "host": {
+    "min": "1.31.6",
+    "max": "2.0.0"
+  },
+  "entry": {
+    "assembly": "TelegramPanel.Modules.MessageReportTask.dll",
+    "type": "TelegramPanel.Modules.MessageReportTask.MessageReportTaskModule"
+  }
+}

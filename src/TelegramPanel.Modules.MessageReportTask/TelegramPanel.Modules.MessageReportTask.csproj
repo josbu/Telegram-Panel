@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TelegramPanel.Modules.MessageReportTask</RootNamespace>
+    <AssemblyName>TelegramPanel.Modules.MessageReportTask</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TelegramPanel.Modules.Abstractions\TelegramPanel.Modules.Abstractions.csproj" />
+    <ProjectReference Include="..\TelegramPanel.Core\TelegramPanel.Core.csproj" />
+    <ProjectReference Include="..\TelegramPanel.Data\TelegramPanel.Data.csproj" />
+    <PackageReference Include="MudBlazor" Version="7.*" />
+    <PackageReference Include="WTelegramClient" Version="4.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Remove="publish/**" />
+    <None Remove="publish/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="manifest.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
+    <Content Update="manifest.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+</Project>

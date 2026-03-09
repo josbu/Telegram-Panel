@@ -534,7 +534,56 @@ yield return new ModuleTaskDefinition
 
 > 注意：这组字段已经进入抽象层，并且内置持续任务已按此方式声明；外部模块也建议遵循相同结构，便于后续宿主统一扩展任务中心行为。
 
-### 6) 为“重新运行”提供专用构建器（适合复杂任务）
+### 6) 宿主内置数据字典与模板变量（推荐优先复用）
+
+如果你的模块任务需要“随机文案 / 队列文案 / 图片变量 / 标题模板 / 用户名模板”等能力，建议优先复用宿主已经内置的数据字典体系，而不是在模块里重复造一套词库配置。
+
+当前宿主已经提供：
+
+- 数据字典管理页面：`/data-dictionaries`
+- 文本字典：返回 `string`
+- 图片字典：返回图片资产引用（适合头像、图片消息等）
+- 读取模式：`random` / `queue`
+- 队列游标持久化：`queue` 模式的 `NextIndex` 会写入数据库，重启后继续
+- 模板变量语法：固定为 `{name}`
+- 内置变量：`{time}`（格式 `yyyyMMddHHmmss`）
+
+相关宿主服务：
+
+- `TelegramPanel.Web.Services.DataDictionaryService`
+- `TelegramPanel.Web.Services.TemplateRenderingService`
+- `TelegramPanel.Web.Services.ImageAssetStorageService`
+
+推荐用法：
+
+```csharp
+var templateRendering = host.Services.GetRequiredService<TemplateRenderingService>();
+
+var title = await templateRendering.RenderTextTemplateAsync("临时频道{time}_{city}", cancellationToken);
+var avatar = await templateRendering.ResolveImageTemplateAsync("{avatar_dict}", cancellationToken);
+```
+
+约束说明：
+
+- 标题、描述、公开用户名这类文本字段，只能解析到**文本值**
+- 头像、图片消息这类图片字段，只能使用**固定图片**或**图片字典变量**
+- 文本字典和图片字典**严格分型**，不要混用
+- 未知变量、空字典、已停用字典、类型不匹配，宿主会直接抛出校验失败
+- 图片变量必须是**单个 token**，例如 `{avatar}`，不能写成 `头像_{avatar}`
+
+如果你的模块也提供任务编辑器，建议：
+
+- 在 UI 中直接提示“支持 `{time}` 与 `{字典名}`”
+- 文本输入框只展示文本字典变量
+- 图片输入框只展示图片字典变量
+- 让最终配置 JSON 只保存模板字符串 / 字典 token，不要把解析后的随机结果提前固化进配置
+
+这样做的好处是：
+
+- 宿主统一管理字典内容，模块间可以复用同一份变量源
+- 后续扩展新变量 provider 时，模块通常不需要改协议
+- 计划任务、一次性任务、模块页面都能复用同一套解析规则
+### 7) 为“重新运行”提供专用构建器（适合复杂任务）
 
 如果你的任务配置在运行过程中会写回运行态字段，或者重跑前需要清洗旧配置，建议额外实现 `IModuleTaskRerunBuilder`：
 
@@ -662,6 +711,8 @@ public IEnumerable<ModuleApiTypeDefinition> GetApis(ModuleHostContext context)
 - 建议在生产环境使用“灰度/备份”方式试装模块
 
 后续如需更强隔离，可以把模块改为“独立进程 Module Host”模式（主站通过 HTTP/gRPC 调用），进一步降低崩溃风险。
+
+
 
 
 

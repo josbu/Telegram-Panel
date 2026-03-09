@@ -2,29 +2,37 @@
 @inject AccountManagementService AccountManagement
 @inject TelegramPanel.Core.Services.Telegram.AccountTelegramToolsService AccountTelegramTools
 @inject TelegramPanel.Core.Services.AccountRiskService RiskService
+@inject TemplateRenderingService TemplateRendering
+@inject DataDictionaryService DictionaryService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@using System.Text.RegularExpressions
 @using TelegramPanel.Data.Entities
 
 <MudDialog>
     <DialogContent>
         <MudStack Spacing="2">
             <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
-                将对选中的账号批量修改昵称。支持两种模式：单个“批量昵称”（可自动追加手机号后 4 位），或“昵称列表”（按行轮询分配）。
+                将对选中的账号批量修改昵称。支持两种模式：单个“批量昵称”或“昵称列表”。这两个输入都支持 `{time}` 和文本字典变量。
             </MudAlert>
 
             <MudText Typo="Typo.subtitle2">账号数量：@accounts.Count</MudText>
 
             <MudTextField @bind-Value="baseNickname" Label="批量昵称" Variant="Variant.Outlined" Required="true"
-                          HelperText="单昵称模式：例如“测试号”（将生成：测试号1234 / 测试号5678 ...）。若填写了“昵称列表”，则优先使用昵称列表。" />
+                          HelperText="单昵称模式：例如“测试号{city}”。若填写了“昵称列表”，则优先使用昵称列表。" />
             <MudSwitch @bind-Value="appendPhoneLast4" Label="自动追加手机号后 4 位（单昵称模式）" Color="Color.Primary" />
 
             <MudTextField @bind-Value="nicknameLines" Label="昵称列表（换行分隔）" Variant="Variant.Outlined" Lines="6"
-                          HelperText="每行一个昵称；会按顺序依次分配给已选账号；昵称用完后从头开始轮询。" />
+                          HelperText="每行一个昵称模板；按顺序分配给已选账号；昵称用完后从头轮询。每行同样支持 `{time}` 和文本字典变量。" />
             <MudSwitch @bind-Value="appendPhoneLast4WhenDuplicate" Label="昵称重复时追加手机号后 4 位（昵称列表模式）" Color="Color.Primary" />
             <MudText Typo="Typo.caption" Class="mud-text-secondary">
                 例如：昵称列表只有 1 行或轮询后重复时，为避免重复昵称可追加手机号后 4 位。
             </MudText>
+
+            @if (textDictionaryNames.Count > 0)
+            {
+                <MudText Typo="Typo.caption">可用文本变量：@string.Join("、", textDictionaryNames.Select(x => $"{{{x}}}"))</MudText>
+            }
 
             @if (running || results.Count > 0)
             {
@@ -82,7 +90,11 @@
     [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public IReadOnlyList<int> AccountIds { get; set; } = Array.Empty<int>();
 
+    private static readonly Regex TemplateTokenRegex = new(@"\{(?<name>[a-zA-Z0-9_]+)\}", RegexOptions.Compiled);
+
+    private readonly HashSet<string> supportedTextTokens = new(StringComparer.OrdinalIgnoreCase);
     private List<Account> accounts = new();
+    private List<string> textDictionaryNames = new();
 
     private string baseNickname = "";
     private bool appendPhoneLast4 = true;
@@ -103,6 +115,17 @@
 
         var all = await AccountManagement.GetAllAccountsAsync();
         accounts = all.Where(a => ids.Contains(a.Id)).OrderBy(a => a.Id).ToList();
+
+        var dictionaries = await DictionaryService.GetAllAsync();
+        textDictionaryNames = dictionaries
+            .Where(x => x.IsEnabled && string.Equals(x.Type, DataDictionaryTypes.Text, StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.Name)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        supportedTextTokens.Clear();
+        foreach (var item in textDictionaryNames)
+            supportedTextTokens.Add(item);
     }
 
     private async Task Start()
@@ -125,7 +148,13 @@
             return;
         }
 
-        // 批量风控检查：修改昵称是敏感操作
+        var templates = useList ? nicknameList : new List<string> { baseNickname };
+        if (!ValidateTemplates(templates, out var templateError))
+        {
+            Snackbar.Add(templateError ?? "昵称模板不合法", Severity.Warning);
+            return;
+        }
+
         var batchCheck = RiskService.CheckBatchAccounts(accounts);
         if (batchCheck.HasRiskyAccounts)
         {
@@ -141,12 +170,11 @@
             var dialog = DialogService.Show<TelegramPanel.Web.Components.Dialogs.RiskWarningDialog>("批量操作风控警告", parameters, options);
             var result = await dialog.Result;
 
-            if (result.Canceled)
-                return; // 用户取消操作
+            if (result?.Canceled ?? true)
+                return;
 
             if (result.Data is TelegramPanel.Core.Services.RiskWarningAction action && action == TelegramPanel.Core.Services.RiskWarningAction.ExcludeRisky)
             {
-                // 排除风险账号后继续
                 accounts = batchCheck.SafeAccounts.ToList();
                 if (accounts.Count == 0)
                 {
@@ -154,7 +182,6 @@
                     return;
                 }
             }
-            // else: 用户选择继续所有账号
         }
 
         bool? confirm = await DialogService.ShowMessageBox(
@@ -174,35 +201,51 @@
         try
         {
             var baseUsedCount = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var a in accounts)
+            foreach (var account in accounts)
             {
-                var baseName = useList ? nicknameList[processed % nicknameList.Count] : baseNickname;
+                var nicknameTemplate = useList ? nicknameList[processed % nicknameList.Count] : baseNickname;
+                string resolvedNickname;
+                try
+                {
+                    resolvedNickname = (await TemplateRendering.RenderTextTemplateAsync(nicknameTemplate, CancellationToken.None)).Trim();
+                }
+                catch (Exception ex)
+                {
+                    processed++;
+                    failed++;
+                    results.Add(new ResultRow(account.DisplayPhone, string.Empty, false, $"昵称模板解析失败：{ex.Message}"));
+                    StateHasChanged();
+                    continue;
+                }
 
                 var needAppend = appendPhoneLast4;
                 if (useList)
                 {
-                    baseName = (baseName ?? string.Empty).Trim();
-                    baseUsedCount.TryGetValue(baseName, out var used);
-                    baseUsedCount[baseName] = used + 1;
+                    baseUsedCount.TryGetValue(resolvedNickname, out var used);
+                    baseUsedCount[resolvedNickname] = used + 1;
                     needAppend = appendPhoneLast4WhenDuplicate && used > 0;
                 }
 
-                var newNickname = BuildNickname(baseName, a.Phone, needAppend);
+                var newNickname = BuildNickname(resolvedNickname, account.Phone, needAppend);
 
                 var (ok, err) = await AccountTelegramTools.UpdateUserProfileAsync(
-                    accountId: a.Id,
+                    accountId: account.Id,
                     nickname: newNickname,
                     bio: null,
                     cancellationToken: CancellationToken.None);
 
                 processed++;
-                if (ok) success++; else failed++;
-                results.Add(new ResultRow(a.DisplayPhone, newNickname, ok, err));
+                if (ok)
+                    success++;
+                else
+                    failed++;
+
+                results.Add(new ResultRow(account.DisplayPhone, newNickname, ok, err));
 
                 if (ok)
                 {
-                    a.Nickname = newNickname;
-                    await AccountManagement.UpdateAccountAsync(a);
+                    account.Nickname = newNickname;
+                    await AccountManagement.UpdateAccountAsync(account);
                 }
 
                 StateHasChanged();
@@ -218,6 +261,37 @@
         {
             running = false;
         }
+    }
+
+    private bool ValidateTemplates(IEnumerable<string> templates, out string? error)
+    {
+        foreach (var template in templates)
+        {
+            if (!ValidateTemplate(template, out error))
+                return false;
+        }
+
+        error = null;
+        return true;
+    }
+
+    private bool ValidateTemplate(string? template, out string? error)
+    {
+        error = null;
+        foreach (Match token in TemplateTokenRegex.Matches(template ?? string.Empty))
+        {
+            var tokenName = token.Groups["name"].Value;
+            if (string.Equals(tokenName, "time", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!supportedTextTokens.Contains(tokenName))
+            {
+                error = $"不支持的文本变量：{{{tokenName}}}。请使用 {{time}} 或已启用的文本字典变量。";
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static string BuildNickname(string baseName, string phone, bool appendLast4)
@@ -266,4 +340,3 @@
 
     private sealed record ResultRow(string Phone, string NewNickname, bool Success, string? Error);
 }
-
