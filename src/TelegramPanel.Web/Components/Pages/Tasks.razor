@@ -1,12 +1,15 @@
 ﻿@page "/tasks"
 @inject BatchTaskManagementService TaskManagement
 @inject TelegramPanel.Web.Modules.ModuleContributionRegistry Contributions
+@inject IEnumerable<IModuleTaskRerunBuilder> TaskRerunBuilders
 @inject PanelTimeZoneService TimeZone
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @using TelegramPanel.Data.Entities
 @using TelegramPanel.Core.BatchTasks
 @using System.Text.Json
+@using TelegramPanel.Modules
+@using TelegramPanel.Web.Modules
 @using TelegramPanel.Web.Services
 @implements IDisposable
 
@@ -90,20 +93,20 @@
                 <MudTd DataLabel="操作">
                     <MudIconButton Icon="@Icons.Material.Filled.Info" Size="Size.Small" Color="Color.Info"
                                    OnClick="@(() => ShowTaskDetails(context))" />
-                    @if (CanPauseUserChatActiveTask(context))
+                    @if (CanPauseTask(context))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Pause" Size="Size.Small" Color="Color.Warning"
                                        OnClick="@(() => PauseTask(context))" />
                     }
-                    @if (CanResumeUserChatActiveTask(context))
+                    @if (CanResumeTask(context))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
                                        OnClick="@(() => ResumeTask(context))" />
                     }
-                    @if (CanEditUserChatActiveTask(context))
+                    @if (CanEditTask(context))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
-                                       OnClick="@(() => OpenEditUserChatActiveTask(context))" />
+                                       OnClick="@(() => OpenEditTask(context))" />
                     }
                     @if (CanCancelTask(context))
                     {
@@ -166,10 +169,10 @@
                 <MudTd DataLabel="操作">
                     <MudIconButton Icon="@Icons.Material.Filled.Info" Size="Size.Small" Color="Color.Info"
                                    OnClick="@(() => ShowTaskDetails(context))" />
-                    @if (CanEditUserChatActiveTask(context))
+                    @if (CanEditTask(context))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
-                                       OnClick="@(() => OpenEditUserChatActiveTask(context))" />
+                                       OnClick="@(() => OpenEditTask(context))" />
                     }
                     @if (CanRerunTask(context))
                     {
@@ -441,21 +444,54 @@
     private static bool IsUserChatActiveTask(string taskType) =>
         string.Equals((taskType ?? string.Empty).Trim(), BatchTaskTypes.UserChatActive, StringComparison.OrdinalIgnoreCase);
 
-    private static bool CanPauseUserChatActiveTask(BatchTask task)
+    private RegisteredTaskDefinition? GetTaskDefinition(BatchTask task)
     {
-        return IsUserChatActiveTask(task.TaskType)
-               && string.Equals(GetDisplayStatus(task), "running", StringComparison.OrdinalIgnoreCase);
+        var taskType = (task.TaskType ?? string.Empty).Trim();
+        if (taskType.Length == 0)
+            return null;
+
+        return Contributions.TaskTypeToDefinition.TryGetValue(taskType, out var definition)
+            ? definition
+            : null;
     }
 
-    private static bool CanResumeUserChatActiveTask(BatchTask task)
+    private static string? NormalizeNullableText(string? value)
     {
-        return IsUserChatActiveTask(task.TaskType)
-               && string.Equals(GetDisplayStatus(task), "paused", StringComparison.OrdinalIgnoreCase);
+        var text = (value ?? string.Empty).Trim();
+        return text.Length == 0 ? null : text;
     }
 
-    private static bool CanEditUserChatActiveTask(BatchTask task)
+    private static bool HasStatus(BatchTask task, string status)
     {
-        return IsUserChatActiveTask(task.TaskType);
+        return string.Equals(GetDisplayStatus(task), status, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool CanPauseTask(BatchTask task)
+    {
+        var capabilities = GetTaskDefinition(task)?.Definition.TaskCenter;
+        return capabilities?.CanPause == true && HasStatus(task, "running");
+    }
+
+    private bool CanResumeTask(BatchTask task)
+    {
+        var capabilities = GetTaskDefinition(task)?.Definition.TaskCenter;
+        return capabilities?.CanResume == true && HasStatus(task, "paused");
+    }
+
+    private bool CanEditTask(BatchTask task)
+    {
+        var definition = GetTaskDefinition(task);
+        if (definition == null)
+            return false;
+
+        var capabilities = definition.Definition.TaskCenter;
+        if (!capabilities.CanEdit)
+            return false;
+
+        if (ModuleTaskEditorComponentResolver.ResolveEditEditor(definition) == null)
+            return false;
+
+        return !HasStatus(task, "running") || capabilities.AutoPauseBeforeEdit;
     }
 
     private bool CanRerunTask(BatchTask task)
@@ -463,18 +499,16 @@
         if (!IsHistoryStatus(GetDisplayStatus(task)))
             return false;
 
-        var taskType = (task.TaskType ?? string.Empty).Trim();
-        return taskType.Length > 0 && Contributions.TaskTypeToDefinition.ContainsKey(taskType);
+        return GetTaskDefinition(task)?.Definition.TaskCenter.CanRerun == true;
     }
 
-    private static bool CanCancelTask(BatchTask task)
+    private bool CanCancelTask(BatchTask task)
     {
         var status = GetDisplayStatus(task);
         if (status is not ("pending" or "running"))
             return false;
 
-        // 持续活跃任务运行中优先使用“暂停”，避免直接进入历史任务导致不能快速调整配置。
-        return !CanPauseUserChatActiveTask(task);
+        return !CanPauseTask(task);
     }
 
     private static List<string> ExtractBotAdminFailureLines(BatchTask task)
@@ -692,7 +726,7 @@
 
     private async Task PauseTask(BatchTask task)
     {
-        if (!CanPauseUserChatActiveTask(task))
+        if (!CanPauseTask(task))
         {
             Snackbar.Add("该任务当前不可暂停", Severity.Warning);
             return;
@@ -700,7 +734,7 @@
 
         bool? result = await DialogService.ShowMessageBox(
             "确认暂停",
-            $"确定要暂停任务 #{task.Id} 吗？暂停后可直接编辑配置并继续运行。",
+            $"确定要暂停任务 #{task.Id} 吗？暂停后可编辑配置并稍后继续运行。",
             yesText: "暂停", cancelText: "返回");
 
         if (result != true)
@@ -720,7 +754,7 @@
 
     private async Task ResumeTask(BatchTask task)
     {
-        if (!CanResumeUserChatActiveTask(task))
+        if (!CanResumeTask(task))
         {
             Snackbar.Add("该任务当前不可继续运行", Severity.Warning);
             return;
@@ -799,7 +833,7 @@
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
         var dialog = DialogService.Show<TelegramPanel.Web.Components.Dialogs.TaskCleanupDialog>("确认清理", parameters, options)!;
         var result = await dialog.Result;
-        if (result.Canceled || result.Data is not string mode)
+        if (result is null || result.Canceled || result.Data is not string mode)
             return;
 
         var historyOnly = string.Equals(mode, "history", StringComparison.OrdinalIgnoreCase);
@@ -826,8 +860,8 @@
                     return;
                 }
 
-                foreach (var task in historyTaskList)
-                    await TaskManagement.DeleteTaskAsync(task.Id);
+                foreach (var item in historyTaskList)
+                    await TaskManagement.DeleteTaskAsync(item.Id);
 
                 Snackbar.Add($"已清理 {historyTaskList.Count} 条历史任务记录", Severity.Success);
             }
@@ -836,8 +870,8 @@
                 foreach (var activeTask in allTasks.Where(t => t.Status is "pending" or "running" or "paused"))
                     await TaskManagement.CompleteTaskAsync(activeTask.Id, success: false);
 
-                foreach (var task in allTasks)
-                    await TaskManagement.DeleteTaskAsync(task.Id);
+                foreach (var item in allTasks)
+                    await TaskManagement.DeleteTaskAsync(item.Id);
 
                 tasks.Clear();
                 Snackbar.Add($"已清理 {allTasks.Count} 条任务记录", Severity.Success);
@@ -860,19 +894,35 @@
             await LoadTasks();
     }
 
-    private async Task OpenEditUserChatActiveTask(BatchTask task)
+    private async Task OpenEditTask(BatchTask task)
     {
-        if (!IsUserChatActiveTask(task.TaskType))
+        var definition = GetTaskDefinition(task);
+        if (definition == null || !CanEditTask(task))
         {
             Snackbar.Add("该任务当前不可编辑", Severity.Warning);
             return;
         }
 
-        if (string.Equals(GetDisplayStatus(task), "running", StringComparison.OrdinalIgnoreCase))
+        var capabilities = definition.Definition.TaskCenter;
+        if (HasStatus(task, "running"))
         {
-            await TaskManagement.PauseTaskAsync(task.Id);
-            await LoadTasks();
-            Snackbar.Add("已自动暂停任务，正在打开编辑窗口", Severity.Info);
+            if (!capabilities.AutoPauseBeforeEdit)
+            {
+                Snackbar.Add("该任务正在执行中，请先暂停后再编辑", Severity.Warning);
+                return;
+            }
+
+            try
+            {
+                await TaskManagement.PauseTaskAsync(task.Id);
+                await LoadTasks();
+                Snackbar.Add("已自动暂停任务，正在打开编辑窗口", Severity.Info);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"自动暂停失败：{ex.Message}", Severity.Error);
+                return;
+            }
         }
 
         var parameters = new DialogParameters
@@ -880,7 +930,7 @@
             ["TaskId"] = task.Id
         };
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Large, FullWidth = true };
-        var dialog = DialogService.Show<TelegramPanel.Web.Components.Dialogs.EditUserChatActiveTaskDialog>($"编辑持续任务 #{task.Id}", parameters, options)!;
+        var dialog = DialogService.Show<TelegramPanel.Web.Components.Dialogs.EditModuleTaskDialog>($"编辑任务 #{task.Id}", parameters, options)!;
         var result = await dialog.Result;
         if (result is { Canceled: false })
             await LoadTasks();
@@ -904,7 +954,8 @@
 
         try
         {
-            var created = await TaskManagement.CreateTaskAsync(BuildRerunTask(task));
+            var request = BuildRerunRequest(task);
+            var created = await TaskManagement.CreateTaskAsync(CreateBatchTaskFromRequest(request));
             Snackbar.Add($"已创建重跑任务 #{created.Id}", Severity.Success);
             await LoadTasks();
         }
@@ -914,131 +965,71 @@
         }
     }
 
-    private static BatchTask BuildRerunTask(BatchTask task)
+    private ModuleTaskCreateRequest BuildRerunRequest(BatchTask task)
     {
         var taskType = (task.TaskType ?? string.Empty).Trim();
         if (taskType.Length == 0)
             throw new InvalidOperationException("任务类型为空，无法重新运行");
 
-        if (IsUserChatActiveTask(taskType))
-        {
-            var rerunConfig = BuildRerunConfig(task.Config);
-            var total = rerunConfig.MaxMessages > 0 ? rerunConfig.MaxMessages : 0;
-            var configJson = JsonSerializer.Serialize(rerunConfig, new JsonSerializerOptions { WriteIndented = true });
+        var builder = TaskRerunBuilders.FirstOrDefault(x =>
+            string.Equals((x.TaskType ?? string.Empty).Trim(), taskType, StringComparison.OrdinalIgnoreCase));
 
-            return new BatchTask
-            {
-                TaskType = BatchTaskTypes.UserChatActive,
-                Total = total,
-                Completed = 0,
-                Failed = 0,
-                Config = configJson
-            };
+        if (builder != null)
+        {
+            var request = builder.Build(CreateTaskSnapshot(task));
+            return NormalizeCreateRequest(request);
         }
 
-        return new BatchTask
+        return new ModuleTaskCreateRequest
         {
             TaskType = taskType,
             Total = Math.Max(0, task.Total),
-            Completed = 0,
-            Failed = 0,
-            Config = string.IsNullOrWhiteSpace(task.Config) ? null : task.Config.Trim()
+            Config = NormalizeNullableText(task.Config)
         };
     }
 
-    private static UserChatActiveTaskConfig BuildRerunConfig(string? rawConfig)
+    private static ModuleTaskCreateRequest NormalizeCreateRequest(ModuleTaskCreateRequest? request)
     {
-        var raw = (rawConfig ?? string.Empty).Trim();
-        if (raw.Length == 0)
-            throw new InvalidOperationException("任务配置为空，无法重新运行");
+        if (request == null)
+            throw new InvalidOperationException("重跑构建结果为空");
 
-        UserChatActiveTaskConfig cfg;
-        try
+        var taskType = (request.TaskType ?? string.Empty).Trim();
+        if (taskType.Length == 0)
+            throw new InvalidOperationException("重跑任务类型为空");
+
+        return new ModuleTaskCreateRequest
         {
-            cfg = JsonSerializer.Deserialize<UserChatActiveTaskConfig>(raw)
-                  ?? throw new InvalidOperationException("任务配置解析结果为空");
-        }
-        catch (Exception ex)
+            TaskType = taskType,
+            Total = Math.Max(0, request.Total),
+            Config = NormalizeNullableText(request.Config)
+        };
+    }
+
+    private static ModuleTaskSnapshot CreateTaskSnapshot(BatchTask task)
+    {
+        return new ModuleTaskSnapshot
         {
-            throw new InvalidOperationException($"任务配置 JSON 无效：{ex.Message}");
-        }
-
-        cfg.CategoryIds = NormalizeCategoryIdsForRerun(cfg.CategoryIds, cfg.CategoryId);
-        if (cfg.CategoryIds.Count == 0)
-            throw new InvalidOperationException("任务缺少账号分类，无法重新运行");
-
-        cfg.CategoryId = cfg.CategoryIds[0];
-        cfg.CategoryNames = NormalizeCategoryNamesForRerun(cfg.CategoryNames, cfg.CategoryName);
-        cfg.CategoryName = cfg.CategoryNames.FirstOrDefault() ?? cfg.CategoryName;
-
-        cfg.Targets = (cfg.Targets ?? new List<string>())
-            .Select(x => (x ?? string.Empty).Trim())
-            .Where(x => x.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        cfg.Dictionary = (cfg.Dictionary ?? new List<string>())
-            .Select(x => (x ?? string.Empty).Trim())
-            .Where(x => x.Length > 0)
-            .ToList();
-
-        if (cfg.Targets.Count == 0)
-            throw new InvalidOperationException("任务缺少目标群组/频道，无法重新运行");
-
-        if (cfg.Dictionary.Count == 0)
-            throw new InvalidOperationException("任务缺少词典消息，无法重新运行");
-
-        if (cfg.DelayMinMs < 0) cfg.DelayMinMs = 0;
-        if (cfg.DelayMaxMs < 0) cfg.DelayMaxMs = 0;
-        if (cfg.DelayMinMs > 600000) cfg.DelayMinMs = 600000;
-        if (cfg.DelayMaxMs > 600000) cfg.DelayMaxMs = 600000;
-        if (cfg.DelayMaxMs < cfg.DelayMinMs) cfg.DelayMaxMs = cfg.DelayMinMs;
-        if (cfg.MaxMessages < 0) cfg.MaxMessages = 0;
-
-        cfg.AccountMode = NormalizeModeValue(cfg.AccountMode);
-        cfg.TargetMode = NormalizeModeValue(cfg.TargetMode);
-        cfg.MessageMode = NormalizeModeValue(cfg.MessageMode);
-
-        cfg.Canceled = false;
-        cfg.Error = null;
-        cfg.RecentFailures = new List<UserChatActiveTaskRuntimeFailure>();
-
-        return cfg;
+            TaskId = task.Id,
+            TaskType = (task.TaskType ?? string.Empty).Trim(),
+            Status = GetDisplayStatus(task),
+            Total = Math.Max(0, task.Total),
+            Completed = Math.Max(0, task.Completed),
+            Failed = Math.Max(0, task.Failed),
+            Config = NormalizeNullableText(task.Config)
+        };
     }
 
-    private static List<int> NormalizeCategoryIdsForRerun(IEnumerable<int>? values, int fallback)
+    private static BatchTask CreateBatchTaskFromRequest(ModuleTaskCreateRequest request)
     {
-        var ids = (values ?? Array.Empty<int>())
-            .Where(x => x > 0)
-            .Distinct()
-            .ToList();
-
-        if (ids.Count == 0 && fallback > 0)
-            ids.Add(fallback);
-
-        return ids;
-    }
-
-    private static List<string> NormalizeCategoryNamesForRerun(IEnumerable<string>? values, string? fallback)
-    {
-        var names = (values ?? Array.Empty<string>())
-            .Select(x => (x ?? string.Empty).Trim())
-            .Where(x => x.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var fallbackName = (fallback ?? string.Empty).Trim();
-        if (names.Count == 0 && fallbackName.Length > 0)
-            names.Add(fallbackName);
-
-        return names;
-    }
-
-    private static string NormalizeModeValue(string? mode)
-    {
-        return string.Equals((mode ?? string.Empty).Trim(), UserChatActiveTaskModes.Queue, StringComparison.OrdinalIgnoreCase)
-            ? UserChatActiveTaskModes.Queue
-            : UserChatActiveTaskModes.Random;
+        var normalized = NormalizeCreateRequest(request);
+        return new BatchTask
+        {
+            TaskType = normalized.TaskType,
+            Total = normalized.Total,
+            Completed = 0,
+            Failed = 0,
+            Config = normalized.Config
+        };
     }
 }
 
