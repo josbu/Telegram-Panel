@@ -16,6 +16,7 @@ using TelegramPanel.Web.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.FileProviders;
 using System.Diagnostics;
 
 // 诊断：对某个目录下的 *.json/*.session 做一次“可转换/可校验”检查（不写数据库）
@@ -726,6 +727,16 @@ if (hasHttpsEndpoint)
 
 // 静态文件（包括 MudBlazor 等 NuGet 包的静态 Web 资源）
 app.UseStaticFiles();
+if (Directory.Exists("/data"))
+{
+    var uploadsRoot = "/data/uploads";
+    Directory.CreateDirectory(uploadsRoot);
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(uploadsRoot),
+        RequestPath = "/uploads"
+    });
+}
 
 app.UseAntiforgery();
 

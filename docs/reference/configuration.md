@@ -15,6 +15,7 @@
 - `/data/sessions/`：账号 session 文件
 - `/data/appsettings.local.json`：UI 保存后的本地覆盖配置
 - `/data/admin_auth.json`：后台登录账号/密码（首次会用初始默认值生成）
+- `/data/uploads/`：图片资产（数据字典图片、头像素材等）
 
 ## 后台任务（刷新页面不影响）
 

@@ -61,6 +61,7 @@ docker compose up -d
 - Sessions：`./docker-data/sessions/`
 - 系统设置本地覆盖：`./docker-data/appsettings.local.json`
 - 后台登录凭据文件：`./docker-data/admin_auth.json`
+- 图片资产：`./docker-data/uploads/`
 
 更多说明见：[配置与数据目录](../reference/configuration.md)。
 

@@ -50,7 +50,7 @@ public sealed class ImageAssetStorageService
 
         var extension = ".jpg";
         var relativeDir = Path.Combine("uploads", scope).Replace('\\', '/');
-        var root = GetWebRootPath();
+        var root = GetStorageRootPath();
         var fullDir = Path.Combine(root, "uploads", scope.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(fullDir);
 
@@ -84,7 +84,7 @@ public sealed class ImageAssetStorageService
     public Task<Stream> OpenReadAsync(string assetPath, CancellationToken cancellationToken = default)
     {
         assetPath = NormalizeAssetPath(assetPath);
-        var fullPath = Path.Combine(GetWebRootPath(), assetPath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = Path.Combine(GetStorageRootPath(), assetPath.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(fullPath))
             throw new FileNotFoundException("图片资产不存在", fullPath);
 
@@ -98,7 +98,7 @@ public sealed class ImageAssetStorageService
         if (assetPath.Length == 0)
             return Task.CompletedTask;
 
-        var fullPath = Path.Combine(GetWebRootPath(), assetPath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = Path.Combine(GetStorageRootPath(), assetPath.Replace('/', Path.DirectorySeparatorChar));
         try
         {
             if (File.Exists(fullPath))
@@ -118,7 +118,7 @@ public sealed class ImageAssetStorageService
         if (scope.Length == 0)
             return Task.CompletedTask;
 
-        var fullDir = Path.Combine(GetWebRootPath(), "uploads", scope.Replace('/', Path.DirectorySeparatorChar));
+        var fullDir = Path.Combine(GetStorageRootPath(), "uploads", scope.Replace('/', Path.DirectorySeparatorChar));
         try
         {
             if (Directory.Exists(fullDir))
@@ -132,8 +132,14 @@ public sealed class ImageAssetStorageService
         return Task.CompletedTask;
     }
 
-    private string GetWebRootPath()
+    private string GetStorageRootPath()
     {
+        if (Directory.Exists("/data"))
+        {
+            Directory.CreateDirectory("/data/uploads");
+            return "/data";
+        }
+
         var path = _environment.WebRootPath;
         if (string.IsNullOrWhiteSpace(path))
             path = Path.Combine(AppContext.BaseDirectory, "wwwroot");
