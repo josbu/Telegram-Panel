@@ -128,6 +128,9 @@
                 </MudItem>
             </MudGrid>
 
+            <MudSwitch T="bool" @bind-Value="verificationTimeoutAsFailure" @bind-Value:after="OnInputsChanged"
+                       Label="验证超时计入失败" Color="Color.Primary" />
+
             @if (IsCustomAiModelSelected)
             {
                 <MudTextField @bind-Value="customAiModel" @bind-Value:after="OnInputsChanged"
@@ -221,6 +224,7 @@
     private int maxMessages;
     private bool enableAiVerification;
     private int verificationTimeoutSeconds = 15;
+    private bool verificationTimeoutAsFailure;
     private string verificationMatchMode = UserChatActiveAiVerificationMatchModes.MentionOrReply;
     private string verificationKeywordsText = string.Empty;
     private string verificationRegexText = string.Empty;
@@ -296,6 +300,7 @@
             messageMode = NormalizeMode(cfg.MessageMode);
             enableAiVerification = cfg.EnableAiVerification;
             verificationTimeoutSeconds = cfg.VerificationTimeoutSeconds < 3 ? 15 : cfg.VerificationTimeoutSeconds;
+            verificationTimeoutAsFailure = cfg.VerificationTimeoutAsFailure;
             initialAiModel = AiOpenAiSettingsSnapshot.NormalizeModel(cfg.AiModel);
             verificationMatchMode = UserChatActiveAiVerificationMatchModes.Normalize(cfg.VerificationMatchMode);
             verificationKeywordsText = string.Join(Environment.NewLine, cfg.VerificationKeywords ?? new List<string>());
@@ -511,6 +516,7 @@
             EnableAiVerification = enableAiVerification,
             AiModel = resolvedAiModel,
             VerificationTimeoutSeconds = enableAiVerification ? verificationTimeoutSeconds : 15,
+            VerificationTimeoutAsFailure = enableAiVerification && verificationTimeoutAsFailure,
             VerificationMatchMode = normalizedMatchMode,
             VerificationKeywords = verificationKeywords,
             VerificationRegexes = verificationRegexes,

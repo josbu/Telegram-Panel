@@ -779,6 +779,9 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
 
             if (!verification.Success)
             {
+                if (!config.VerificationTimeoutAsFailure && IsVerificationTimeout(verification.Error))
+                    return;
+
                 verificationFailures.Enqueue(new VerificationFailure(
                     account.Id,
                     accountDisplayName,
@@ -799,11 +802,14 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         }
         catch (OperationCanceledException)
         {
-            verificationFailures.Enqueue(new VerificationFailure(
-                account.Id,
-                accountDisplayName,
-                rawTarget,
-                "验证处理超时"));
+            if (config.VerificationTimeoutAsFailure)
+            {
+                verificationFailures.Enqueue(new VerificationFailure(
+                    account.Id,
+                    accountDisplayName,
+                    rawTarget,
+                    "验证处理超时"));
+            }
         }
         catch (Exception ex)
         {
@@ -826,6 +832,15 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         string AccountDisplayName,
         string RawTarget,
         string Reason);
+
+    private static bool IsVerificationTimeout(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+            return false;
+
+        return error.Contains("等待验证消息超时", StringComparison.OrdinalIgnoreCase)
+               || error.Contains("验证处理超时", StringComparison.OrdinalIgnoreCase);
+    }
 
     private sealed class AccountSlot
     {
