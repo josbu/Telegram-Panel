@@ -30,6 +30,7 @@ public class Account
     /// </summary>
     public string? Nickname { get; set; }
     public string? Username { get; set; }
+    public string? Remark { get; set; }
     public string SessionPath { get; set; } = null!;
     public int ApiId { get; set; }
     public string ApiHash { get; set; } = null!;
