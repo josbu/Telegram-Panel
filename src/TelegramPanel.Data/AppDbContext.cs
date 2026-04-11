@@ -43,6 +43,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.ApiHash).IsRequired().HasMaxLength(100);
             entity.Property(e => e.Username).HasMaxLength(100);
             entity.Property(e => e.Nickname).HasMaxLength(100);
+            entity.Property(e => e.Remark).HasMaxLength(500);
 
             entity.Property(e => e.TelegramStatusSummary).HasMaxLength(200);
             entity.Property(e => e.TelegramStatusDetails).HasMaxLength(2000);

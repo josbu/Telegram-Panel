@@ -1151,6 +1151,7 @@ public class AccountTelegramToolsService
         Func<TelegramAccountMessageUpdate, bool>? messageFilter = null,
         IReadOnlyCollection<string>? allowedSenderUsernames = null,
         bool restrictToAllowedUsernames = false,
+        bool stopOnUnmatchedMention = false,
         CancellationToken cancellationToken = default)
     {
         if (timeoutSeconds < 3)
@@ -1164,13 +1165,29 @@ public class AccountTelegramToolsService
             var waitStartedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
             var update = await _updateHub.WaitForAsync(
                 accountId,
-                x => IsCandidateVerificationMessage(x, target, currentUsername, sentMessageId, messageFilter, allowedSenderUsernames, restrictToAllowedUsernames),
+                x => IsCandidateVerificationMessage(
+                    x,
+                    target,
+                    currentUsername,
+                    sentMessageId,
+                    messageFilter,
+                    allowedSenderUsernames,
+                    restrictToAllowedUsernames,
+                    stopOnUnmatchedMention),
                 waitStartedAt,
                 TimeSpan.FromSeconds(timeoutSeconds),
                 cancellationToken);
 
             if (update == null)
                 return (false, $"等待验证消息超时（{timeoutSeconds} 秒）", null);
+
+            if (messageFilter != null
+                && stopOnUnmatchedMention
+                && !messageFilter(update)
+                && IsMentionOrReply(update, currentUsername, sentMessageId))
+            {
+                return (false, "验证消息未命中关键词/正则，已跳过", null);
+            }
 
             var candidate = await BuildVerificationCandidateAsync(
                 client,
@@ -1280,7 +1297,8 @@ public class AccountTelegramToolsService
         int sentMessageId,
         Func<TelegramAccountMessageUpdate, bool>? messageFilter,
         IReadOnlyCollection<string>? allowedSenderUsernames,
-        bool restrictToAllowedUsernames)
+        bool restrictToAllowedUsernames,
+        bool stopOnUnmatchedMention)
     {
         if (!IsSamePeer(target.Peer, update.Message.peer_id))
             return false;
@@ -1297,14 +1315,30 @@ public class AccountTelegramToolsService
         }
 
         if (messageFilter != null)
-            return messageFilter(update);
+        {
+            if (messageFilter(update))
+                return true;
 
-        var mentionsAccount = ContainsUsernameMention(update.Message.message, currentUsername);
-        var replyToSent = update.ReplyToMessageId == sentMessageId;
-        if (!mentionsAccount && !replyToSent)
+            if (stopOnUnmatchedMention && IsMentionOrReply(update, currentUsername, sentMessageId))
+                return true;
+
+            return false;
+        }
+
+        if (!IsMentionOrReply(update, currentUsername, sentMessageId))
             return false;
 
         return LooksLikeVerificationChallenge(update);
+    }
+
+    private static bool IsMentionOrReply(
+        TelegramAccountMessageUpdate update,
+        string? currentUsername,
+        int sentMessageId)
+    {
+        var mentionsAccount = ContainsUsernameMention(update.Message.message, currentUsername);
+        var replyToSent = update.ReplyToMessageId == sentMessageId;
+        return mentionsAccount || replyToSent;
     }
 
     private static bool IsSenderInAllowedUsernames(
@@ -1314,14 +1348,114 @@ public class AccountTelegramToolsService
         if (allowedUsernames == null || allowedUsernames.Count == 0)
             return false;
 
-        var username = (update.SenderUsername ?? string.Empty).Trim().TrimStart('@');
-        if (username.Length == 0)
-            return false;
+        var candidates = new[]
+        {
+            update.SenderUsername,
+            update.SenderChatUsername,
+            update.SenderPostAuthor
+        };
+
+        foreach (var candidate in candidates)
+        {
+            var normalized = (candidate ?? string.Empty).Trim().TrimStart('@');
+            if (normalized.Length == 0)
+                continue;
+
+            foreach (var allowed in allowedUsernames)
+            {
+                if (string.IsNullOrWhiteSpace(allowed))
+                    continue;
+
+                var normalizedAllowed = allowed.Trim().TrimStart('@');
+                if (normalizedAllowed.Length == 0)
+                    continue;
+
+                if (string.Equals(normalizedAllowed, normalized, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
 
         foreach (var allowed in allowedUsernames)
         {
-            if (string.Equals(allowed, username, StringComparison.OrdinalIgnoreCase))
+            if (!TryParseAllowedSenderId(allowed, out var id, out var kind))
+                continue;
+
+            if (kind == AllowedSenderIdKind.User)
+            {
+                if (update.SenderUserId.HasValue && update.SenderUserId.Value == id)
+                    return true;
+            }
+            else if (kind == AllowedSenderIdKind.Chat)
+            {
+                if (update.SenderChatId.HasValue && update.SenderChatId.Value == id)
+                    return true;
+            }
+            else
+            {
+                if ((update.SenderUserId.HasValue && update.SenderUserId.Value == id)
+                    || (update.SenderChatId.HasValue && update.SenderChatId.Value == id))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private enum AllowedSenderIdKind
+    {
+        Any = 0,
+        User = 1,
+        Chat = 2
+    }
+
+    private static bool TryParseAllowedSenderId(
+        string? raw,
+        out long id,
+        out AllowedSenderIdKind kind)
+    {
+        id = 0;
+        kind = AllowedSenderIdKind.Any;
+
+        var value = (raw ?? string.Empty).Trim();
+        if (value.Length == 0)
+            return false;
+
+        if (value.StartsWith("user:", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = AllowedSenderIdKind.User;
+            value = value[5..].Trim();
+        }
+        else if (value.StartsWith("chat:", StringComparison.OrdinalIgnoreCase)
+                 || value.StartsWith("channel:", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = AllowedSenderIdKind.Chat;
+            value = value.Contains(':')
+                ? value[(value.IndexOf(':') + 1)..].Trim()
+                : string.Empty;
+        }
+        else if (value.StartsWith("id:", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = AllowedSenderIdKind.Any;
+            value = value[3..].Trim();
+        }
+
+        if (value.StartsWith("-100", StringComparison.Ordinal) && value.Length > 4)
+        {
+            if (long.TryParse(value[4..], out var parsedChatId))
+            {
+                id = parsedChatId;
+                if (kind == AllowedSenderIdKind.Any)
+                    kind = AllowedSenderIdKind.Chat;
                 return true;
+            }
+        }
+
+        if (long.TryParse(value, out var parsed))
+        {
+            id = parsed;
+            return true;
         }
 
         return false;

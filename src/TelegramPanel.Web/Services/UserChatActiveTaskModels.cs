@@ -73,6 +73,9 @@ public sealed class UserChatActiveTaskConfig
     [JsonPropertyName("verification_timeout_seconds")]
     public int VerificationTimeoutSeconds { get; set; } = 15;
 
+    [JsonPropertyName("verification_timeout_as_failure")]
+    public bool VerificationTimeoutAsFailure { get; set; }
+
     [JsonPropertyName("verification_match_mode")]
     public string VerificationMatchMode { get; set; } = UserChatActiveAiVerificationMatchModes.MentionOrReply;
 

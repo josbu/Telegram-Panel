@@ -37,14 +37,16 @@ public class AccountRepository : Repository<Account>, IAccountRepository
                     a.UserId == uid
                     || EF.Functions.Like(a.Phone, phoneLike)
                     || (a.Nickname != null && EF.Functions.Like(a.Nickname, like))
-                    || (a.Username != null && EF.Functions.Like(a.Username, like)));
+                    || (a.Username != null && EF.Functions.Like(a.Username, like))
+                    || (a.Remark != null && EF.Functions.Like(a.Remark, like)));
             }
             else
             {
                 query = query.Where(a =>
                     EF.Functions.Like(a.Phone, phoneLike)
                     || (a.Nickname != null && EF.Functions.Like(a.Nickname, like))
-                    || (a.Username != null && EF.Functions.Like(a.Username, like)));
+                    || (a.Username != null && EF.Functions.Like(a.Username, like))
+                    || (a.Remark != null && EF.Functions.Like(a.Remark, like)));
             }
         }
 

@@ -1,10 +1,13 @@
 using System.IO.Compression;
+using System.Collections.Concurrent;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Services.Telegram;
 using TelegramPanel.Data.Entities;
+using TL;
+using WTelegram;
 
 namespace TelegramPanel.Web.Services;
 
@@ -51,19 +54,19 @@ public class AccountExportService
                 var safeFolder = BuildSafeFolderName(phone, account.Id);
 
                 _ = zip.CreateEntry($"{safeFolder}/");
+                await using var exportSession = await PrepareIndependentExportSessionAsync(account, cancellationToken);
 
                 try
                 {
-                    var sessionPath = ResolveSessionPath(account);
                     var hasSession = false;
-                    if (!File.Exists(sessionPath))
+                    if (!exportSession.Ok || string.IsNullOrWhiteSpace(exportSession.SessionPath))
                     {
-                        _logger.LogWarning("Session file missing for account {AccountId}: {Path}", account.Id, sessionPath);
-                        await WriteTextEntryAsync(zip, $"{safeFolder}/WARN.txt", $"未找到 session 文件：{sessionPath}");
+                        _logger.LogWarning("Failed to prepare independent export session for account {AccountId}: {Error}", account.Id, exportSession.Error);
+                        await WriteTextEntryAsync(zip, $"{safeFolder}/WARN.txt", $"无法生成独立 session：{exportSession.Error}");
                     }
                     else
                     {
-                        await CopySessionWithRetryAsync(zip, safeFolder, sessionPath, account.Id, cancellationToken);
+                        await CopySessionWithRetryAsync(zip, safeFolder, exportSession.SessionPath, account.Id, cancellationToken, releaseClientOnRetry: false);
                         hasSession = true;
                     }
 
@@ -81,7 +84,7 @@ public class AccountExportService
                         }
                         else
                         {
-                            var tdataResult = await TryAddTdataPackageAsync(zip, safeFolder, account, sessionPath, cancellationToken);
+                            var tdataResult = await TryAddTdataPackageAsync(zip, safeFolder, account, exportSession.SessionPath!, cancellationToken, releaseClientOnRetry: false);
                             if (!tdataResult.Ok)
                                 await WriteTextEntryAsync(zip, $"{safeFolder}/WARN_TDATA.txt", $"tdata 生成失败：{tdataResult.Error}");
                         }
@@ -108,6 +111,7 @@ public class AccountExportService
         await writer.WriteLineAsync($"导出时间(UTC)：{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
         await writer.WriteLineAsync($"导出格式：{(format == AccountExportFormat.Tdata ? "tdata（包含 tdata + .json + .session）" : "telethon（.json + .session）")}");
         await writer.WriteLineAsync();
+        await writer.WriteLineAsync("默认行为：导出前会自动生成一份独立新 session，避免与面板当前在线 session 发生 AUTH_KEY_DUPLICATED 冲突。");
         await writer.WriteLineAsync("通用结构：每个账号一个子文件夹，至少包含 .json + .session；如保存了二级密码，则额外包含 2fa.txt。");
         if (format == AccountExportFormat.Tdata)
             await writer.WriteLineAsync("tdata 结构：每个账号目录下额外包含 tdata/ 子目录（key_datas / D877F783D5D3EF8C*）。");
@@ -128,6 +132,7 @@ public class AccountExportService
             first_name = account.Nickname,
             api_id = account.ApiId,
             api_hash = account.ApiHash,
+            session_mode = "independent",
             exported_at_utc = DateTime.UtcNow
         }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
 
@@ -145,7 +150,8 @@ public class AccountExportService
         string safeFolder,
         Account account,
         string sourceSessionPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool releaseClientOnRetry = true)
     {
         string? tempSessionPath = null;
         string? tempTdataDir = null;
@@ -163,7 +169,8 @@ public class AccountExportService
                 sourceSessionPath: sourceSessionPath,
                 targetSessionPath: tempSessionPath,
                 accountId: account.Id,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken,
+                releaseClientOnRetry: releaseClientOnRetry);
 
             var telethonResult = SessionDataConverter.TryCreateTelethonStringSessionFromWTelegramSessionFile(
                 sessionPath: tempSessionPath,
@@ -225,7 +232,8 @@ public class AccountExportService
         string sourceSessionPath,
         string targetSessionPath,
         int accountId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool releaseClientOnRetry = true)
     {
         const int maxAttempts = 3;
         Directory.CreateDirectory(Path.GetDirectoryName(targetSessionPath) ?? Path.GetTempPath());
@@ -244,13 +252,16 @@ public class AccountExportService
             {
                 _logger.LogWarning(ex, "Session file is locked while preparing tdata export (attempt {Attempt}/{Max}) for account {AccountId}: {Path}",
                     attempt, maxAttempts, accountId, sourceSessionPath);
-                try
+                if (releaseClientOnRetry)
                 {
-                    await _clientPool.RemoveClientAsync(accountId);
-                }
-                catch (Exception removeEx)
-                {
-                    _logger.LogDebug(removeEx, "Failed to remove client for account {AccountId} while preparing tdata export", accountId);
+                    try
+                    {
+                        await _clientPool.RemoveClientAsync(accountId);
+                    }
+                    catch (Exception removeEx)
+                    {
+                        _logger.LogDebug(removeEx, "Failed to remove client for account {AccountId} while preparing tdata export", accountId);
+                    }
                 }
 
                 await Task.Delay(200, cancellationToken);
@@ -296,7 +307,8 @@ public class AccountExportService
         string safeFolder,
         string sessionPath,
         int accountId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool releaseClientOnRetry = true)
     {
         const int maxAttempts = 3;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
@@ -314,13 +326,16 @@ public class AccountExportService
             {
                 _logger.LogWarning(ex, "Session file is locked (attempt {Attempt}/{Max}) for account {AccountId}: {Path}", attempt, maxAttempts, accountId, sessionPath);
 
-                try
+                if (releaseClientOnRetry)
                 {
-                    await _clientPool.RemoveClientAsync(accountId);
-                }
-                catch (Exception removeEx)
-                {
-                    _logger.LogDebug(removeEx, "Failed to remove client for account {AccountId} while exporting", accountId);
+                    try
+                    {
+                        await _clientPool.RemoveClientAsync(accountId);
+                    }
+                    catch (Exception removeEx)
+                    {
+                        _logger.LogDebug(removeEx, "Failed to remove client for account {AccountId} while exporting", accountId);
+                    }
                 }
 
                 await Task.Delay(200, cancellationToken);
@@ -348,6 +363,289 @@ public class AccountExportService
             return combined;
 
         return Path.GetFullPath(sessionPath);
+    }
+
+    private async Task<PreparedExportSession> PrepareIndependentExportSessionAsync(Account account, CancellationToken cancellationToken)
+    {
+        if (account.ApiId <= 0)
+            return PreparedExportSession.Fail("账号缺少 ApiId，无法生成独立 session");
+
+        var apiHash = (account.ApiHash ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(apiHash))
+            return PreparedExportSession.Fail("账号缺少 ApiHash，无法生成独立 session");
+
+        var sourceSessionPath = ResolveSessionPath(account);
+        if (!File.Exists(sourceSessionPath))
+            return PreparedExportSession.Fail($"源 session 文件不存在：{sourceSessionPath}");
+
+        var tempSessionPath = Path.Combine(Path.GetTempPath(), $"telegram-panel-export-independent-{Guid.NewGuid():N}.session");
+        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linkedCts.CancelAfter(TimeSpan.FromSeconds(60));
+        var acceptTasks = new ConcurrentBag<Task>();
+        Exception? acceptError = null;
+        var keepTempSession = false;
+        var twoFactorPassword = NormalizeOptionalSecret(account.TwoFactorPassword);
+        using var acceptLock = new SemaphoreSlim(1, 1);
+
+        try
+        {
+            var sourceClient = await _clientPool.GetOrCreateClientAsync(
+                account.Id,
+                account.ApiId,
+                apiHash,
+                sourceSessionPath,
+                sessionKey: apiHash,
+                phoneNumber: account.Phone,
+                userId: account.UserId > 0 ? account.UserId : null);
+
+            var sourceUser = await EnsureSourceClientLoggedInAsync(sourceClient, account, cancellationToken);
+            if (sourceUser == null)
+                return PreparedExportSession.Fail("当前账号 session 无法恢复登录状态，无法生成独立 session");
+
+            string Config(string what)
+            {
+                var normalizedPhone = NormalizePhone(account.Phone);
+                return what switch
+                {
+                    "api_id" => account.ApiId.ToString(),
+                    "api_hash" => apiHash,
+                    "session_pathname" => tempSessionPath,
+                    "session_key" => apiHash,
+                    "phone_number" => string.IsNullOrWhiteSpace(normalizedPhone) ? null! : normalizedPhone,
+                    "password" => string.IsNullOrWhiteSpace(twoFactorPassword) ? null! : twoFactorPassword,
+                    _ => null!
+                };
+            }
+
+            await using var builder = new Client(Config);
+
+            var user = await builder.LoginWithQRCode(
+                qrDisplay: loginUrl =>
+                {
+                    var acceptTask = AcceptLoginTokenAsync(
+                        sourceClient,
+                        loginUrl,
+                        linkedCts.Token,
+                        acceptLock,
+                        ex =>
+                        {
+                            acceptError = ex;
+                            try { linkedCts.Cancel(); } catch { }
+                        });
+
+                    acceptTasks.Add(acceptTask);
+                },
+                except_ids: Array.Empty<long>(),
+                logoutFirst: false,
+                ct: linkedCts.Token);
+
+            await AwaitAcceptTasksAsync(acceptTasks);
+
+            if (user == null)
+                return PreparedExportSession.Fail("Telegram 未返回新 session 的登录结果");
+
+            if (account.UserId > 0 && user.id != account.UserId)
+                return PreparedExportSession.Fail($"新 session 登录到了错误账号（期望 {account.UserId}，实际 {user.id}）");
+
+            if (sourceUser.id != 0 && user.id != sourceUser.id)
+                return PreparedExportSession.Fail($"新 session 登录到了错误账号（期望 {sourceUser.id}，实际 {user.id}）");
+
+            _logger.LogInformation(
+                "Generated independent export session for account {AccountId}, userId={UserId}",
+                account.Id,
+                user.id);
+
+            keepTempSession = true;
+            return PreparedExportSession.Success(tempSessionPath);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return PreparedExportSession.Fail(acceptError?.Message ?? "生成独立 session 超时");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate independent export session for account {AccountId}", account.Id);
+            return PreparedExportSession.Fail(TranslateIndependentExportError(ex, string.IsNullOrWhiteSpace(twoFactorPassword)));
+        }
+        finally
+        {
+            linkedCts.Dispose();
+            if (!keepTempSession)
+                TryDeleteFile(tempSessionPath);
+        }
+    }
+
+    private static string TranslateIndependentExportError(Exception ex, bool passwordMissing)
+    {
+        var message = (ex.Message ?? string.Empty).Trim();
+        if (message.Contains("config value for password", StringComparison.OrdinalIgnoreCase))
+        {
+            return passwordMissing
+                ? "该账号启用了二级密码，但系统未保存二级密码，无法生成独立 session。请先在【账号详情】中保存二级密码后再导出。"
+                : "该账号需要二级密码才能完成独立 session 登录，但当前保存的二级密码未生效。请到【账号详情】确认二级密码后重试。";
+        }
+
+        return string.IsNullOrWhiteSpace(message) ? ex.GetType().Name : message;
+    }
+
+    private async Task<User?> EnsureSourceClientLoggedInAsync(Client sourceClient, Account account, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (sourceClient.User != null)
+            return sourceClient.User;
+
+        try
+        {
+            await sourceClient.ConnectAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to connect source client while preparing independent export session for account {AccountId}", account.Id);
+            throw;
+        }
+
+        if (sourceClient.User != null)
+            return sourceClient.User;
+
+        if (sourceClient.UserId == 0 && account.UserId <= 0)
+            return null;
+
+        try
+        {
+            return await sourceClient.LoginUserIfNeeded(reloginOnFailedResume: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to restore source session login state for account {AccountId}", account.Id);
+            return null;
+        }
+    }
+
+    private async Task AcceptLoginTokenAsync(
+        Client sourceClient,
+        string loginUrl,
+        CancellationToken cancellationToken,
+        SemaphoreSlim acceptLock,
+        Action<Exception> onError)
+    {
+        try
+        {
+            var token = ParseLoginToken(loginUrl);
+            await acceptLock.WaitAsync(cancellationToken);
+            try
+            {
+                await sourceClient.Auth_AcceptLoginToken(token);
+            }
+            finally
+            {
+                acceptLock.Release();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // ignore
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to accept QR login token while generating independent export session");
+            onError(ex);
+        }
+    }
+
+    private static async Task AwaitAcceptTasksAsync(ConcurrentBag<Task> acceptTasks)
+    {
+        var tasks = acceptTasks.ToArray();
+        if (tasks.Length == 0)
+            return;
+
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch
+        {
+            // 具体异常已在各自任务中记录，这里避免覆盖主流程异常
+        }
+    }
+
+    private static byte[] ParseLoginToken(string loginUrl)
+    {
+        if (string.IsNullOrWhiteSpace(loginUrl))
+            throw new InvalidOperationException("QR 登录链接为空");
+
+        var tokenMarker = "token=";
+        var idx = loginUrl.IndexOf(tokenMarker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            throw new InvalidOperationException("QR 登录链接中缺少 token 参数");
+
+        var tokenEncoded = loginUrl[(idx + tokenMarker.Length)..];
+        var ampIdx = tokenEncoded.IndexOf('&');
+        if (ampIdx >= 0)
+            tokenEncoded = tokenEncoded[..ampIdx];
+
+        tokenEncoded = Uri.UnescapeDataString(tokenEncoded);
+        if (string.IsNullOrWhiteSpace(tokenEncoded))
+            throw new InvalidOperationException("QR 登录 token 为空");
+
+        return DecodeBase64Url(tokenEncoded);
+    }
+
+    private static byte[] DecodeBase64Url(string input)
+    {
+        var s = input.Replace('-', '+').Replace('_', '/');
+        var mod = s.Length % 4;
+        if (mod == 2) s += "==";
+        else if (mod == 3) s += "=";
+        else if (mod == 1) throw new FormatException("base64url token 长度非法");
+
+        return Convert.FromBase64String(s);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private static string? NormalizeOptionalSecret(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return value.Trim();
+    }
+
+    private sealed class PreparedExportSession : IAsyncDisposable
+    {
+        private PreparedExportSession(string? sessionPath, string? error, bool isTemporary)
+        {
+            SessionPath = sessionPath;
+            Error = error;
+            IsTemporary = isTemporary;
+        }
+
+        public string? SessionPath { get; }
+        public string? Error { get; }
+        public bool IsTemporary { get; }
+        public bool Ok => string.IsNullOrWhiteSpace(Error) && !string.IsNullOrWhiteSpace(SessionPath);
+
+        public static PreparedExportSession Success(string sessionPath) => new(sessionPath, null, true);
+        public static PreparedExportSession Fail(string error) => new(null, error, false);
+
+        public ValueTask DisposeAsync()
+        {
+            if (IsTemporary && !string.IsNullOrWhiteSpace(SessionPath))
+                TryDeleteFile(SessionPath);
+            return ValueTask.CompletedTask;
+        }
     }
 
     private static string BuildSafeFolderName(string phone, int accountId)

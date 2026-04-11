@@ -111,6 +111,7 @@
                 <MudTh>手机号</MudTh>
                 <MudTh>昵称</MudTh>
                 <MudTh>用户名</MudTh>
+                <MudTh>备注</MudTh>
                 <MudTh>用户ID</MudTh>
                 <MudTh>分类</MudTh>
                 <MudTh>频道/群组</MudTh>
@@ -124,6 +125,20 @@
                 <MudTd DataLabel="手机号">@context.DisplayPhone</MudTd>
                 <MudTd DataLabel="昵称">@(context.Nickname ?? "-")</MudTd>
                 <MudTd DataLabel="用户名">@(context.Username ?? "-")</MudTd>
+                <MudTd DataLabel="备注">
+                    @if (string.IsNullOrWhiteSpace(context.Remark))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Default">-</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2"
+                                 title="@context.Remark"
+                                 Style="max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block;">
+                            @context.Remark
+                        </MudText>
+                    }
+                </MudTd>
                 <MudTd DataLabel="用户ID">@context.UserId</MudTd>
                 <MudTd DataLabel="分类">
                     @if (context.Category != null)
