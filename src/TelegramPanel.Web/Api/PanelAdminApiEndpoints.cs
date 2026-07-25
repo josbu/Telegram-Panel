@@ -1634,7 +1634,6 @@ public static class PanelAdminApiEndpoints
         HttpRequest httpRequest,
         AccountImportService importService,
         AccountManagementService accountManagement,
-        ProxyManagementService proxyManagement,
         CancellationToken cancellationToken)
     {
         if (!httpRequest.HasFormContentType)
@@ -1680,9 +1679,9 @@ public static class PanelAdminApiEndpoints
             {
                 return Results.BadRequest(new OperationResultDto(
                     false,
-                    "请先明确选择账号首次连接出口：已有代理、逐账号批量代理、独立 WARP、已配置的全局代理或明确直连"));
+                    "请先明确选择账号首次连接出口：已有代理、逐账号批量代理、自动分配已有 WARP、已配置的全局代理或明确直连"));
             }
-            await proxyManagement.ValidateBindingInputAsync(proxyBinding, cancellationToken);
+            await importService.ValidateImportProxyBindingAsync(proxyBinding, cancellationToken);
         }
 
         await using var stream = file.OpenReadStream();
@@ -1708,7 +1707,6 @@ public static class PanelAdminApiEndpoints
         HttpRequest httpRequest,
         AccountImportService importService,
         AccountManagementService accountManagement,
-        ProxyManagementService proxyManagement,
         IConfiguration configuration,
         CancellationToken cancellationToken)
     {
@@ -1731,19 +1729,9 @@ public static class PanelAdminApiEndpoints
         {
             return Results.BadRequest(new OperationResultDto(
                 false,
-                "请先明确选择账号首次连接出口：已有代理、独立 WARP、已配置的全局代理或明确直连；逐账号批量代理仅支持 Zip 导入"));
+                "请先明确选择账号首次连接出口：已有代理、自动分配已有 WARP、已配置的全局代理或明确直连；逐账号批量代理仅支持 Zip 导入"));
         }
-        if (string.Equals(
-                proxyBinding.Strategy,
-                "warp_per_account",
-                StringComparison.OrdinalIgnoreCase)
-            && files.Count > AccountImportService.MaxPerAccountWarpBatchSize)
-        {
-            return Results.BadRequest(new OperationResultDto(
-                false,
-                $"逐账号 WARP 单次最多处理 {AccountImportService.MaxPerAccountWarpBatchSize} 个账号"));
-        }
-        await proxyManagement.ValidateBindingInputAsync(proxyBinding, cancellationToken);
+        await importService.ValidateImportProxyBindingAsync(proxyBinding, cancellationToken);
         var importFiles = new List<AccountImportFile>();
         foreach (var file in files)
             importFiles.Add(new AccountImportFile(file.FileName, file.OpenReadStream()));
@@ -1770,7 +1758,6 @@ public static class PanelAdminApiEndpoints
         ImportStringSessionRequestDto request,
         AccountImportService importService,
         AccountManagementService accountManagement,
-        ProxyManagementService proxyManagement,
         IConfiguration configuration,
         CancellationToken cancellationToken)
     {
@@ -1786,9 +1773,9 @@ public static class PanelAdminApiEndpoints
         {
             return Results.BadRequest(new OperationResultDto(
                 false,
-                "请先明确选择账号首次连接出口：已有代理、独立 WARP、已配置的全局代理或明确直连；逐账号批量代理仅支持 Zip 导入"));
+                "请先明确选择账号首次连接出口：已有代理、自动分配已有 WARP、已配置的全局代理或明确直连；逐账号批量代理仅支持 Zip 导入"));
         }
-        await proxyManagement.ValidateBindingInputAsync(proxyBinding, cancellationToken);
+        await importService.ValidateImportProxyBindingAsync(proxyBinding, cancellationToken);
 
         var result = await importService.ImportFromStringSessionAsync(
             sessionString,

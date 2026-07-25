@@ -389,7 +389,7 @@ public sealed class ImportProxyFirstConnectionTests
     }
 
     [Fact]
-    public async Task WARP环境不可用时不会开始首次Telegram验证()
+    public async Task 导入旧独立WARP策略会在首次Telegram验证前拒绝且不创建容器记录()
     {
         await using var fixture = await ImportFixture.CreateAsync(OutboundProxyProtocols.Http);
 
@@ -400,6 +400,7 @@ public sealed class ImportProxyFirstConnectionTests
             proxyBinding: new AccountProxyBindingInput("warp_per_account"));
 
         Assert.False(result.Success);
+        Assert.Contains("已停用每账号独立 WARP", result.Error);
         Assert.Equal(0, fixture.Importer.ImportCount);
         Assert.Empty(await fixture.Db.Accounts.AsNoTracking().ToListAsync());
         Assert.Empty(await fixture.Db.OutboundProxies.AsNoTracking()
@@ -513,60 +514,64 @@ public sealed class ImportProxyFirstConnectionTests
     }
 
     [Fact]
-    public async Task Session批量导入在创建WARP前拒绝超过十个账号()
+    public async Task 自动WARP池为空时不会开始首次Telegram验证或回退直连()
     {
         await using var fixture = await ImportFixture.CreateAsync(OutboundProxyProtocols.Http);
-        var files = Enumerable.Range(1, AccountImportService.MaxPerAccountWarpBatchSize + 1)
-            .Select(index => new AccountImportFile(
-                $"{index}.session",
-                new MemoryStream(new byte[] { 1, 2, 3 })))
-            .ToList();
+
+        var result = await fixture.Service.ImportFromStringSessionAsync(
+            "session-data",
+            12345,
+            "0123456789abcdef0123456789abcdef",
+            proxyBinding: new AccountProxyBindingInput("warp_pool"));
+
+        Assert.False(result.Success);
+        Assert.Contains("没有可自动分配的已有 WARP", result.Error);
+        Assert.Equal(0, fixture.Importer.ImportCount);
+        Assert.Empty(await fixture.Db.Accounts.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 自动WARP池复用已有容器并优先分配当前绑定较少的出口()
+    {
+        await using var fixture = await ImportFixture.CreateAsync(OutboundProxyProtocols.Http);
+        var firstWarp = await fixture.AddWarpAsync("WARP 1", 21080);
+        var secondWarp = await fixture.AddWarpAsync("WARP 2", 21081);
+        fixture.Importer.ResultFactory = count => new ImportResult(
+            true,
+            $"86138000000{count}",
+            10000 + count,
+            $"imported-{count}",
+            $"sessions/86138000000{count}.session");
+        var files = new[]
+        {
+            new AccountImportFile("first.session", new MemoryStream(new byte[] { 1 })),
+            new AccountImportFile("second.session", new MemoryStream(new byte[] { 2 }))
+        };
 
         try
         {
-            var error = await Assert.ThrowsAsync<ArgumentException>(() =>
-                fixture.Service.ImportFromSessionFileStreamsAsync(
-                    files,
-                    12345,
-                    "0123456789abcdef0123456789abcdef",
-                    proxyBinding: new AccountProxyBindingInput("warp_per_account")));
+            var results = await fixture.Service.ImportFromSessionFileStreamsAsync(
+                files,
+                12345,
+                "0123456789abcdef0123456789abcdef",
+                proxyBinding: new AccountProxyBindingInput("warp_pool"));
 
-            Assert.Contains("最多处理 10 个账号", error.Message);
-            Assert.Equal(0, fixture.Importer.ImportCount);
+            Assert.All(results, result => Assert.True(result.Success, result.Error));
+            Assert.Equal(new[] { firstWarp.Id, secondWarp.Id },
+                fixture.Importer.SeenProxies.Select(x => x!.ProxyId));
+            Assert.Equal(2, await fixture.Db.OutboundProxies.CountAsync(
+                x => x.Kind == OutboundProxyKinds.Warp));
+            var bindings = await fixture.Db.Accounts.AsNoTracking()
+                .OrderBy(x => x.Id)
+                .Select(x => x.ProxyId)
+                .ToListAsync();
+            Assert.Equal(new int?[] { firstWarp.Id, secondWarp.Id }, bindings);
         }
         finally
         {
             foreach (var file in files)
                 await file.Content.DisposeAsync();
         }
-    }
-
-    [Fact]
-    public async Task Zip批量导入在创建WARP前拒绝超过十个账号()
-    {
-        await using var fixture = await ImportFixture.CreateAsync(OutboundProxyProtocols.Http);
-        await using var zipStream = new MemoryStream();
-        using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
-        {
-            var fileCount = AccountImportService.MaxPerAccountWarpBatchSize + 1;
-            for (var index = 1; index <= fileCount; index++)
-            {
-                var entry = archive.CreateEntry($"{index}/{index}.json");
-                await using var content = entry.Open();
-                await content.WriteAsync(Encoding.UTF8.GetBytes("{}"));
-            }
-        }
-        zipStream.Position = 0;
-
-        var results = await fixture.Service.ImportFromZipStreamAsync(
-            "many-accounts.zip",
-            zipStream,
-            proxyBinding: new AccountProxyBindingInput("warp_per_account"));
-
-        var result = Assert.Single(results);
-        Assert.False(result.Success);
-        Assert.Contains("最多处理 10 个账号", result.Error);
-        Assert.Equal(0, fixture.Importer.ImportCount);
     }
 
     [Fact]
@@ -808,6 +813,32 @@ public sealed class ImportProxyFirstConnectionTests
         public AccountImportService Service { get; }
         public OutboundProxy Proxy { get; }
         public StubClientPool ClientPool { get; }
+
+        public async Task<OutboundProxy> AddWarpAsync(string name, int port)
+        {
+            var proxy = new OutboundProxy
+            {
+                Name = name,
+                Kind = OutboundProxyKinds.Warp,
+                Protocol = OutboundProxyProtocols.Http,
+                Host = "127.0.0.1",
+                Port = port,
+                IsEnabled = true,
+                WarpProfile = new WarpProfile
+                {
+                    ProfileId = Guid.NewGuid().ToString("N"),
+                    ContainerName = $"test-warp-{port}",
+                    ContainerId = Guid.NewGuid().ToString("N"),
+                    VolumeName = $"test-warp-volume-{port}",
+                    HostPort = port,
+                    Status = "active",
+                    DesiredEnabled = true
+                }
+            };
+            Db.OutboundProxies.Add(proxy);
+            await Db.SaveChangesAsync();
+            return proxy;
+        }
 
         public static async Task<ImportFixture> CreateAsync(
             string protocol,

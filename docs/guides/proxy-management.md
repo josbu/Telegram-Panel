@@ -21,7 +21,8 @@ Telegram Panel 按账号管理 Telegram 连接出口。导入、登录，以及�
 - **明确直连**：绕过账号代理和全局代理。
 - **全局代理**：继承 `Telegram:Proxy` 配置。
 - **已有代理**：绑定代理管理中的 HTTP、SOCKS5、MTProxy 或 Resin。
-- **独立 WARP**：为账号创建并绑定受管 WARP 容器。
+- **独立 WARP**：登录或账号管理可按需创建并绑定受管 WARP 容器；账号导入只会自动分配
+  已有 WARP，不会按账号创建新容器。
 
 导入账号、手机号登录和二维码登录都会在第一条 Telegram 请求前要求选择路由。
 选定后，验证码发送、二维码轮询、2FA 验证和 Session 建立会使用同一出口；失败时不会
@@ -88,11 +89,14 @@ TP_WARP_DOCKER_NETWORK=telegram-panel_default
 TP_WARP_PROXY_PROTOCOL=http
 ```
 
-WARP 镜像中的 GOST 端口同时支持 HTTP 和 SOCKS5。默认协议决定登录、导入和批量绑定
-自动创建 WARP 时宿主使用哪种握手；代理管理中的一键创建弹窗可以覆盖单次创建协议。
+WARP 镜像中的 GOST 端口同时支持 HTTP 和 SOCKS5。默认协议决定登录和批量绑定自动创建
+WARP 时宿主使用哪种握手；代理管理中的一键创建弹窗可以覆盖单次创建协议。账号导入
+自动分配已有 WARP 时沿用代理记录自身的协议，不读取该创建默认值。
 
 每个 WARP 都对应一个独立 Docker 容器和数据卷，并持续占用一定的服务器内存与 CPU。
-批量导入使用“每账号独立 WARP”时会按账号数量创建容器，请先评估服务器资源并控制数量。
+账号导入的“自动分配已有 WARP”只复用这些现有容器，并优先选择绑定账号较少的 WARP；
+批量导入不会再按账号数量创建容器。没有健康候选项时导入会停止，需先在本页准备 WARP
+或改选其他出口。
 
 默认 `container` 模式由 Docker 网络按容器名访问，不占用宿主机代理端口。若在其他
 拓扑中把 `Proxy:Warp:ProxyHostMode` 配为 `published`，面板会从

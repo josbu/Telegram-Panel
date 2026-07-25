@@ -26,8 +26,14 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 ### Zip 逐账号批量代理
 
 `POST /api/panel/accounts/import/zip` 使用 `multipart/form-data`。普通导入支持
-`proxyStrategy=direct|global|existing|warp_per_account`；`existing` 还必须提供
+`proxyStrategy=direct|global|existing|warp_pool`；`existing` 还必须提供
 `proxyId`。
+
+`warp_pool` 只自动分配代理管理中已存在、已启用且状态为 `active` 的 WARP，按绑定账号数升序、
+代理 ID 升序选择。它不会创建容器或数据卷，也无需提供 `proxyId`。没有候选项或候选项都在
+维护/被其他首次连接流程占用时，请求会在连接 Telegram 前失败。历史参数
+`warp_per_account` 已从账号导入接口停用并会返回明确错误；手机号和二维码登录接口的策略
+合同不受此次调整影响。
 
 Zip 专属的一对一代理模式使用以下字段：
 
