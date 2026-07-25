@@ -158,7 +158,9 @@ export interface CreateWarpProxyRequest {
 
 export type AccountProxyStrategy = 'direct' | 'global' | 'existing' | 'warp_per_account'
 
-export type ZipImportProxyStrategy = AccountProxyStrategy | 'proxy_per_account'
+export type AccountImportProxyStrategy = Exclude<AccountProxyStrategy, 'warp_per_account'> | 'warp_pool'
+
+export type ZipImportProxyStrategy = AccountImportProxyStrategy | 'proxy_per_account'
 
 export interface AccountProxyBindingRequest {
   strategy: AccountProxyStrategy

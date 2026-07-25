@@ -93,6 +93,16 @@ public sealed class ProxyApiValidationTests
         Assert.Null(PanelAdminApiEndpoints.ParseImportProxyBinding(strategy, "1"));
     }
 
+    [Fact]
+    public void 自动WARP池策略解析为无固定代理引用()
+    {
+        var binding = PanelAdminApiEndpoints.ParseImportProxyBinding("warp_pool", null);
+
+        Assert.NotNull(binding);
+        Assert.Equal("warp_pool", binding!.Strategy);
+        Assert.Null(binding.ProxyId);
+    }
+
     private static async Task AssertBatchMutationsBlockedAsync(WarpProxyFixture fixture)
     {
         var expected = await fixture.ReadSnapshotAsync();

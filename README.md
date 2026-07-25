@@ -81,8 +81,10 @@ Set the automatic-creation default to `http` or `socks5` in `.env`:
 TP_WARP_PROXY_PROTOCOL=http
 ```
 
-Each managed WARP creates one Docker container and one persistent volume. Per-account WARP batch
-imports therefore create one container per account; size the host memory and CPU accordingly.
+Each managed WARP creates one Docker container and one persistent volume. Account imports use the
+existing-WARP pool and distribute accounts toward routes with fewer bindings; they never create a
+new container per account. Phone and QR login, plus account management, can still create a dedicated
+WARP when explicitly requested, so size host memory and CPU for those operations.
 
 Managed WARP health checks run every five minutes by default. Two consecutive failures trigger
 a container restart, egress recheck, and reconnection of bound account clients without any
