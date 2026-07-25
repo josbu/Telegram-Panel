@@ -152,7 +152,8 @@ TP_WARP_SCHEDULED_REFRESH_INTERVAL_MINUTES=720
 
 Compose 会映射为 `Proxy:Warp:Network` 和 `Proxy:Warp:Protocol`。修改后需要使用包含
 `docker-compose.warp.yml` 的命令重新创建容器。代理管理中的一键创建弹窗可以覆盖单次
-创建协议；导入、登录和批量绑定自动创建 WARP 时使用这里的默认值。
+创建协议；登录和批量绑定自动创建 WARP 时使用这里的默认值。账号导入的自动 WARP 池
+不会创建新容器，并沿用已有代理记录自身的协议。
 
 默认 `Proxy:Warp:ProxyHostMode=container` 不发布宿主端口。自定义为 `published` 时，
 `Proxy:Warp:HostPortStart` 默认从 `42080` 起步；已占用或 Docker 绑定时发生冲突的端口会

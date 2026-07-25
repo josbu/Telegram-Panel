@@ -15,13 +15,22 @@ function sourceSection(startMarker, endMarker) {
 
 test('逐账号批量代理仅扩展 Zip 导入策略', () => {
   assert.match(typesSource, /export type AccountProxyStrategy = 'direct' \| 'global' \| 'existing' \| 'warp_per_account'/)
-  assert.match(typesSource, /export type ZipImportProxyStrategy = AccountProxyStrategy \| 'proxy_per_account'/)
+  assert.match(typesSource, /export type AccountImportProxyStrategy = Exclude<AccountProxyStrategy, 'warp_per_account'> \| 'warp_pool'/)
+  assert.match(typesSource, /export type ZipImportProxyStrategy = AccountImportProxyStrategy \| 'proxy_per_account'/)
   assert.doesNotMatch(
     typesSource.match(/export type AccountProxyStrategy = .+/)?.[0] || '',
     /proxy_per_account/,
   )
   assert.match(source, /value="proxy_per_account">批量代理一对一/)
   assert.match(source, /批量代理一对一仅适用于 Zip 导入/)
+})
+
+test('账号导入移除独立 WARP 创建并只自动分配已有 WARP', () => {
+  assert.doesNotMatch(source, /value="warp_per_account"|每账号独立 WARP/)
+  assert.match(source, /value="warp_pool"[^>]*>自动分配已有 WARP/)
+  assert.match(source, /proxy\.kind === 'warp'[\s\S]*proxy\.isEnabled[\s\S]*proxy\.warpRuntimeStatus === 'active'/)
+  assert.match(source, /不会创建新容器/)
+  assert.doesNotMatch(source, /panelApi\.warpStatus\(\)/)
 })
 
 test('有效代理计数忽略空行和注释并保留重复槽位', () => {

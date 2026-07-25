@@ -30,7 +30,7 @@
       >
         <el-radio-button value="existing">已有代理</el-radio-button>
         <el-radio-button value="proxy_per_account">批量代理一对一</el-radio-button>
-        <el-radio-button value="warp_per_account" :disabled="!warpAvailable">每账号独立 WARP</el-radio-button>
+        <el-radio-button value="warp_pool" :disabled="availableWarpPoolCount === 0">自动分配已有 WARP</el-radio-button>
         <el-radio-button value="global">全局设置</el-radio-button>
         <el-radio-button value="direct">直连（确认风险）</el-radio-button>
       </el-radio-group>
@@ -51,16 +51,16 @@
         />
       </el-select>
       <div v-if="!proxyStrategy" class="proxy-route-notice warning">
-        为防止首个 Telegram 请求使用面板直连 IP，请明确选择已有代理或一键 WARP。
+        为防止首个 Telegram 请求使用面板直连 IP，请明确选择已有代理或自动分配已有 WARP。
       </div>
       <div v-else-if="proxyStrategy === 'direct'" class="proxy-route-notice danger">
         已明确选择直连：Telegram 从首次验证开始即可看到面板公网 IP。
       </div>
       <div v-else-if="proxyStrategy === 'global'" class="proxy-route-notice warning">
-        仅在已配置全局代理时可用；未配置会在首次连接前拒绝，请改选已有代理、WARP 或明确直连。
+        仅在已配置全局代理时可用；未配置会在首次连接前拒绝，请改选已有代理、自动分配已有 WARP 或明确直连。
       </div>
-      <div v-else-if="proxyStrategy === 'warp_per_account'" class="proxy-route-notice warning">
-        每个账号都会创建一个独立 Docker 容器和数据卷；批量导入会按账号数量持续占用服务器内存与 CPU。
+      <div v-else-if="proxyStrategy === 'warp_pool'" class="proxy-route-notice warning">
+        将按当前账号绑定数自动选择已有 WARP；不会创建新容器。当前已启用 {{ availableWarpPoolCount }} 个 WARP。
       </div>
       <div v-else-if="proxyStrategy === 'proxy_per_account'" class="proxy-route-notice warning">
         批量代理一对一仅适用于 Zip 导入；Session 文件和 StringSession 导入在此模式下不可用。
@@ -560,13 +560,12 @@ import type {
   AccountCategory,
   AccountListItem,
   AccountOperationItem,
-  AccountProxyStrategy,
+  AccountImportProxyStrategy,
   BatchTask,
   DataDictionary,
   ImportAccountsResponse,
   ImportResult,
   OutboundProxy,
-  WarpRuntimeStatus,
   ZipImportProxyStrategy,
 } from '@/api/types'
 import { formatTime } from '@/utils/format'
@@ -596,7 +595,6 @@ const dictionaries = ref<DataDictionary[]>([])
 const proxies = ref<OutboundProxy[]>([])
 const proxyStrategy = ref<ZipImportProxyStrategy | ''>('')
 const proxyId = ref<number | null>(null)
-const warpStatus = ref<WarpRuntimeStatus | null>(null)
 const tableRef = ref<TableInstance>()
 const batchChatMembershipRef = ref<InstanceType<typeof BatchChatMembershipDialog>>()
 const batchRecoveryEmailRef = ref<InstanceType<typeof BatchRecoveryEmailDialog>>()
@@ -610,18 +608,18 @@ let importOperationToken = 0
 const selectedIds = computed(() => selectedRows.value.map((x) => x.id))
 const busy = computed(() => importingZip.value || importingSessions.value || importingString.value || actionLoading.value)
 const shouldBlockApiImport = computed(() => telegramApiChecked.value && !telegramApiConfigured.value)
-const warpAvailable = computed(() => Boolean(
-  warpStatus.value?.platformSupported
-  && warpStatus.value.enabled
-  && warpStatus.value.dockerAvailable,
-))
+const availableWarpPoolCount = computed(() => proxies.value.filter(
+  (proxy) => proxy.kind === 'warp'
+    && proxy.isEnabled
+    && proxy.warpRuntimeStatus === 'active',
+).length)
 const isPerAccountProxyBatch = computed(() => proxyStrategy.value === 'proxy_per_account')
 const perAccountProxyCount = computed(() => countEffectiveProxyLines(perAccountProxyText.value))
 const perAccountProxyLimitExceeded = computed(() => perAccountProxyCount.value > PER_ACCOUNT_PROXY_LIMIT)
 const proxySelectionInvalid = computed(() =>
   !proxyStrategy.value
   || (proxyStrategy.value === 'existing' && !proxyId.value)
-  || (proxyStrategy.value === 'warp_per_account' && !warpAvailable.value)
+  || (proxyStrategy.value === 'warp_pool' && availableWarpPoolCount.value === 0)
   || (isPerAccountProxyBatch.value
     && (perAccountProxyCount.value === 0 || perAccountProxyLimitExceeded.value)),
 )
@@ -769,14 +767,16 @@ function ensureProxySelected(allowPerAccountBatch = false) {
       ? `逐账号批量代理单次最多 ${PER_ACCOUNT_PROXY_LIMIT} 条`
       : '请填写逐账号批量代理，每行一个代理地址')
   } else {
-    ElMessage.warning(proxyStrategy.value === 'warp_per_account' ? '当前环境无法创建 WARP' : '请选择已有代理')
+    ElMessage.warning(proxyStrategy.value === 'warp_pool'
+      ? '没有可自动分配的已有 WARP，请先在代理管理中准备并启用 WARP'
+      : '请选择已有代理')
   }
   return false
 }
 
 function appendProxyFields(
   form: FormData,
-  strategy: AccountProxyStrategy,
+  strategy: AccountImportProxyStrategy,
   selectedProxyId: number | null,
 ) {
   form.append('proxyStrategy', strategy)
@@ -859,7 +859,7 @@ async function importSessionFiles() {
 
   const form = new FormData()
   files.forEach((file) => form.append('files', file))
-  const selectedStrategy = proxyStrategy.value as AccountProxyStrategy
+  const selectedStrategy = proxyStrategy.value as AccountImportProxyStrategy
   const selectedProxyId = proxyId.value
   appendProxyFields(form, selectedStrategy, selectedProxyId)
 
@@ -888,7 +888,7 @@ async function importStringSession() {
   }
 
   const selectedSessionString = sessionString.value
-  const selectedStrategy = proxyStrategy.value as AccountProxyStrategy
+  const selectedStrategy = proxyStrategy.value as AccountImportProxyStrategy
   const selectedProxyId = proxyId.value
   const operationToken = ++importOperationToken
   importingString.value = true
@@ -1321,17 +1321,6 @@ async function loadProxies() {
   proxies.value = await panelApi.proxies()
 }
 
-async function loadWarpStatus() {
-  try {
-    warpStatus.value = await panelApi.warpStatus()
-  } catch {
-    warpStatus.value = null
-  }
-  if (!warpAvailable.value && proxyStrategy.value === 'warp_per_account') {
-    proxyStrategy.value = ''
-  }
-}
-
 async function loadTelegramApiStatus() {
   try {
     const settings = await panelApi.settings()
@@ -1351,7 +1340,6 @@ onMounted(() => {
     loadCategories(),
     loadDictionaries(),
     loadProxies(),
-    loadWarpStatus(),
     loadTelegramApiStatus(),
   ])
 })

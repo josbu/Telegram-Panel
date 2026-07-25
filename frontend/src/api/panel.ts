@@ -9,6 +9,7 @@ import type {
   AccountProxyBindingRequest,
   AccountProxyEgress,
   AccountProxyStrategy,
+  AccountImportProxyStrategy,
   BatchChangeRecoveryEmailRequest,
   CleanupWasteResult,
   AuthMe,
@@ -259,7 +260,7 @@ export const panelApi = {
   importAccountsStringSession: (payload: {
     sessionString: string
     categoryId?: number | null
-    proxyStrategy: AccountProxyStrategy
+    proxyStrategy: AccountImportProxyStrategy
     proxyId?: number | null
   }) =>
     api.post<ImportAccountsResponse>('/accounts/import/string-session', payload, { timeout: 900_000 }).then((r) => r.data),
