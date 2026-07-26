@@ -82,6 +82,13 @@ ghcr.io/moeacgx/telegram-panel:dev-latest
 
 `main` 合并后会构建 `latest` 和多架构镜像；若需要正式版本，再按现有 Release 工作流创建 tag。正式发布不得反向替代 `dev` 验收。
 
+创建正式 tag 前，必须先把 `Directory.Build.props` 中的 `Version`、`AssemblyVersion`、
+`FileVersion` 和 `InformationalVersion` 更新为目标版本。Docker tag 构建和 Release 工作流
+都会校验 `vX.Y.Z` 与项目 `Version` 完全一致；不一致时应停止发布，禁止生成“文件名是新
+版本、包内二进制仍显示旧版本”的资产。成功判据是 Release ZIP 内 `version.txt`、运行时
+`/api/panel/auth/me` 和 tag 三者一致。回滚时删除尚未发布的错误 tag；已经公开的错误版本
+不得覆盖重发，应递增补丁版本重新发布。
+
 ### 5. 清理分支
 
 合并确认后执行清理：
