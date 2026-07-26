@@ -98,7 +98,9 @@
             <template v-if="isCompactList && isColumnVisible('proxy')">
               <div v-if="row.proxy" class="mobile-account-proxy">
                 <el-tag size="small" :type="proxyKindTagType(row.proxy.kind)">{{ proxyKindLabel(row.proxy.kind) }}</el-tag>
-                <span class="proxy-name">{{ row.proxy.name }}</span>
+                <el-tooltip :content="row.proxy.name || `代理 #${row.proxy.id}`" placement="top">
+                  <span class="proxy-name">#{{ row.proxy.id }}</span>
+                </el-tooltip>
                 <span class="cell-sub">{{ row.proxy.egressIp || '出口未检测' }}</span>
               </div>
               <div v-else class="cell-sub">{{ row.useGlobalProxy ? '全局代理设置' : '直连' }}</div>
@@ -110,7 +112,9 @@
             <div v-if="row.proxy" class="proxy-cell">
               <div>
                 <el-tag size="small" :type="proxyKindTagType(row.proxy.kind)">{{ proxyKindLabel(row.proxy.kind) }}</el-tag>
-                <span class="proxy-name">{{ row.proxy.name || `代理 #${row.proxy.id}` }}</span>
+                <el-tooltip :content="row.proxy.name || `代理 #${row.proxy.id}`" placement="top">
+                  <span class="proxy-name">#{{ row.proxy.id }}</span>
+                </el-tooltip>
               </div>
               <div class="cell-sub">{{ row.proxy.egressIp || '出口未检测' }}</div>
             </div>
