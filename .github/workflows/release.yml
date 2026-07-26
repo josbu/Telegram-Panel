@@ -35,6 +35,23 @@ jobs:
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout source at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.vars.outputs.tag }}
+
+      - name: Validate release tag version
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${{ steps.vars.outputs.tag }}"
+          TAG_VERSION="${TAG_VERSION#v}"
+          PROJECT_VERSION="$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' Directory.Build.props | head -n 1)"
+          if [[ -z "$PROJECT_VERSION" || "$PROJECT_VERSION" != "$TAG_VERSION" ]]; then
+            echo "Tag version $TAG_VERSION does not match Directory.Build.props version $PROJECT_VERSION" >&2
+            exit 1
+          fi
+
   build-linux:
     needs: prepare
     runs-on: ubuntu-latest
