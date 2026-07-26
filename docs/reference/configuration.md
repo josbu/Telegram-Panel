@@ -70,6 +70,22 @@ Docker 下常用环境变量（见 `docker-compose.yml`）：
 - `Telegram__WebhookEnabled`：Bot Webhook 模式开关（默认关闭，使用长轮询）
 - `Telegram__WebhookBaseUrl`：Webhook 公网 HTTPS 地址
 - `Telegram__WebhookSecretToken`：Webhook 验证密钥
+- `Telegram__MaxRetries`：批量 Telegram 操作的最大自动重试次数，`0` 表示关闭，范围 `1-5`。
+
+### 群聊活跃任务失败重试（v1.31.42 及以上）
+
+在 **系统设置 → 批量操作设置** 开启“失败自动重试”并设置最大重试次数后，有限次
+“用户群聊活跃”任务会在把当前消息记为最终失败前重试可恢复错误。适用范围包括连接
+取消或超时，以及 `CHANNEL_INVALID`、`PEER_ID_INVALID`、`CHAT_ID_INVALID` 等失效
+peer；重试前会重建异常连接并重新解析目标，退避时间依次为 1-5 秒。
+
+权限不足、Session 失效、账号受限、词典内容错误和 `FLOOD_WAIT` 等永久或风控错误不会
+自动重试，避免重复发送和扩大限流。重试成功时本轮按成功计数；全部失败时只计一次失败，
+最近失败详情会注明已重试次数。成功判据是任务日志出现 `send recovered after retry`，且任务
+失败数不因中间尝试增加。若仍失败，检查账号是否已加入目标、是否具备发言权限及代理连接；
+需要回滚时关闭“失败自动重试”或将 `Telegram:MaxRetries` 设为 `0`，无需迁移数据库。
+重试发生在客户端未收到成功确认时；若 Telegram 已接收消息但响应恰好中断，极端情况下
+可能出现重复消息，对重复敏感的任务应关闭自动重试。
 
 ### Docker 更新来源
 

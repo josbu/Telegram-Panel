@@ -30,6 +30,10 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         var assetStorage = host.Services.GetRequiredService<ImageAssetStorageService>();
         var aiVerification = host.Services.GetRequiredService<UserChatActiveAiVerificationService>();
         var aiOptions = host.Services.GetRequiredService<IOptionsMonitor<AiOpenAiOptions>>();
+        var configuration = host.Services.GetRequiredService<IConfiguration>();
+        var clientPool = host.Services.GetRequiredService<TelegramClientPool>();
+        var maxSendRetries = UserChatActiveSendRetryPolicy.NormalizeMaxRetries(
+            configuration.GetValue("Telegram:MaxRetries", 0));
 
         var config = DeserializeConfig(host.Config);
         ValidateAndNormalizeConfig(config);
@@ -246,33 +250,102 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                     continue;
                 }
 
-                (bool Success, string? Error, int? MessageId) send;
-                if (hasImageDictionary)
+                async Task<(bool Success, string? Error, int? MessageId)> SendCurrentMessageAsync()
                 {
-                    try
+                    if (hasImageDictionary)
                     {
-                        var asset = await templateRendering.ResolveImageTemplateAsync(imageDictionaryToken, cancellationToken);
-                        await using var image = await assetStorage.OpenReadAsync(asset.AssetPath, cancellationToken);
-                        send = await accountTools.SendPhotoToResolvedChatAsync(
-                            accountSlot.Account.Id,
-                            targetSlot.Resolved,
-                            image,
-                            asset.FileName,
-                            text,
-                            cancellationToken: cancellationToken);
+                        try
+                        {
+                            var asset = await templateRendering.ResolveImageTemplateAsync(imageDictionaryToken, cancellationToken);
+                            await using var image = await assetStorage.OpenReadAsync(asset.AssetPath, cancellationToken);
+                            return await accountTools.SendPhotoToResolvedChatAsync(
+                                accountSlot.Account.Id,
+                                targetSlot.Resolved,
+                                image,
+                                asset.FileName,
+                                text,
+                                cancellationToken: cancellationToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            return (false, $"图片字典解析/发送准备失败：{ex.Message}", null);
+                        }
                     }
-                    catch (Exception ex)
-                    {
-                        send = (false, $"图片字典解析/发送准备失败：{ex.Message}", null);
-                    }
-                }
-                else
-                {
-                    send = await accountTools.SendMessageToResolvedChatAsync(
+
+                    return await accountTools.SendMessageToResolvedChatAsync(
                         accountSlot.Account.Id,
                         targetSlot.Resolved,
                         text,
                         cancellationToken: cancellationToken);
+                }
+
+                var send = await SendCurrentMessageAsync();
+                var retryAttempts = 0;
+                while (!send.Success
+                       && retryAttempts < maxSendRetries
+                       && UserChatActiveSendRetryPolicy.ShouldRetry(send.Error))
+                {
+                    if (cancellationToken.IsCancellationRequested
+                        || !await host.IsStillRunningAsync(cancellationToken))
+                    {
+                        config.Canceled = true;
+                        verificationTokenSource.Cancel();
+                        break;
+                    }
+
+                    retryAttempts++;
+                    logger.LogWarning(
+                        "UserChatActive send retry {RetryAttempt}/{MaxRetries}: taskId={TaskId}, accountId={AccountId}, target={Target}, error={Error}",
+                        retryAttempts,
+                        maxSendRetries,
+                        host.TaskId,
+                        accountSlot.Account.Id,
+                        targetSlot.RawTarget,
+                        send.Error);
+
+                    if (UserChatActiveSendRetryPolicy.ShouldResetClient(send.Error))
+                        await clientPool.RemoveClientAsync(accountSlot.Account.Id);
+
+                    var retryDelayMs = UserChatActiveSendRetryPolicy.GetDelayMilliseconds(retryAttempts);
+                    if (!await DelayWithPauseCheckAsync(host, retryDelayMs, cancellationToken))
+                    {
+                        config.Canceled = true;
+                        verificationTokenSource.Cancel();
+                        break;
+                    }
+
+                    var refresh = await accountTools.ResolveChatTargetAsync(
+                        accountSlot.Account.Id,
+                        targetSlot.RawTarget,
+                        cancellationToken);
+                    if (refresh.Success && refresh.Target != null)
+                    {
+                        targetSlot.Resolved = refresh.Target;
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "UserChatActive retry target refresh failed: taskId={TaskId}, accountId={AccountId}, target={Target}, error={Error}",
+                            host.TaskId,
+                            accountSlot.Account.Id,
+                            targetSlot.RawTarget,
+                            refresh.Error);
+                    }
+
+                    send = await SendCurrentMessageAsync();
+                }
+
+                if (config.Canceled)
+                    break;
+
+                if (send.Success && retryAttempts > 0)
+                {
+                    logger.LogInformation(
+                        "UserChatActive send recovered after retry: taskId={TaskId}, accountId={AccountId}, target={Target}, retries={Retries}",
+                        host.TaskId,
+                        accountSlot.Account.Id,
+                        targetSlot.RawTarget,
+                        retryAttempts);
                 }
 
                 var sendCompleted = Interlocked.Increment(ref progress.Completed);
@@ -288,7 +361,7 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                         config,
                         accountSlot.Account,
                         targetSlot.RawTarget,
-                        NormalizeReason(send.Error),
+                        UserChatActiveSendRetryPolicy.DescribeFinalFailure(send.Error, retryAttempts),
                         configGate,
                         cancellationToken);
 
