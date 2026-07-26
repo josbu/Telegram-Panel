@@ -80,6 +80,10 @@ ghcr.io/moeacgx/telegram-panel:dev-latest
 - 本次功能验收有明确通过证据；
 - 没有未处理的回滚、数据迁移或安全风险。
 
+Docker PR 工作流必须覆盖会改变镜像内容或运行版本的路径；至少包括 `frontend/**`、
+`src/**`、`docker/**` 和 `Directory.Build.props`。如果相关 PR 没有出现 Docker 检查，
+应先修复路径门禁并等待构建通过，不得把“未触发”视为“已通过”。
+
 `main` 合并后会构建 `latest` 和多架构镜像；若需要正式版本，再按现有 Release 工作流创建 tag。正式发布不得反向替代 `dev` 验收。
 
 创建正式 tag 前，必须先把 `Directory.Build.props` 中的 `Version`、`AssemblyVersion`、

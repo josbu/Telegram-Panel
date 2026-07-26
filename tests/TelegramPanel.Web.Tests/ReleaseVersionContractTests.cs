@@ -43,6 +43,17 @@ public sealed class ReleaseVersionContractTests
         Assert.Contains("TAG_VERSION", workflow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Docker拉取请求覆盖前端与版本文件()
+    {
+        var root = FindRepositoryRoot();
+        var workflow = File.ReadAllText(
+            Path.Combine(root, ".github", "workflows", "docker.yml"));
+
+        Assert.Contains("- \"frontend/**\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("- \"Directory.Build.props\"", workflow, StringComparison.Ordinal);
+    }
+
     private static string ReadProperty(XDocument document, string propertyName) =>
         document.Descendants(propertyName).Select(x => x.Value.Trim()).FirstOrDefault()
         ?? throw new InvalidOperationException($"Directory.Build.props 缺少 {propertyName}");
