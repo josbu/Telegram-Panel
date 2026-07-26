@@ -16,6 +16,8 @@ on:
       - "Dockerfile.local"
       - "docker/**"
       - "docker-compose.yml"
+      - "Directory.Build.props"
+      - "frontend/**"
       - "src/**"
       - ".github/workflows/docker.yml"
   workflow_dispatch: {}
