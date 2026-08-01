@@ -8,6 +8,21 @@ internal static class UserChatActiveSendRetryPolicy
 {
     internal const int MaximumRetries = 5;
 
+    private static readonly string[] ConnectionRelatedErrors =
+    [
+        "连接失败",
+        "请求超时",
+        "A task was canceled",
+        "TaskCanceledException"
+    ];
+
+    private static readonly string[] InvalidPeerErrors =
+    [
+        "CHANNEL_INVALID",
+        "PEER_ID_INVALID",
+        "CHAT_ID_INVALID"
+    ];
+
     internal static int NormalizeMaxRetries(int value) =>
         Math.Clamp(value, 0, MaximumRetries);
 
@@ -17,22 +32,14 @@ internal static class UserChatActiveSendRetryPolicy
         if (text.Length == 0)
             return false;
 
-        return text.Contains("连接失败", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("请求超时", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("A task was canceled", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("TaskCanceledException", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("CHANNEL_INVALID", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("PEER_ID_INVALID", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("CHAT_ID_INVALID", StringComparison.OrdinalIgnoreCase);
+        return ContainsAny(text, ConnectionRelatedErrors)
+               || ContainsAny(text, InvalidPeerErrors);
     }
 
     internal static bool ShouldResetClient(string? error)
     {
         var text = (error ?? string.Empty).Trim();
-        return text.Contains("连接失败", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("请求超时", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("A task was canceled", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("TaskCanceledException", StringComparison.OrdinalIgnoreCase);
+        return ContainsAny(text, ConnectionRelatedErrors);
     }
 
     internal static int GetDelayMilliseconds(int retryAttempt) =>
@@ -45,4 +52,7 @@ internal static class UserChatActiveSendRetryPolicy
             ? reason
             : $"{reason}（自动重试 {retryAttempts} 次后仍失败）";
     }
+
+    private static bool ContainsAny(string text, IEnumerable<string> markers) =>
+        markers.Any(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase));
 }
