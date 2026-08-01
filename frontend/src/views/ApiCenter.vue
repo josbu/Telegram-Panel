@@ -142,6 +142,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { panelApi } from '@/api/panel'
+import { writeClipboardText } from '@/utils/clipboard'
 import type {
   ExternalApiDefinition,
   ExternalApiType,
@@ -328,7 +329,7 @@ function showCurl(api: ExternalApiDefinition) {
 }
 
 async function copyCurl() {
-  await navigator.clipboard.writeText(curlDialog.content)
+  await writeClipboardText(curlDialog.content)
   ElMessage.success('已复制')
 }
 

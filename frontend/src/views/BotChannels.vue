@@ -485,6 +485,7 @@ import { panelApi } from '@/api/panel'
 import ColumnVisibilityMenu from '@/components/ColumnVisibilityMenu.vue'
 import type { BotBinding, BotChannelListItem, BotChannelRemoteInfo, BotManagementItem, ChatAdmin, NumberPreset, OperationAccount, SimpleCategory, TextPreset } from '@/api/types'
 import { formatTime } from '@/utils/format'
+import { writeClipboardText } from '@/utils/clipboard'
 import { usePersistentColumnVisibility, type ColumnVisibilityOption } from '@/utils/columnVisibility'
 import { useMediaQuery } from '@/utils/useMediaQuery'
 
@@ -779,7 +780,7 @@ async function sync() {
 
 async function copyLink(row: BotChannelListItem) {
   const result = await panelApi.exportBotChannelLink(row.id, filters.botId)
-  await navigator.clipboard.writeText(result.link)
+  await writeClipboardText(result.link)
   ElMessage.success('已复制链接')
 }
 

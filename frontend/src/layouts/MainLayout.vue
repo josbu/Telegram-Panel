@@ -245,7 +245,7 @@ const versionDialog = ref({
 const pageTitle = computed(() => (route.meta.title as string) || '')
 const activeIndex = computed(() => (route.path === '/dictionaries' ? '/data-dictionaries' : route.path))
 const isEmbedMode = computed(() => route.query.embed === '1')
-const defaultOpeneds = ['accounts-group', 'channels-group', 'groups-group', 'bots-group', 'extensions-group']
+const defaultOpeneds: string[] = []
 const menuTextColor = computed(() => (isDark.value ? '#c6cad4' : '#3f4b5b'))
 const menuActiveTextColor = computed(() => (isDark.value ? '#90caf9' : '#1976d2'))
 const canApplyVersionUpdate = computed(() =>
