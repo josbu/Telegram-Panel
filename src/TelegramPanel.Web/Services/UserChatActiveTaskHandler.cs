@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TelegramPanel.Core.BatchTasks;
+using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Services;
 using TelegramPanel.Core.Services.Telegram;
 using TelegramPanel.Data.Entities;
@@ -31,7 +32,7 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         var aiVerification = host.Services.GetRequiredService<UserChatActiveAiVerificationService>();
         var aiOptions = host.Services.GetRequiredService<IOptionsMonitor<AiOpenAiOptions>>();
         var configuration = host.Services.GetRequiredService<IConfiguration>();
-        var clientPool = host.Services.GetRequiredService<TelegramClientPool>();
+        var clientPool = host.Services.GetRequiredService<ITelegramClientPool>();
         var maxSendRetries = UserChatActiveSendRetryPolicy.NormalizeMaxRetries(
             configuration.GetValue("Telegram:MaxRetries", 0));
 
