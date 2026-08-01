@@ -509,6 +509,7 @@ import { panelApi } from '@/api/panel'
 import ColumnVisibilityMenu from '@/components/ColumnVisibilityMenu.vue'
 import type { ChannelListItem, ChatAdmin, ChatMembershipAccount, GroupListItem, OperationAccount, SimpleCategory, TextPreset } from '@/api/types'
 import { formatTime } from '@/utils/format'
+import { writeClipboardText } from '@/utils/clipboard'
 import { usePersistentColumnVisibility, type ColumnVisibilityOption } from '@/utils/columnVisibility'
 import { useMediaQuery } from '@/utils/useMediaQuery'
 
@@ -793,7 +794,7 @@ async function syncAll() {
 
 async function copyLink(row: Row) {
   const result = props.kind === 'channel' ? await panelApi.exportChannelLink(row.id) : await panelApi.exportGroupLink(row.id)
-  await navigator.clipboard.writeText(result.link)
+  await writeClipboardText(result.link)
   ElMessage.success('已复制链接')
 }
 
@@ -831,7 +832,7 @@ async function batchCopyLinks() {
         }
       }
     }
-    await navigator.clipboard.writeText(lines.join('\n'))
+    await writeClipboardText(lines.join('\n'))
     showOperationSummary(`已复制${linkName.value}`, ok, failed, skipped)
   } finally {
     loading.value = false
