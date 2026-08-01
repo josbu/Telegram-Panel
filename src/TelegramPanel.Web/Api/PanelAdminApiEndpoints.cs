@@ -2752,13 +2752,24 @@ public static class PanelAdminApiEndpoints
         return Results.Ok(new OperationResultDto(true, "密码已修改"));
     }
 
-    private static async Task<IResult> ChangeAdminUsernameAsync(
+    internal static async Task<IResult> ChangeAdminUsernameAsync(
         ChangeAdminUsernameRequestDto request,
         HttpContext http,
         AdminCredentialStore credentialStore,
         CancellationToken cancellationToken)
     {
-        await credentialStore.ChangeUsernameAsync(request.CurrentPassword ?? "", request.NewUsername ?? "", cancellationToken);
+        if (!AdminCredentialStore.TryNormalizeUsername(
+                request.NewUsername,
+                out var normalizedUsername,
+                out var validationError))
+        {
+            return Results.BadRequest(new OperationResultDto(false, validationError));
+        }
+
+        await credentialStore.ChangeUsernameAsync(
+            request.CurrentPassword ?? "",
+            normalizedUsername,
+            cancellationToken);
 
         var claims = new List<Claim>
         {

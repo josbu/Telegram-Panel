@@ -111,6 +111,7 @@
             <el-checkbox v-model="batch.autoRetry">失败自动重试</el-checkbox>
             <el-form-item v-if="batch.autoRetry" label="最大重试次数" class="mt-3">
               <el-input-number v-model="batch.maxRetries" :min="1" :max="5" />
+              <div class="muted mt-2">群聊活跃任务会重试连接取消、超时和失效目标；权限、Session 与风控错误不会重试。</div>
             </el-form-item>
           </el-form>
           <el-button type="primary" :loading="saving.batch" @click="saveBatch">保存配置</el-button>

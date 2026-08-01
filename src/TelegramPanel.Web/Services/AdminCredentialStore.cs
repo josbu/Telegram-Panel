@@ -204,19 +204,42 @@ public sealed class AdminCredentialStore
         file.Iterations = iterations;
     }
 
+    internal static bool TryNormalizeUsername(
+        string? username,
+        out string normalizedUsername,
+        out string? error)
+    {
+        normalizedUsername = (username ?? string.Empty).Trim();
+        if (normalizedUsername.Length < 4 || normalizedUsername.Length > 32)
+        {
+            error = "后台用户名长度应为 4-32 位";
+            return false;
+        }
+
+        if (!normalizedUsername.All(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.'))
+        {
+            error = "后台用户名只能包含字母、数字、下划线、短横线或点";
+            return false;
+        }
+
+        if (string.Equals(normalizedUsername, "admin", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedUsername, "administrator", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedUsername, "root", StringComparison.OrdinalIgnoreCase))
+        {
+            error = "请不要使用常见后台用户名";
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
+
     private static string NormalizeUsername(string? username)
     {
-        username = (username ?? string.Empty).Trim();
-        if (username.Length < 4 || username.Length > 32)
-            throw new InvalidOperationException("后台用户名长度应为 4-32 位");
-        if (!username.All(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.'))
-            throw new InvalidOperationException("后台用户名只能包含字母、数字、下划线、短横线或点");
-        if (string.Equals(username, "admin", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(username, "administrator", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(username, "root", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("请不要使用常见后台用户名");
+        if (!TryNormalizeUsername(username, out var normalizedUsername, out var error))
+            throw new InvalidOperationException(error);
 
-        return username;
+        return normalizedUsername;
     }
 
     private static byte[] HashPassword(string password, byte[] salt, int iterations)

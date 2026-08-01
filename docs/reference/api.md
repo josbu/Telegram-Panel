@@ -8,6 +8,7 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 
 - `POST /api/panel/auth/login`：后台登录
 - `GET /api/panel/auth/me`：当前后台登录状态
+- `POST /api/panel/settings/username`：修改后台用户名
 - `GET /api/panel/accounts`：账号列表
 - `GET /api/panel/accounts/{id}`：账号详情
 - `POST /api/panel/accounts/import/zip`：导入 Telethon 或 TData 压缩包
@@ -22,6 +23,17 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 前端会为登录和导入请求明确携带 `proxyStrategy`；自定义调用也必须显式传入。省略策略、
 策略无效或所选代理不可用时，服务端会在连接 Telegram 前拒绝请求，不会回退直连。不要
 绕过这些入口自行先直连创建 Session。
+
+`POST /api/panel/settings/username` 的以下合同适用于 v1.31.42 及以上版本。调用方必须
+已经通过管理员 Cookie 认证，请求 JSON 必须提供 `currentPassword` 和 `newUsername`。
+新用户名要求 4-32 位，只包含字母、数字、下划线、短横线或点，且不能使用 `admin`、
+`administrator` 或 `root`。成功时返回 `200`、`success=true`，当前登录 Cookie 会切换到
+新用户名；输入不合法时返回 `400` 和可直接展示的 `message`，不会修改凭据文件。
+
+若修改失败，先按 `message` 检查当前密码、长度、字符范围和保留名称，再修正后重试。
+需要回滚时用相同接口提交原用户名，并以当前密码完成确认；成功判据是重新读取
+`GET /api/panel/auth/me` 时返回原用户名。凭据文件损坏或无法写入时应先停止修改并检查
+持久化目录权限，不要直接删除 `/data/admin_auth.json`。
 
 ### Zip 逐账号批量代理
 
