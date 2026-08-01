@@ -8,6 +8,7 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 
 - `POST /api/panel/auth/login`：后台登录
 - `GET /api/panel/auth/me`：当前后台登录状态
+- `POST /api/panel/settings/username`：修改后台用户名
 - `GET /api/panel/accounts`：账号列表
 - `GET /api/panel/accounts/{id}`：账号详情
 - `POST /api/panel/accounts/import/zip`：导入 Telethon 或 TData 压缩包
@@ -22,6 +23,10 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 前端会为登录和导入请求明确携带 `proxyStrategy`；自定义调用也必须显式传入。省略策略、
 策略无效或所选代理不可用时，服务端会在连接 Telegram 前拒绝请求，不会回退直连。不要
 绕过这些入口自行先直连创建 Session。
+
+`POST /api/panel/settings/username` 要求新用户名为 4-32 位，只包含字母、数字、
+下划线、短横线或点，且不能使用 `admin`、`administrator` 或 `root`。输入不合法时
+返回 `400` 和可直接展示的 `message`；不会修改凭据文件，用户可修正后重试。
 
 ### Zip 逐账号批量代理
 
