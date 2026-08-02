@@ -426,57 +426,73 @@ public class DataSyncService
             }
             catch (Exception ex)
             {
+                if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
+                    throw;
+
                 accountFailed = true;
                 _logger.LogDebug(ex, "Account sync failed (debug details): {AccountId}", account.Id);
                 summary.AccountFailures.Add((account.Id, account.Phone, ex.Message));
 
-                // 同步失败时更新账号的 Telegram 状态
-                try
+                // 单个 Telegram 请求被取消通常只是本次网络/代理请求中断，不能据此把账号标记为失效。
+                // 只有整个同步任务的取消令牌已触发时，才由上层任务执行器负责中断和恢复。
+                if (IsTransientRequestCancellation(ex, cancellationToken))
                 {
-                    var (statusSummary, statusDetails) = AccountTelegramToolsService.MapTelegramException(ex);
-                    _logger.LogWarning("Account sync failed: {Phone} {Summary}", account.Phone, statusSummary);
-
-                    // FLOOD_WAIT 之类属于“限流/临时状态”，不代表账号异常：避免把正常账号标红。
-                    // 同理：某些群组接口不支持也不应影响账号状态。
-                    var shouldPersistStatus = true;
-                    if (statusSummary.Contains("FLOOD_WAIT", StringComparison.OrdinalIgnoreCase)
-                        || statusSummary.Contains("CHANNEL_MONOFORUM_UNSUPPORTED", StringComparison.OrdinalIgnoreCase))
+                    _logger.LogWarning(
+                        ex,
+                        "Account sync request was canceled transiently; preserving Telegram status: {AccountId} {Phone}",
+                        account.Id,
+                        account.Phone);
+                }
+                else
+                {
+                    // 其他同步失败仍更新账号的 Telegram 状态
+                    try
                     {
-                        shouldPersistStatus = false;
-                    }
+                        var (statusSummary, statusDetails) = AccountTelegramToolsService.MapTelegramException(ex);
+                        _logger.LogWarning("Account sync failed: {Phone} {Summary}", account.Phone, statusSummary);
 
-                    var updatedByProbe = false;
-                    if (string.Equals(statusSummary, "连接失败", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // 同步操作里遇到的“连接失败”有可能是误判：这里做一次轻量探测（等同于“刷新账号状态”不勾深度探测），避免把存活账号标成掉线。
-                        try
+                        // FLOOD_WAIT 之类属于“限流/临时状态”，不代表账号异常：避免把正常账号标红。
+                        // 同理：某些群组接口不支持也不应影响账号状态。
+                        var shouldPersistStatus = true;
+                        if (statusSummary.Contains("FLOOD_WAIT", StringComparison.OrdinalIgnoreCase)
+                            || statusSummary.Contains("CHANNEL_MONOFORUM_UNSUPPORTED", StringComparison.OrdinalIgnoreCase))
                         {
-                            var probe = await _telegramTools.RefreshAccountStatusAsync(account.Id, probeCreateChannel: false, cancellationToken: cancellationToken);
-                            if (!string.Equals(probe.Summary, "连接失败", StringComparison.OrdinalIgnoreCase)
-                                && !string.Equals(probe.Summary, "已取消", StringComparison.OrdinalIgnoreCase))
+                            shouldPersistStatus = false;
+                        }
+
+                        var updatedByProbe = false;
+                        if (string.Equals(statusSummary, "连接失败", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // 同步操作里遇到的“连接失败”有可能是误判：这里做一次轻量探测（等同于“刷新账号状态”不勾深度探测），避免把存活账号标成掉线。
+                            try
                             {
-                                // RefreshAccountStatusAsync 内部已持久化账号状态，这里避免覆盖回“连接失败”。
-                                updatedByProbe = true;
+                                var probe = await _telegramTools.RefreshAccountStatusAsync(account.Id, probeCreateChannel: false, cancellationToken: cancellationToken);
+                                if (!string.Equals(probe.Summary, "连接失败", StringComparison.OrdinalIgnoreCase)
+                                    && !string.Equals(probe.Summary, "已取消", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // RefreshAccountStatusAsync 内部已持久化账号状态，这里避免覆盖回“连接失败”。
+                                    updatedByProbe = true;
+                                }
+                            }
+                            catch (Exception probeEx)
+                            {
+                                _logger.LogWarning(probeEx, "Account sync fallback status probe failed: {AccountId}", account.Id);
                             }
                         }
-                        catch (Exception probeEx)
+
+                        if (!updatedByProbe && shouldPersistStatus)
                         {
-                            _logger.LogWarning(probeEx, "Account sync fallback status probe failed: {AccountId}", account.Id);
+                            account.TelegramStatusOk = false;
+                            account.TelegramStatusSummary = statusSummary;
+                            account.TelegramStatusDetails = statusDetails;
+                            account.TelegramStatusCheckedAtUtc = DateTime.UtcNow;
+                            await _accountManagement.UpdateAccountAsync(account);
                         }
                     }
-
-                    if (!updatedByProbe && shouldPersistStatus)
+                    catch (Exception statusEx)
                     {
-                        account.TelegramStatusOk = false;
-                        account.TelegramStatusSummary = statusSummary;
-                        account.TelegramStatusDetails = statusDetails;
-                        account.TelegramStatusCheckedAtUtc = DateTime.UtcNow;
-                        await _accountManagement.UpdateAccountAsync(account);
+                        _logger.LogWarning(statusEx, "Failed to update Telegram status for account {AccountId}", account.Id);
                     }
-                }
-                catch (Exception statusEx)
-                {
-                    _logger.LogWarning(statusEx, "Failed to update Telegram status for account {AccountId}", account.Id);
                 }
             }
             finally
@@ -518,6 +534,12 @@ public class DataSyncService
     private static SyncSkippedItem ToSkippedItem(Account account)
     {
         return new SyncSkippedItem(account.Id, account.Phone, account.TelegramStatusSummary ?? "Session 不可用");
+    }
+
+    internal static bool IsTransientRequestCancellation(Exception exception, CancellationToken syncCancellationToken)
+    {
+        return !syncCancellationToken.IsCancellationRequested
+               && exception is OperationCanceledException;
     }
 
     private static string BuildSyncTaskConfig(
