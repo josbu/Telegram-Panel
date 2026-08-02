@@ -313,6 +313,16 @@
           >
             设置分类<span v-if="selectedProxies.length">（{{ selectedProxies.length }}）</span>
           </el-button>
+          <el-button
+            type="danger"
+            plain
+            :icon="Delete"
+            :loading="batchDeleting"
+            :disabled="selectedProxies.length === 0 || batchDeleting || loading"
+            @click="removeSelectedProxies"
+          >
+            批量删除<span v-if="selectedProxies.length">（{{ selectedProxies.length }}）</span>
+          </el-button>
           <el-button :icon="FolderOpened" @click="openCategoryManager">管理分类</el-button>
         </div>
       </div>
@@ -846,6 +856,7 @@ const proxyCategoryLoading = ref(false)
 const testingIds = reactive(new Set<number>())
 const refreshingIds = reactive(new Set<number>())
 const deletingIds = reactive(new Set<number>())
+const batchDeleting = ref(false)
 const refreshingAllWarps = ref(false)
 const AUTO_STATUS_REFRESH_MS = 30_000
 let autoStatusRefreshTimer: ReturnType<typeof setInterval> | null = null
@@ -1348,6 +1359,43 @@ async function saveBatchCategory() {
     selectedProxies.value = []
   } finally {
     batchCategoryDialog.saving = false
+  }
+}
+
+async function removeSelectedProxies() {
+  if (batchDeleting.value || selectedProxies.value.length === 0) return
+  const selected = [...selectedProxies.value]
+  const proxyIds = selected.map((proxy) => proxy.id)
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${proxyIds.length} 个代理吗？已绑定账号或正在作为全局代理使用的项目会逐项失败并保留。`,
+      '确认批量删除',
+      { type: 'warning', confirmButtonText: '批量删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+
+  batchDeleting.value = true
+  proxyIds.forEach((id) => deletingIds.add(id))
+  try {
+    const result = await panelApi.batchDeleteProxies(proxyIds)
+    if (result.failed > 0) {
+      const failures = result.items
+        .filter((item) => !item.success)
+        .slice(0, 5)
+        .map((item) => `#${item.proxyId}：${item.error || item.summary}`)
+        .join('；')
+      ElMessage.warning(`已删除 ${result.success} 个，${result.failed} 个失败${failures ? `：${failures}` : ''}`)
+    } else {
+      ElMessage.success(`已删除 ${result.success} 个代理`)
+    }
+  } finally {
+    await Promise.allSettled([loadProxies(), loadProxyCategories()])
+    proxyTableRef.value?.clearSelection()
+    selectedProxies.value = []
+    proxyIds.forEach((id) => deletingIds.delete(id))
+    batchDeleting.value = false
   }
 }
 

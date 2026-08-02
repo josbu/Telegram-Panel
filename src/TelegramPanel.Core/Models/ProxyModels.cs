@@ -228,3 +228,43 @@ public sealed record WarpMaintenanceBatchResult(
     int Recovered,
     int Failed,
     IReadOnlyList<WarpMaintenanceResult> Items);
+
+/// <summary>
+/// 普通代理和 Resin 代理的出口巡检配置。巡检只更新出口元数据，不会重启或修改代理资源。
+/// </summary>
+public sealed record ProxyEgressMaintenanceOptions(
+    bool Enabled,
+    int InitialDelaySeconds,
+    int IntervalMinutes)
+{
+    public static ProxyEgressMaintenanceOptions From(IConfiguration configuration) => new(
+        ReadBool(configuration, "Proxy:Egress:Maintenance:Enabled", true),
+        ReadInt(configuration, "Proxy:Egress:Maintenance:InitialDelaySeconds", 30, 0, 3600),
+        ReadInt(configuration, "Proxy:Egress:Maintenance:IntervalMinutes", 5, 1, 1440));
+
+    private static bool ReadBool(IConfiguration configuration, string key, bool fallback) =>
+        bool.TryParse(configuration[key], out var value) ? value : fallback;
+
+    private static int ReadInt(
+        IConfiguration configuration,
+        string key,
+        int fallback,
+        int min,
+        int max) =>
+        int.TryParse(configuration[key], out var value) && value >= min && value <= max
+            ? value
+            : fallback;
+}
+
+public sealed record ProxyEgressMaintenanceItem(
+    int ProxyId,
+    string Name,
+    bool Success,
+    string? EgressIp,
+    string? Error);
+
+public sealed record ProxyEgressMaintenanceBatchResult(
+    int Checked,
+    int Succeeded,
+    int Failed,
+    IReadOnlyList<ProxyEgressMaintenanceItem> Items);

@@ -67,6 +67,27 @@ public sealed class ChannelGroupPrivateCreateTaskConfig
 
     [JsonPropertyName("asset_scope_id")]
     public string? AssetScopeId { get; set; }
+
+    [JsonPropertyName("recent_failures")]
+    public List<ChannelGroupAutomationTaskRuntimeFailure> RecentFailures { get; set; } = new();
+}
+
+public sealed class ChannelGroupAutomationTaskRuntimeFailure
+{
+    [JsonPropertyName("time_utc")]
+    public DateTime TimeUtc { get; set; }
+
+    [JsonPropertyName("account_id")]
+    public int AccountId { get; set; }
+
+    [JsonPropertyName("target_type")]
+    public string TargetType { get; set; } = string.Empty;
+
+    [JsonPropertyName("target")]
+    public string Target { get; set; } = string.Empty;
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
 }
 
 public sealed class ChannelGroupPublicizeTaskConfig
