@@ -64,6 +64,9 @@ Docker 下常用环境变量（见 `docker-compose.yml`）：
 - `Proxy__Warp__Maintenance__RecoveryCooldownMinutes`：失败恢复冷却，默认 30 分钟
 - `Proxy__Warp__Maintenance__ScheduledRefreshEnabled`：是否定时重启健康出口，默认关闭
 - `Proxy__Warp__Maintenance__ScheduledRefreshIntervalMinutes`：健康出口定时刷新周期，默认 720 分钟
+- `Proxy__Egress__Maintenance__Enabled`：v1.31.44 起启用普通代理和 Resin 出口元数据巡检，默认开启
+- `Proxy__Egress__Maintenance__InitialDelaySeconds`：服务启动后首次巡检延迟，默认 30 秒
+- `Proxy__Egress__Maintenance__IntervalMinutes`：普通代理和 Resin 巡检周期，默认 5 分钟
 - `AdminAuth__CredentialsPath`：后台密码文件（默认 `/data/admin_auth.json`）
 - `Sync__AutoSyncEnabled`：账号创建的频道/群组自动同步（默认关闭）
 - `Telegram__BotAutoSyncEnabled`：Bot 频道自动同步（默认关闭）

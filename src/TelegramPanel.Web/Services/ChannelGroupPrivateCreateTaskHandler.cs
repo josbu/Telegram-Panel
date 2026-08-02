@@ -4,6 +4,8 @@ using TelegramPanel.Core.Interfaces;
 using TelegramPanel.Core.Services;
 using TelegramPanel.Data.Entities;
 using TelegramPanel.Modules;
+using Regex = System.Text.RegularExpressions.Regex;
+using RegexOptions = System.Text.RegularExpressions.RegexOptions;
 
 namespace TelegramPanel.Web.Services;
 
@@ -12,6 +14,22 @@ namespace TelegramPanel.Web.Services;
 /// </summary>
 public sealed class ChannelGroupPrivateCreateTaskHandler : IModuleTaskHandler
 {
+    internal const int MaxRecentFailures = 20;
+    internal const int MaxFailureReasonLength = 500;
+
+    private static readonly JsonSerializerOptions PersistedConfigJsonOptions = new()
+    {
+        WriteIndented = true
+    };
+
+    private static readonly Regex UriUserInfoPattern = new(
+        @"(?<scheme>\b(?:https?|socks4a?|socks5h?|mtproto)://)[^@\s/]+@",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex SecretAssignmentPattern = new(
+        @"\b(?<name>password|passwd|token|secret|api[_-]?hash)\s*[:=]\s*[^\s,;]+",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     public string TaskType => BatchTaskTypes.ChannelGroupPrivateCreate;
 
     public async Task ExecuteAsync(IModuleTaskExecutionHost host, CancellationToken cancellationToken)
@@ -27,6 +45,7 @@ public sealed class ChannelGroupPrivateCreateTaskHandler : IModuleTaskHandler
         var taskManagement = host.Services.GetRequiredService<BatchTaskManagementService>();
         var templateRendering = host.Services.GetRequiredService<TemplateRenderingService>();
         var assetStorage = host.Services.GetRequiredService<ImageAssetStorageService>();
+        var logger = host.Services.GetRequiredService<ILogger<ChannelGroupPrivateCreateTaskHandler>>();
 
         var selectedCategoryIds = config.CategoryIds.Where(x => x > 0).ToHashSet();
         var accounts = (await accountManagement.GetActiveAccountsAsync())
@@ -64,21 +83,22 @@ public sealed class ChannelGroupPrivateCreateTaskHandler : IModuleTaskHandler
                 if (!await host.IsStillRunningAsync(cancellationToken))
                     return;
 
+                var attemptedTitle = string.Empty;
                 try
                 {
-                    var title = (await templateRendering.RenderTextTemplateAsync(config.TitleTemplate, cancellationToken)).Trim();
-                    if (title.Length == 0)
+                    attemptedTitle = (await templateRendering.RenderTextTemplateAsync(config.TitleTemplate, cancellationToken)).Trim();
+                    if (attemptedTitle.Length == 0)
                         throw new InvalidOperationException("标题模板解析结果为空");
 
                     if (string.Equals(config.CreateType, ChannelGroupAutomationTaskObjectTypes.Channel, StringComparison.OrdinalIgnoreCase))
                     {
-                        var info = await channelService.CreateChannelAsync(account.Id, title, string.Empty, isPublic: false);
+                        var info = await channelService.CreateChannelAsync(account.Id, attemptedTitle, string.Empty, isPublic: false);
                         var now = DateTime.UtcNow;
                         var channel = new Channel
                         {
                             TelegramId = info.TelegramId,
                             AccessHash = info.AccessHash,
-                            Title = title,
+                            Title = attemptedTitle,
                             Username = null,
                             IsBroadcast = true,
                             MemberCount = info.MemberCount,
@@ -95,13 +115,13 @@ public sealed class ChannelGroupPrivateCreateTaskHandler : IModuleTaskHandler
                     }
                     else
                     {
-                        var info = await groupService.CreateGroupAsync(account.Id, title, string.Empty, isPublic: false, username: null);
+                        var info = await groupService.CreateGroupAsync(account.Id, attemptedTitle, string.Empty, isPublic: false, username: null);
                         var now = DateTime.UtcNow;
                         var group = new Group
                         {
                             TelegramId = info.TelegramId,
                             AccessHash = info.AccessHash,
-                            Title = title,
+                            Title = attemptedTitle,
                             Username = null,
                             MemberCount = Math.Max(info.MemberCount, 1),
                             About = string.Empty,
@@ -122,11 +142,23 @@ public sealed class ChannelGroupPrivateCreateTaskHandler : IModuleTaskHandler
                     created++;
                     await host.UpdateProgressAsync(created, failed, cancellationToken);
                 }
-                catch
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
                 {
                     processedForAccount++;
                     created++;
                     failed++;
+                    RecordFailure(config, account.Id, config.CreateType, attemptedTitle, ex.Message);
+                    logger.LogWarning(
+                        ex,
+                        "自动创建私密{TargetType}失败，任务 {TaskId}，账号 {AccountId}",
+                        string.Equals(config.CreateType, ChannelGroupAutomationTaskObjectTypes.Group, StringComparison.OrdinalIgnoreCase) ? "群组" : "频道",
+                        host.TaskId,
+                        account.Id);
+                    await taskManagement.UpdateTaskConfigAsync(host.TaskId, SerializeConfig(config));
                     await host.UpdateProgressAsync(created, failed, cancellationToken);
                 }
 
@@ -144,7 +176,7 @@ public sealed class ChannelGroupPrivateCreateTaskHandler : IModuleTaskHandler
             }
         }
 
-        await taskManagement.UpdateTaskDraftAsync(host.TaskId, created, host.Config);
+        await taskManagement.UpdateTaskDraftAsync(host.TaskId, created, SerializeConfig(config));
     }
 
     private static async Task ApplyAvatarIfNeededAsync(
@@ -216,7 +248,55 @@ public sealed class ChannelGroupPrivateCreateTaskHandler : IModuleTaskHandler
         config.MaxDelaySeconds = ChannelGroupTaskDelayHelper.NormalizeMaxDelay(config.MinDelaySeconds, config.MaxDelaySeconds);
         config.JitterPercent = ChannelGroupTaskDelayHelper.NormalizeJitterPercent(config.JitterPercent);
         config.AvatarSource = NormalizeAvatarSource(config.AvatarSource);
+        config.RecentFailures ??= new List<ChannelGroupAutomationTaskRuntimeFailure>();
     }
+
+    internal static void RecordFailure(
+        ChannelGroupPrivateCreateTaskConfig config,
+        int accountId,
+        string? targetType,
+        string? target,
+        string? reason,
+        DateTime? timeUtc = null)
+    {
+        config.RecentFailures ??= new List<ChannelGroupAutomationTaskRuntimeFailure>();
+        config.RecentFailures.Add(new ChannelGroupAutomationTaskRuntimeFailure
+        {
+            TimeUtc = timeUtc ?? DateTime.UtcNow,
+            AccountId = accountId,
+            TargetType = string.Equals(targetType, ChannelGroupAutomationTaskObjectTypes.Group, StringComparison.OrdinalIgnoreCase)
+                ? ChannelGroupAutomationTaskObjectTypes.Group
+                : ChannelGroupAutomationTaskObjectTypes.Channel,
+            Target = string.IsNullOrWhiteSpace(target) ? "-" : target.Trim(),
+            Reason = NormalizeFailureReason(reason)
+        });
+
+        if (config.RecentFailures.Count > MaxRecentFailures)
+        {
+            config.RecentFailures.RemoveRange(
+                0,
+                config.RecentFailures.Count - MaxRecentFailures);
+        }
+    }
+
+    internal static string NormalizeFailureReason(string? reason)
+    {
+        var normalized = (reason ?? string.Empty)
+            .Replace("\r\n", " ")
+            .Replace('\r', ' ')
+            .Replace('\n', ' ')
+            .Trim();
+        if (normalized.Length == 0)
+            return "失败";
+        normalized = UriUserInfoPattern.Replace(normalized, "${scheme}***@");
+        normalized = SecretAssignmentPattern.Replace(normalized, "${name}=***");
+        return normalized.Length <= MaxFailureReasonLength
+            ? normalized
+            : normalized[..MaxFailureReasonLength];
+    }
+
+    internal static string SerializeConfig(ChannelGroupPrivateCreateTaskConfig config) =>
+        JsonSerializer.Serialize(config, PersistedConfigJsonOptions);
 
     private static string NormalizeAvatarSource(string? value)
     {

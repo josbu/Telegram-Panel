@@ -81,6 +81,7 @@ import type {
   NumberPreset,
   NetworkEgress,
   OutboundProxy,
+  ProxyBatchResult,
   ProxyImportRequest,
   SaveOutboundProxyRequest,
   TextPreset,
@@ -119,6 +120,8 @@ export const panelApi = {
     api.put<OutboundProxy>(`/proxies/${id}`, payload, { timeout: PROXY_SAVE_TIMEOUT_MS }).then((r) => r.data),
   deleteProxy: (id: number) =>
     api.delete<OperationResult>(`/proxies/${id}`, { timeout: PROXY_DELETE_TIMEOUT_MS }).then((r) => r.data),
+  batchDeleteProxies: (proxyIds: number[]) =>
+    api.post<ProxyBatchResult>('/proxies/batch/delete', { proxyIds }, { timeout: PROXY_DELETE_TIMEOUT_MS }).then((r) => r.data),
   testProxy: (id: number) => api.post<OutboundProxy>(`/proxies/${id}/test`, {}, { timeout: 60_000 }).then((r) => r.data),
   importProxies: (payload: ProxyImportRequest) =>
     api.post<OutboundProxy[]>('/proxies/import', payload, { timeout: PROXY_IMPORT_TIMEOUT_MS }).then((r) => r.data),

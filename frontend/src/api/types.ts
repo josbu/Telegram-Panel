@@ -12,6 +12,19 @@ export interface OperationResult {
   code?: string | null
 }
 
+export interface ProxyBatchItem {
+  proxyId: number
+  success: boolean
+  summary: string
+  error?: string | null
+}
+
+export interface ProxyBatchResult {
+  success: number
+  failed: number
+  items: ProxyBatchItem[]
+}
+
 export type ProxyKind = 'manual' | 'resin' | 'warp'
 
 export type ProxyProtocol = 'http' | 'socks5' | 'mtproto'
