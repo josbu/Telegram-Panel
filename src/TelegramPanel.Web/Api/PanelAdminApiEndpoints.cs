@@ -742,10 +742,37 @@ public static class PanelAdminApiEndpoints
 
     private static async Task<IResult> GetDevicesAsync(
         int id,
-        AccountTelegramToolsService accountTools)
+        AccountTelegramToolsService accountTools,
+        CancellationToken cancellationToken)
     {
-        var devices = await accountTools.GetAuthorizationsAsync(id);
-        return Results.Ok(devices.Select(ToDto).ToList());
+        try
+        {
+            var devices = await accountTools.GetAuthorizationsAsync(id, cancellationToken);
+            return CreateDeviceQuerySuccess(devices);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return CreateDeviceQueryFailure(ex);
+        }
+    }
+
+    internal static IResult CreateDeviceQuerySuccess(
+        IReadOnlyList<TelegramAuthorizationInfo> devices) =>
+        Results.Ok(devices.Select(ToDto).ToList());
+
+    internal static IResult CreateDeviceQueryFailure(Exception exception)
+    {
+        var (summary, _) = AccountTelegramToolsService.MapTelegramException(exception);
+        return Results.Json(
+            new OperationResultDto(
+                false,
+                $"在线设备读取失败：{summary}。请检查账号登录状态和代理可用性后重试；瞬时连接故障会自动刷新一次连接。",
+                "TELEGRAM_DEVICE_QUERY_FAILED"),
+            statusCode: StatusCodes.Status502BadGateway);
     }
 
     private static async Task<IResult> KickDeviceAsync(

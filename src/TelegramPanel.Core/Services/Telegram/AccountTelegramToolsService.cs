@@ -377,10 +377,27 @@ public class AccountTelegramToolsService
         _ => 0
     };
 
-    public async Task<IReadOnlyList<TelegramAuthorizationInfo>> GetAuthorizationsAsync(int accountId)
+    public async Task<IReadOnlyList<TelegramAuthorizationInfo>> GetAuthorizationsAsync(
+        int accountId,
+        CancellationToken cancellationToken = default)
     {
-        var client = await GetOrCreateConnectedClientAsync(accountId);
-        var auths = await client.Account_GetAuthorizations();
+        var auths = await TelegramTransientConnectionRetry.ExecuteAsync(
+            async () =>
+            {
+                var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+                return await ExecuteTelegramRequestAsync(
+                    accountId,
+                    "读取在线设备",
+                    () => client.Account_GetAuthorizations(),
+                    cancellationToken,
+                    resetClientOnTimeout: false);
+            },
+            () => _clientPool.RemoveClientAsync(accountId),
+            cancellationToken,
+            ex => _logger.LogWarning(
+                "Transient Telegram connection failure while reading devices for account {AccountId}; rebuilding client once ({ErrorType})",
+                accountId,
+                ex.GetBaseException().GetType().Name));
 
         var list = new List<TelegramAuthorizationInfo>(auths.authorizations.Length);
         foreach (var a in auths.authorizations)
