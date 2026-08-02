@@ -609,10 +609,10 @@
         }
     }
 
-    private static List<string> BuildPrivateCreateConfigLines(JsonElement root)
+    private List<string> BuildPrivateCreateConfigLines(JsonElement root)
     {
         var createType = GetJsonString(root, "create_type", ChannelGroupAutomationTaskObjectTypes.Channel);
-        return new List<string>
+        var lines = new List<string>
         {
             $"账号分类: {BuildSelectedCategorySummary(root)}",
             $"创建对象: {GetObjectTypeName(createType)}",
@@ -624,6 +624,39 @@
             $"标题模板: {GetJsonString(root, "title_template", "-")}",
             $"头像来源: {GetAvatarSourceName(root)}"
         };
+
+        var failures = BuildChannelGroupAutomationFailureLines(root);
+        if (failures.Count > 0)
+        {
+            lines.Add(string.Empty);
+            lines.Add("最近失败:");
+            lines.AddRange(failures);
+        }
+
+        return lines;
+    }
+
+    private List<string> BuildChannelGroupAutomationFailureLines(JsonElement root)
+    {
+        var lines = new List<string>();
+        if (!root.TryGetProperty("recent_failures", out var failures) || failures.ValueKind != JsonValueKind.Array)
+            return lines;
+
+        foreach (var item in failures.EnumerateArray().TakeLast(20))
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+                continue;
+
+            var accountId = GetJsonInt(item, "account_id", 0);
+            var account = accountId > 0 ? $"账号 #{accountId}" : "账号 -";
+            var targetType = GetObjectTypeName(GetJsonString(item, "target_type", ChannelGroupAutomationTaskObjectTypes.Channel));
+            var target = GetJsonString(item, "target", "-");
+            var reason = GetJsonString(item, "reason", "失败");
+            var time = FormatTaskFailureTime(GetJsonString(item, "time_utc", string.Empty));
+            lines.Add($"{account} -> {targetType}「{target}」：{reason}{(time.Length > 0 ? $"（{time}）" : string.Empty)}");
+        }
+
+        return lines;
     }
 
     private static List<string> BuildPublicizeConfigLines(JsonElement root)

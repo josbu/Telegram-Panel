@@ -927,7 +927,7 @@ async function rerunTask(task: BatchTask) {
   await panelApi.createTask({
     taskType: fullTask.taskType,
     total: Math.max(0, fullTask.total),
-    config: fullTask.config || null,
+    config: fullTask.config ? stripRuntimeFields(fullTask.config) : null,
   })
   await load()
 }
@@ -1139,7 +1139,26 @@ function buildPrivateCreateDetails(obj: Record<string, any>) {
     `标题模板: ${formatTextValue(obj.title_template)}`,
     `头像来源: ${avatarSourceName(obj.avatar_source, obj)}`,
   ]
+
+  const failures = buildChannelGroupAutomationFailureLines(obj)
+  if (failures.length > 0) lines.push('', '最近失败:', ...failures)
   return lines
+}
+
+function buildChannelGroupAutomationFailureLines(obj: Record<string, any>) {
+  if (!Array.isArray(obj.recent_failures)) return []
+
+  return obj.recent_failures
+    .map((item: any) => {
+      const accountId = Number(item?.account_id || 0)
+      const account = accountId > 0 ? `账号 #${accountId}` : '账号 -'
+      const targetType = objectTypeName(item?.target_type)
+      const target = String(item?.target || '').trim() || '-'
+      const reason = String(item?.reason || '').trim() || '失败'
+      const time = formatTime(item?.time_utc || '', '')
+      return `${account} -> ${targetType}「${target}」：${reason}${time ? `（${time}）` : ''}`
+    })
+    .slice(-20)
 }
 
 function buildPublicizeDetails(obj: Record<string, any>) {

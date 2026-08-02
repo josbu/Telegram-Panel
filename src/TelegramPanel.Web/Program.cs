@@ -482,6 +482,7 @@ builder.Services.AddScoped<AccountLoginProxyCoordinator>();
 builder.Services.AddHostedService<AccountLoginProxyCleanupService>();
 builder.Services.AddSingleton<WarpMaintenanceState>();
 builder.Services.AddHostedService<WarpMaintenanceBackgroundService>();
+builder.Services.AddHostedService<ProxyEgressMaintenanceBackgroundService>();
 builder.Services.AddScoped<AccountExportService>();
 builder.Services.AddScoped<DataSyncService>();
 builder.Services.AddScoped<UiPreferencesService>();

@@ -20,6 +20,17 @@ Cloudflare WARP。下方代理列表会单独显示每个 WARP 容器的出口�
 健康 WARP 默认不会每 720 分钟强制重启，以免无故更换 Telegram 账号 IP；确需参考
 tokens-pro 的周期刷新时，可设置 `TP_WARP_SCHEDULED_REFRESH_ENABLED=true`。
 
+## 普通代理或 Resin 的出口 IP 为什么一直不变
+
+从 v1.31.44 起，启用的普通 HTTP/SOCKS5 和 Resin 默认每 5 分钟重新检测出口，代理列表
+与账号列表会共用更新后的 IP 快照。普通代理只检测、不重启；Resin 使用独立探测身份并在
+完成后回收临时 Lease，不会替换账号自身的稳定身份。MTProxy 不能承载 HTTP 出口探测，
+因此不参与这项巡检。
+
+若“最近检测”没有更新，先确认 `Proxy__Egress__Maintenance__Enabled` 未设为 `false`，再
+查看容器日志中的 `Proxy egress maintenance` 错误，并手动检测单个代理以区分代理不可用
+和后台任务未运行。需要回滚时关闭该开关并重建容器；账号绑定和数据库结构不会改变。
+
 ## 发送验证码提示“session 被占用/进程占用”
 
 - 确保不要多开多个面板实例共享同一个 `sessions` 目录（会互相锁文件）

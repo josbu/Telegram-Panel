@@ -24,6 +24,11 @@ services:
       # 后台登录凭据文件（持久化到 ./docker-data/admin_auth.json）
       AdminAuth__CredentialsPath: "/data/admin_auth.json"
 
+      # 普通代理和 Resin 只刷新出口快照，不会重启外部代理资源。
+      Proxy__Egress__Maintenance__Enabled: "${TP_PROXY_EGRESS_MAINTENANCE_ENABLED:-true}"
+      Proxy__Egress__Maintenance__InitialDelaySeconds: "${TP_PROXY_EGRESS_MAINTENANCE_INITIAL_DELAY_SECONDS:-30}"
+      Proxy__Egress__Maintenance__IntervalMinutes: "${TP_PROXY_EGRESS_MAINTENANCE_INTERVAL_MINUTES:-5}"
+
       # 说明：这些“易变开关”建议通过面板「系统设置」保存到 /data/appsettings.local.json 来配置，
       # 不要直接改 docker-compose.yml（否则 git pull 更新时容易冲突）。
       # 注意：如果在这里设置了对应环境变量，会覆盖 /data/appsettings.local.json 的面板配置。

@@ -114,6 +114,7 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 - `GET /api/panel/proxies?usage=used|unused&categoryId={id}`：按使用状态或分类筛选代理
 - `GET/POST/PUT/DELETE /api/panel/proxy-categories[/{id}]`：查询和管理代理分类
 - `POST /api/panel/proxies/batch/category`：批量设置代理分类
+- `POST /api/panel/proxies/batch/delete`：逐项删除所选代理并返回成功、失败数及每项原因
 - `POST /api/panel/proxies`：新增普通代理或 Resin
 - `PUT /api/panel/proxies/{id}`：修改代理
 - `POST /api/panel/proxies/{id}/test`：检测代理出口
@@ -142,6 +143,7 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 ## 任务和模块
 
 - `GET /api/panel/tasks`：任务列表
+- `GET /api/panel/tasks/{id}`：任务详情，包含完整 `config`
 - `POST /api/panel/tasks`：创建任务
 - `POST /api/panel/tasks/{id}/pause`：暂停
 - `POST /api/panel/tasks/{id}/resume`：恢复
@@ -150,6 +152,15 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 - `GET /api/panel/modules`：模块列表
 - `POST /api/panel/modules/install`：安装模块包
 - `/api/panel/extensions/{module-slug}`：模块自定义后台管理接口约定
+
+自 v1.31.44 起，`channel_group_private_create` 任务会在 `config.recent_failures`
+返回最近 20 条失败明细。字段包括 `time_utc`、`account_id`、`target_type`、
+`target` 和 `reason`。成功判据是任务的 `failed` 大于零时，详情接口和任务中心均能看到
+对应失败原因；该字段为空表示没有失败或运行的是尚未支持失败明细的旧版本。
+
+失败原因来自当次执行，最长 500 字符。接口调用方不得把其中内容当作稳定错误码；需要自动化
+判断时应优先匹配 Telegram/RPC 的明确错误标识。回滚到 v1.31.43 或更早版本无需修改数据库，
+但旧版本不会继续写入该字段。
 
 需要给外部系统调用时，优先使用模块的 `MapEndpoints` 明确设计鉴权、限流和响应模型，
 不要直接把管理 Cookie 接口暴露到公网。
