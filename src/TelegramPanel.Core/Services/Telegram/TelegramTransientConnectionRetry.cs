@@ -16,12 +16,12 @@ internal static class TelegramTransientConnectionRetry
         "connection closed",
         "connection aborted",
         "connection refused",
+        "connection shut down",
         "forcibly closed",
         "transport connection",
         "SocketException",
         "ObjectDisposedException",
         "unexpected EOF",
-        "proxy",
         "连接失败",
         "连接已关闭",
         "连接被关闭",
@@ -44,6 +44,7 @@ internal static class TelegramTransientConnectionRetry
         }
         catch (Exception ex) when (ShouldRetry(ex, cancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             onRetry?.Invoke(ex);
             await resetClient();
             cancellationToken.ThrowIfCancellationRequested();

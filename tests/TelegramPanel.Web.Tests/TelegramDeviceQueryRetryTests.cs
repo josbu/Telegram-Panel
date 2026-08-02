@@ -34,6 +34,17 @@ public sealed class TelegramDeviceQueryRetryTests
     }
 
     [Fact]
+    public void WTelegram连接关闭错误会识别为瞬时故障()
+    {
+        var error = new WTelegram.WTException(
+            "Could not read payload length : Connection shut down");
+
+        Assert.True(TelegramTransientConnectionRetry.ShouldRetry(
+            error,
+            CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Telegram业务错误不会重建或重试()
     {
         var attempts = 0;
