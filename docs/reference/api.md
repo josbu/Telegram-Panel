@@ -19,6 +19,7 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 - `POST /api/panel/accounts/login/code`：提交手机号验证码
 - `POST /api/panel/accounts/login/password`：提交 2FA 密码
 - `DELETE /api/panel/accounts/{id}`：删除账号
+- `GET /api/panel/accounts/{id}/devices`：读取账号在线设备
 
 前端会为登录和导入请求明确携带 `proxyStrategy`；自定义调用也必须显式传入。省略策略、
 策略无效或所选代理不可用时，服务端会在连接 Telegram 前拒绝请求，不会回退直连。不要
@@ -34,6 +35,20 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 需要回滚时用相同接口提交原用户名，并以当前密码完成确认；成功判据是重新读取
 `GET /api/panel/auth/me` 时返回原用户名。凭据文件损坏或无法写入时应先停止修改并检查
 持久化目录权限，不要直接删除 `/data/admin_auth.json`。
+
+### 在线设备动态代理恢复（v1.31.43 及以上）
+
+`GET /api/panel/accounts/{id}/devices` 要求管理员已登录，且账号 Session 有效、账号当前选择的
+直连/全局/已有代理路由可用。读取在线设备遇到超时、连接关闭或动态代理出口失效等瞬时故障时，
+服务端会清理该账号的缓存客户端，重新解析当前代理并重试一次；不会为账号创建独立 WARP 容器。
+Telegram 的限流、权限和 Session 等业务错误不会重试，避免扩大限流。
+
+成功时返回 `200` 和设备数组；数组中的 `lastActiveAtUtc` 是 Telegram 返回的服务端时间，刷新
+页面会重新请求 Telegram，但该字段的更新粒度由 Telegram 决定。自动恢复后仍失败时返回 `502`，
+响应包含可直接展示的中文 `message` 和 `code=TELEGRAM_DEVICE_QUERY_FAILED`。此时先在代理管理中
+检测账号当前出口，再检查 Session 是否仍有效；不需要通过“切换代理再应用”手工清理客户端。
+成功判据是代理出口短暂变化后再次打开“在线设备”仍返回 `200`，日志至多记录一次客户端重建。
+如需回滚，恢复到 v1.31.42；本改动不包含数据库迁移，也不会改变账号代理绑定。
 
 ### Zip 逐账号批量代理
 
