@@ -36,6 +36,12 @@ tokens-pro 的周期刷新时，可设置 `TP_WARP_SCHEDULED_REFRESH_ENABLED=tru
 - 确保不要多开多个面板实例共享同一个 `sessions` 目录（会互相锁文件）
 - 如果刚修改了全局 `ApiId/ApiHash`，建议重启面板再登录
 
+## 数据同步后账号显示 “A task was canceled” 或失效
+
+适用于 v1.31.45 及以上版本。账号数据同步遇到单个 Telegram 请求取消时，只会将该账号记为本轮同步失败并保留原有 Telegram 状态，不会因为一次代理/网络瞬时中断把账号标为 Session 失效。
+
+先在任务中心查看失败详情并重新运行同步任务；如果仍持续失败，再对该账号执行状态刷新，检查代理出口和 Session 错误。只有出现 `AUTH_KEY_UNREGISTERED`、`SESSION_REVOKED` 等明确错误时，才需要重新登录账号。
+
 ## 侧栏为什么默认不展开子菜单
 
 为避免首次打开页面时侧栏过长，账号、频道、群组、机器人和扩展模块等子菜单默认收起。
