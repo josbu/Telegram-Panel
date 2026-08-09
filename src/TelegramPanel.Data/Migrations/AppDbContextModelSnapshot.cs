@@ -809,7 +809,7 @@ namespace TelegramPanel.Data.Migrations
 
                     b.ToTable("OutboundProxies", null, t =>
                         {
-                            t.HasCheckConstraint("CK_OutboundProxies_Kind", "\"Kind\" IN ('manual', 'resin', 'warp')");
+                            t.HasCheckConstraint("CK_OutboundProxies_Kind", "\"Kind\" IN ('manual', 'resin', 'warp', 'wireguard_warp')");
 
                             t.HasCheckConstraint("CK_OutboundProxies_LastLatencyMs", "\"LastLatencyMs\" IS NULL OR \"LastLatencyMs\" >= 0");
 

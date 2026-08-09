@@ -55,17 +55,28 @@ public class AccountTelegramToolsService
         var checkedAt = DateTime.UtcNow;
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var (client, users) = await TelegramTransientConnectionRetry.ExecuteAsync(
+                async () =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var currentClient = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var users = await ExecuteTelegramRequestAsync(
-                accountId,
-                "拉取账号资料",
-                () => client.Users_GetUsers(InputUser.Self),
+                    var currentUsers = await ExecuteTelegramRequestAsync(
+                        accountId,
+                        "拉取账号资料",
+                        () => currentClient.Users_GetUsers(InputUser.Self),
+                        cancellationToken,
+                        resetClientOnTimeout: false);
+                    return (currentClient, currentUsers);
+                },
+                () => _clientPool.RemoveClientAsync(accountId),
                 cancellationToken,
-                resetClientOnTimeout: true);
+                ex => _logger.LogWarning(
+                    "Transient Telegram connection failure while refreshing status for account {AccountId}; rebuilding client once ({ErrorType})",
+                    accountId,
+                    ex.GetBaseException().GetType().Name));
+
             cancellationToken.ThrowIfCancellationRequested();
             var self = users.OfType<User>().FirstOrDefault();
 
@@ -153,21 +164,12 @@ public class AccountTelegramToolsService
             await TryPersistStatusAsync(accountId, ok, account, persistProfile: true, cancellationToken: cancellationToken);
             return ok;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
             return new TelegramAccountStatusResult(
                 Ok: false,
                 Summary: "已取消",
                 Details: "操作已取消（页面关闭/刷新导致取消）",
-                CheckedAtUtc: checkedAt);
-        }
-        catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Blazor 页面刷新/断连时，Scoped 的 DbContext 可能已被释放；把它视为取消而不是错误。
-            return new TelegramAccountStatusResult(
-                Ok: false,
-                Summary: "已取消",
-                Details: "页面已关闭/刷新，操作被中断",
                 CheckedAtUtc: checkedAt);
         }
         catch (Exception ex)
@@ -253,6 +255,93 @@ public class AccountTelegramToolsService
         return list
             .OrderByDescending(x => x.DateUtc ?? DateTime.MinValue)
             .Take(limit)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<TelegramSystemMessage>> GetSystemMessagesInWindowAsync(
+        int accountId,
+        DateTime fromUtc,
+        DateTime toUtc,
+        int maxMessages = 300,
+        CancellationToken cancellationToken = default)
+    {
+        maxMessages = Math.Clamp(maxMessages, 20, 1000);
+        if (fromUtc.Kind == DateTimeKind.Unspecified)
+            fromUtc = DateTime.SpecifyKind(fromUtc, DateTimeKind.Utc);
+        else
+            fromUtc = fromUtc.ToUniversalTime();
+        if (toUtc.Kind == DateTimeKind.Unspecified)
+            toUtc = DateTime.SpecifyKind(toUtc, DateTimeKind.Utc);
+        else
+            toUtc = toUtc.ToUniversalTime();
+        if (toUtc < fromUtc)
+            (fromUtc, toUtc) = (toUtc, fromUtc);
+
+        var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var peer = await TryResolveSystemPeerAsync(client);
+        if (peer == null)
+            return Array.Empty<TelegramSystemMessage>();
+
+        const int pageSize = 100;
+        var offsetId = 0;
+        var scanned = 0;
+        var list = new List<TelegramSystemMessage>();
+
+        while (scanned < maxMessages)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var limit = Math.Min(pageSize, maxMessages - scanned);
+            var history = await ExecuteTelegramRequestAsync(
+                accountId,
+                "读取 777000 系统通知窗口",
+                () => client.Messages_GetHistory(peer, offset_id: offsetId, limit: limit),
+                cancellationToken,
+                resetClientOnTimeout: true);
+
+            if (history.Messages == null || history.Messages.Length == 0)
+                break;
+
+            scanned += history.Messages.Length;
+            var oldestSeenUtc = DateTime.MaxValue;
+            foreach (var msgBase in history.Messages)
+            {
+                if (msgBase is not Message message)
+                    continue;
+
+                var dateUtc = message.Date.ToUniversalTime();
+                if (dateUtc < oldestSeenUtc)
+                    oldestSeenUtc = dateUtc;
+
+                var text = message.message ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                if (dateUtc >= fromUtc && dateUtc <= toUtc)
+                {
+                    list.Add(new TelegramSystemMessage(
+                        Id: message.id,
+                        DateUtc: dateUtc,
+                        Text: text.Trim()));
+                }
+            }
+
+            if (oldestSeenUtc < fromUtc)
+                break;
+
+            var nextOffsetId = history.Messages
+                .Select(GetTelegramMessageId)
+                .Where(id => id > 0)
+                .DefaultIfEmpty(0)
+                .Min();
+            if (nextOffsetId <= 0 || nextOffsetId == offsetId || history.Messages.Length < limit)
+                break;
+
+            offsetId = nextOffsetId;
+        }
+
+        return list
+            .OrderByDescending(x => x.DateUtc ?? DateTime.MinValue)
             .ToList();
     }
 
@@ -1090,42 +1179,68 @@ public class AccountTelegramToolsService
     {
         try
         {
-            var raw = (target ?? string.Empty).Trim();
-            if (raw.Length == 0)
-                return (false, "目标为空", null);
+            return await TelegramTransientConnectionRetry.ExecuteAsync<(
+                bool Success,
+                string? Error,
+                ResolvedChatTarget? Target)>(
+                async () =>
+                {
+                    var raw = (target ?? string.Empty).Trim();
+                    if (raw.Length == 0)
+                        return (false, "目标为空", null);
 
-            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+                    var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            if (TryParseChatIdCandidate(raw, out var normalizedId))
-            {
-                var resolvedById = await TryResolveChatByIdFromDialogsAsync(client, normalizedId, cancellationToken);
-                if (resolvedById != null)
-                    return (true, null, resolvedById);
+                    if (TryParseChatIdCandidate(raw, out var normalizedId))
+                    {
+                        var resolvedById = await TryResolveChatByIdFromDialogsAsync(
+                            client,
+                            accountId,
+                            normalizedId,
+                            cancellationToken);
+                        if (resolvedById != null)
+                            return (true, null, resolvedById);
 
-                return (false, $"未找到 chatId={raw} 对应的群组/频道（请确认该账号已加入目标）", null);
-            }
+                        return (false, $"未找到 chatId={raw} 对应的群组/频道（请确认该账号已加入目标）", null);
+                    }
 
-            var url = NormalizeTelegramJoinUrl(raw);
-            var chat = await client.AnalyzeInviteLink(url, join: false);
-            cancellationToken.ThrowIfCancellationRequested();
+                    var url = NormalizeTelegramJoinUrl(raw);
+                    var chat = await ExecuteTelegramRequestAsync(
+                        accountId,
+                        "解析群组/频道目标",
+                        () => client.AnalyzeInviteLink(url, join: false),
+                        cancellationToken,
+                        resetClientOnTimeout: false);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            var peer = chat switch
-            {
-                TL.Channel c => c.ToInputPeer(),
-                TL.Chat c => c.ToInputPeer(),
-                _ => null
-            };
+                    var peer = chat switch
+                    {
+                        TL.Channel c => c.ToInputPeer(),
+                        TL.Chat c => c.ToInputPeer(),
+                        _ => null
+                    };
 
-            if (peer == null)
-                return (false, "无法解析目标群组/频道", null);
+                    if (peer == null)
+                        return (false, "无法解析目标群组/频道", null);
 
-            return chat switch
-            {
-                TL.Channel channel => (true, null, new ResolvedChatTarget(peer, NormalizeChatTitle(channel.title, channel.id.ToString(CultureInfo.InvariantCulture)), BuildChannelBotApiChatId(channel.id).ToString(CultureInfo.InvariantCulture))),
-                TL.Chat basic => (true, null, new ResolvedChatTarget(peer, NormalizeChatTitle(basic.title, basic.id.ToString(CultureInfo.InvariantCulture)), basic.id.ToString(CultureInfo.InvariantCulture))),
-                _ => (true, null, new ResolvedChatTarget(peer, raw, raw))
-            };
+                    return chat switch
+                    {
+                        TL.Channel channel => (true, null, new ResolvedChatTarget(peer, NormalizeChatTitle(channel.title, channel.id.ToString(CultureInfo.InvariantCulture)), BuildChannelBotApiChatId(channel.id).ToString(CultureInfo.InvariantCulture))),
+                        TL.Chat basic => (true, null, new ResolvedChatTarget(peer, NormalizeChatTitle(basic.title, basic.id.ToString(CultureInfo.InvariantCulture)), basic.id.ToString(CultureInfo.InvariantCulture))),
+                        _ => (true, null, new ResolvedChatTarget(peer, raw, raw))
+                    };
+                },
+                () => _clientPool.RemoveClientAsync(accountId),
+                cancellationToken,
+                ex => _logger.LogWarning(
+                    "Transient Telegram connection failure while resolving chat target for account {AccountId}; rebuilding client once ({ErrorType})",
+                    accountId,
+                    ex.GetBaseException().GetType().Name));
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1321,10 +1436,16 @@ public class AccountTelegramToolsService
 
     private async Task<ResolvedChatTarget?> TryResolveChatByIdFromDialogsAsync(
         Client client,
+        int accountId,
         long normalizedId,
         CancellationToken cancellationToken)
     {
-        var dialogs = await client.Messages_GetAllDialogs();
+        var dialogs = await ExecuteTelegramRequestAsync(
+            accountId,
+            "读取账号群组/频道列表",
+            () => client.Messages_GetAllDialogs(),
+            cancellationToken,
+            resetClientOnTimeout: false);
         cancellationToken.ThrowIfCancellationRequested();
 
         foreach (var chat in dialogs.chats.Values)
@@ -2181,21 +2302,21 @@ public class AccountTelegramToolsService
 
     private int ResolveApiId(Account account)
     {
-        if (int.TryParse(_configuration["Telegram:ApiId"], out var globalApiId) && globalApiId > 0)
-            return globalApiId;
         if (account.ApiId > 0)
             return account.ApiId;
-        throw new InvalidOperationException("未配置全局 ApiId，且账号缺少 ApiId");
+        if (int.TryParse(_configuration["Telegram:ApiId"], out var globalApiId) && globalApiId > 0)
+            return globalApiId;
+        throw new InvalidOperationException("账号缺少 ApiId，且未配置全局 ApiId");
     }
 
     private string ResolveApiHash(Account account)
     {
+        if (!string.IsNullOrWhiteSpace(account.ApiHash))
+            return account.ApiHash.Trim();
         var global = _configuration["Telegram:ApiHash"];
         if (!string.IsNullOrWhiteSpace(global))
             return global.Trim();
-        if (!string.IsNullOrWhiteSpace(account.ApiHash))
-            return account.ApiHash.Trim();
-        throw new InvalidOperationException("未配置全局 ApiHash，且账号缺少 ApiHash");
+        throw new InvalidOperationException("账号缺少 ApiHash，且未配置全局 ApiHash");
     }
 
     private static string ResolveSessionKey(Account account, string apiHash)

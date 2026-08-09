@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -1734,14 +1735,12 @@ public static class PanelAdminApiEndpoints
         HttpRequest httpRequest,
         AccountImportService importService,
         AccountManagementService accountManagement,
-        IConfiguration configuration,
         CancellationToken cancellationToken)
     {
         if (!httpRequest.HasFormContentType)
             return Results.BadRequest(new OperationResultDto(false, "请使用 multipart/form-data 上传 session 文件"));
 
-        if (!TryGetTelegramApi(configuration, out var apiId, out var apiHash, out var apiError))
-            return Results.BadRequest(new OperationResultDto(false, apiError));
+
 
         var form = await httpRequest.ReadFormAsync(cancellationToken);
         var files = form.Files.GetFiles("files");
@@ -1765,10 +1764,8 @@ public static class PanelAdminApiEndpoints
 
         try
         {
-            var results = await importService.ImportFromSessionFileStreamsAsync(
+            var results = await importService.ImportFromSessionFileStreamsBalancedAsync(
                 importFiles,
-                apiId,
-                apiHash,
                 categoryId,
                 proxyBinding,
                 cancellationToken);
@@ -1785,11 +1782,9 @@ public static class PanelAdminApiEndpoints
         ImportStringSessionRequestDto request,
         AccountImportService importService,
         AccountManagementService accountManagement,
-        IConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        if (!TryGetTelegramApi(configuration, out var apiId, out var apiHash, out var apiError))
-            return Results.BadRequest(new OperationResultDto(false, apiError));
+
 
         var sessionString = (request.SessionString ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(sessionString))
@@ -1804,10 +1799,8 @@ public static class PanelAdminApiEndpoints
         }
         await importService.ValidateImportProxyBindingAsync(proxyBinding, cancellationToken);
 
-        var result = await importService.ImportFromStringSessionAsync(
+        var result = await importService.ImportFromStringSessionBalancedAsync(
             sessionString,
-            apiId,
-            apiHash,
             request.CategoryId,
             proxyBinding,
             cancellationToken);
@@ -1818,12 +1811,12 @@ public static class PanelAdminApiEndpoints
         StartAccountLoginRequestDto request,
         IAccountService accountService,
         AccountManagementService accountManagement,
+        TelegramApiProfilePool apiProfilePool,
         AccountLoginProxyCoordinator loginProxy,
         IConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        if (!TryGetTelegramApi(configuration, out _, out _, out var apiError))
-            return Results.BadRequest(new OperationResultDto(false, apiError));
+
 
         var phone = (request.Phone ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(phone))
@@ -1836,6 +1829,16 @@ public static class PanelAdminApiEndpoints
                 request.LoginId,
                 loginProxy,
                 accountManagement);
+        TelegramApiCredentials apiCredentials;
+        try
+        {
+            var existingAccount = await accountManagement.GetAccountByPhoneAsync(phone);
+            apiCredentials = await apiProfilePool.SelectForAccountAsync(existingAccount, accountManagement);
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new OperationResultDto(false, ex.Message));
+        }
         AccountLoginProxyStateLease? reuseLease = null;
         AccountLoginProxyState proxyState;
         try
@@ -1907,7 +1910,8 @@ public static class PanelAdminApiEndpoints
             result = await accountService.StartLoginAsync(
                 loginId,
                 phone,
-                proxyState.Resolution);
+                proxyState.Resolution,
+                apiCredentials);
         }
         catch (Exception ex) when (IsLoginProxyInputError(ex))
         {
@@ -1944,12 +1948,12 @@ public static class PanelAdminApiEndpoints
         StartAccountQrLoginRequestDto request,
         IAccountService accountService,
         AccountManagementService accountManagement,
+        TelegramApiProfilePool apiProfilePool,
         AccountLoginProxyCoordinator loginProxy,
         IConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        if (!TryGetTelegramApi(configuration, out _, out _, out var apiError))
-            return Results.Ok(new AccountQrLoginResponseDto(false, request.LoginId, "failed", apiError, null, null, null));
+
 
         var reuseLoginId = request.LoginId > 0 && loginProxy.HasState(request.LoginId);
         var loginId = reuseLoginId
@@ -1958,6 +1962,15 @@ public static class PanelAdminApiEndpoints
                 request.LoginId,
                 loginProxy,
                 accountManagement);
+        TelegramApiCredentials apiCredentials;
+        try
+        {
+            apiCredentials = await apiProfilePool.SelectForNewAccountAsync(accountManagement);
+        }
+        catch (Exception ex)
+        {
+            return Results.Ok(new AccountQrLoginResponseDto(false, request.LoginId, "failed", ex.Message, null, null, null));
+        }
         AccountLoginProxyStateLease? reuseLease = null;
         AccountLoginProxyState proxyState;
         try
@@ -2015,7 +2028,8 @@ public static class PanelAdminApiEndpoints
         {
             result = await accountService.StartQrLoginAsync(
                 loginId,
-                proxyState.Resolution);
+                proxyState.Resolution,
+                apiCredentials);
         }
         catch
         {
@@ -2237,7 +2251,7 @@ public static class PanelAdminApiEndpoints
         var dto = new SettingsDto(
             LocalConfigPath: localPath,
             LocalConfigExists: File.Exists(localPath),
-            Telegram: new TelegramApiSettingsDto(configuration["Telegram:ApiId"] ?? "", configuration["Telegram:ApiHash"] ?? ""),
+            Telegram: new TelegramApiSettingsDto(configuration["Telegram:ApiId"] ?? "", configuration["Telegram:ApiHash"] ?? "", ReadTelegramApiProfiles(configuration)),
             GlobalProxy: ReadGlobalProxySettings(configuration),
             CloudMail: new CloudMailSettingsDto(configuration["CloudMail:BaseUrl"] ?? "", configuration["CloudMail:Domain"] ?? "", configuration["CloudMail:Token"] ?? ""),
             Ai: new AiSettingsDto(
@@ -2310,18 +2324,120 @@ public static class PanelAdminApiEndpoints
         ITelegramClientPool telegramClientPool,
         CancellationToken cancellationToken)
     {
-        if (!int.TryParse(request.ApiId, out var apiId) || apiId <= 0)
-            return Results.BadRequest(new OperationResultDto(false, "默认 API ID 格式错误"));
-        if (!TelegramApiConfigValidator.TryNormalizeApiHash(request.ApiHash, out var apiHash, out var reason))
-            return Results.BadRequest(new OperationResultDto(false, $"默认 API Hash 无效：{reason}"));
+        var requestedProfiles = request.Profiles ?? ReadTelegramApiProfiles(configuration);
+        var profiles = NormalizeTelegramApiProfiles(requestedProfiles, out var profileError);
+        if (profileError != null)
+            return Results.BadRequest(new OperationResultDto(false, profileError));
 
+        var (hasDefaultApi, defaultApiIdText, defaultApiHashText) = NormalizeTelegramApiDefaultInput(request.ApiId, request.ApiHash);
+        if (hasDefaultApi)
+        {
+            if (!int.TryParse(defaultApiIdText, out var apiId) || apiId <= 0)
+                return Results.BadRequest(new OperationResultDto(false, "默认 API ID 格式错误"));
+            if (!TelegramApiConfigValidator.TryNormalizeApiHash(defaultApiHashText, out var apiHash, out var reason))
+                return Results.BadRequest(new OperationResultDto(false, $"默认 API Hash 无效：{reason}"));
+            request = request with { ApiId = apiId.ToString(CultureInfo.InvariantCulture), ApiHash = apiHash };
+        }
+        else if (profiles.All(profile => !profile.Enabled))
+        {
+            return Results.BadRequest(new OperationResultDto(false, "请至少配置默认 API 或启用一个 API 配置"));
+        }
         var root = await LoadLocalConfigRootAsync(LocalConfigFile.ResolvePath(configuration, environment));
         var telegram = EnsureObject(root, "Telegram");
-        telegram["ApiId"] = apiId;
-        telegram["ApiHash"] = apiHash;
+        if (hasDefaultApi)
+        {
+            telegram["ApiId"] = int.Parse(request.ApiId, CultureInfo.InvariantCulture);
+            telegram["ApiHash"] = request.ApiHash;
+        }
+        else
+        {
+            telegram["ApiId"] = 0;
+            telegram["ApiHash"] = string.Empty;
+        }
+        var normalizedProfiles = new JsonArray();
+        foreach (var profile in profiles)
+        {
+            normalizedProfiles.Add(new JsonObject
+            {
+                ["Name"] = profile.Name,
+                ["ApiId"] = profile.ApiId,
+                ["ApiHash"] = profile.ApiHash,
+                ["Enabled"] = profile.Enabled,
+                ["Weight"] = profile.Weight,
+                ["Notes"] = profile.Notes
+            });
+        }
+        telegram["ApiProfiles"] = normalizedProfiles;
         await SaveLocalRootAsync(configuration, environment, root, cancellationToken);
         await telegramClientPool.RemoveAllClientsAsync();
         return Results.Ok(new OperationResultDto(true, "API 配置已保存，Telegram 客户端缓存已清理"));
+    }
+
+    internal static (bool HasDefaultApi, string ApiId, string ApiHash) NormalizeTelegramApiDefaultInput(string? apiId, string? apiHash)
+    {
+        var apiIdText = (apiId ?? string.Empty).Trim();
+        var apiHashText = (apiHash ?? string.Empty).Trim();
+        if (apiIdText == "0" && string.IsNullOrWhiteSpace(apiHashText))
+            apiIdText = string.Empty;
+
+        return (!string.IsNullOrWhiteSpace(apiIdText) || !string.IsNullOrWhiteSpace(apiHashText), apiIdText, apiHashText);
+    }
+
+    private static IReadOnlyList<TelegramApiProfileDto> ReadTelegramApiProfiles(IConfiguration configuration) =>
+        TelegramApiProfilePool.ReadConfiguredProfiles(configuration)
+            .Select(profile => new TelegramApiProfileDto(
+                profile.Name,
+                profile.ApiId.ToString(CultureInfo.InvariantCulture),
+                profile.ApiHash,
+                profile.Enabled,
+                profile.Weight,
+                profile.Notes))
+            .ToList();
+
+    private static IReadOnlyList<TelegramApiProfile> NormalizeTelegramApiProfiles(
+        IReadOnlyList<TelegramApiProfileDto>? profiles,
+        out string? error)
+    {
+        error = null;
+        var normalized = new List<TelegramApiProfile>();
+        if (profiles == null || profiles.Count == 0)
+            return normalized;
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < profiles.Count; i++)
+        {
+            var profile = profiles[i];
+            var name = (profile.Name ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(name))
+                name = $"API {i + 1}";
+            if (!names.Add(name))
+            {
+                error = $"API 配置名称重复：{name}";
+                return Array.Empty<TelegramApiProfile>();
+            }
+
+            if (!int.TryParse(profile.ApiId, out var apiId) || apiId <= 0)
+            {
+                error = $"API 配置 {name} 的 ApiId 格式错误";
+                return Array.Empty<TelegramApiProfile>();
+            }
+
+            if (!TelegramApiConfigValidator.TryNormalizeApiHash(profile.ApiHash, out var apiHash, out var reason))
+            {
+                error = $"API 配置 {name} 的 ApiHash 无效：{reason}";
+                return Array.Empty<TelegramApiProfile>();
+            }
+
+            normalized.Add(new TelegramApiProfile(
+                name,
+                apiId,
+                apiHash,
+                profile.Enabled,
+                Math.Clamp(profile.Weight <= 0 ? 1 : profile.Weight, 1, 1000),
+                string.IsNullOrWhiteSpace(profile.Notes) ? null : profile.Notes.Trim()));
+        }
+
+        return normalized;
     }
 
     private static GlobalProxySettingsDto ReadGlobalProxySettings(IConfiguration configuration)
@@ -6621,8 +6737,17 @@ public static class PanelAdminApiEndpoints
         string? twoFactorPasswordToSave = null,
         bool activate = true)
     {
-        if (!TryGetTelegramApi(configuration, out var apiId, out var apiHash, out var apiError))
+        int apiId;
+        string apiHash;
+        if (TelegramApiProfilePool.TryNormalizeCredentials(accountInfo.ApiId, accountInfo.ApiHash, out var assignedApiHash, out _))
+        {
+            apiId = accountInfo.ApiId;
+            apiHash = assignedApiHash;
+        }
+        else if (!TryGetTelegramApi(configuration, out apiId, out apiHash, out var apiError))
+        {
             throw new InvalidOperationException(apiError);
+        }
 
         var sessionsPath = configuration["Telegram:SessionsPath"] ?? "sessions";
         var phoneDigits = PhoneNumberFormatter.NormalizeToDigits(accountInfo.Phone);
@@ -6740,19 +6865,15 @@ public static class PanelAdminApiEndpoints
         out string apiHash,
         out string error)
     {
-        apiHash = (configuration["Telegram:ApiHash"] ?? string.Empty).Trim();
-        if (!int.TryParse(configuration["Telegram:ApiId"], out apiId) || apiId <= 0)
+        if (!TelegramApiProfilePool.TrySelectDefault(configuration, out var credentials, out error))
         {
-            error = "请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）";
+            apiId = 0;
+            apiHash = string.Empty;
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(apiHash))
-        {
-            error = "请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）";
-            return false;
-        }
-
+        apiId = credentials.ApiId;
+        apiHash = credentials.ApiHash;
         error = string.Empty;
         return true;
     }
@@ -7831,7 +7952,8 @@ public sealed record VersionApplyResultDto(
 public sealed record UpdateModeRequestDto(string? Mode);
 public sealed record UpdateModeResultDto(bool Success, string Mode, string Message);
 
-public sealed record TelegramApiSettingsDto(string ApiId, string ApiHash);
+public sealed record TelegramApiSettingsDto(string ApiId, string ApiHash, IReadOnlyList<TelegramApiProfileDto>? Profiles = null);
+public sealed record TelegramApiProfileDto(string? Name, string? ApiId, string? ApiHash, bool Enabled = true, int Weight = 1, string? Notes = null);
 public sealed record GlobalProxySettingsDto(
     bool Enabled,
     string? Protocol,

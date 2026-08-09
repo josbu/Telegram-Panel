@@ -8,7 +8,7 @@ public sealed class ReleaseVersionContractTests
     [Fact]
     public void 项目版本字段保持一致且发布包写入信息版本()
     {
-        var root = FindRepositoryRoot();
+        var root = TestRepositoryRoot.Find();
         var props = XDocument.Load(Path.Combine(root, "Directory.Build.props"));
         var values = new[]
         {
@@ -33,7 +33,7 @@ public sealed class ReleaseVersionContractTests
     [InlineData("release.yml")]
     public void 正式标签工作流校验项目版本(string workflowName)
     {
-        var root = FindRepositoryRoot();
+        var root = TestRepositoryRoot.Find();
         var workflow = File.ReadAllText(
             Path.Combine(root, ".github", "workflows", workflowName));
 
@@ -46,7 +46,7 @@ public sealed class ReleaseVersionContractTests
     [Fact]
     public void Docker拉取请求覆盖前端与版本文件()
     {
-        var root = FindRepositoryRoot();
+        var root = TestRepositoryRoot.Find();
         var workflow = File.ReadAllText(
             Path.Combine(root, ".github", "workflows", "docker.yml"));
 
@@ -61,19 +61,4 @@ public sealed class ReleaseVersionContractTests
     private static string RemoveRevisionComponent(string version) =>
         version.EndsWith(".0", StringComparison.Ordinal) ? version[..^2] : version;
 
-    private static string FindRepositoryRoot()
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
-             directory != null;
-             directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Directory.Build.props"))
-                && Directory.Exists(Path.Combine(directory.FullName, ".github", "workflows")))
-            {
-                return directory.FullName;
-            }
-        }
-
-        throw new DirectoryNotFoundException("未找到仓库根目录");
-    }
 }

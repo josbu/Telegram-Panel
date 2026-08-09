@@ -12,6 +12,8 @@ public record AccountInfo
     public string? FirstName { get; init; }
     public string? LastName { get; init; }
     public string? PhotoPath { get; init; }
+    public int ApiId { get; init; }
+    public string? ApiHash { get; init; }
     public AccountStatus Status { get; init; }
     public DateTime? LastActiveAt { get; init; }
 

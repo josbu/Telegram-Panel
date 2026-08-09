@@ -324,7 +324,7 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("OutboundProxies", table =>
             {
-                table.HasCheckConstraint("CK_OutboundProxies_Kind", "\"Kind\" IN ('manual', 'resin', 'warp')");
+                table.HasCheckConstraint("CK_OutboundProxies_Kind", "\"Kind\" IN ('manual', 'resin', 'warp', 'wireguard_warp')");
                 table.HasCheckConstraint("CK_OutboundProxies_Protocol", "\"Protocol\" IN ('http', 'socks5', 'mtproto')");
                 table.HasCheckConstraint("CK_OutboundProxies_TestStatus", "\"TestStatus\" IN ('unknown', 'ok', 'fail')");
                 table.HasCheckConstraint("CK_OutboundProxies_Port", "\"Port\" BETWEEN 1 AND 65535");

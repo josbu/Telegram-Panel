@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using TelegramPanel.Core.Models;
 using TelegramPanel.Data.Entities;
 
@@ -23,21 +24,32 @@ public interface IProxyEgressProbeService
         ProxyConnectionOptions options,
         bool requireWarp = false,
         CancellationToken cancellationToken = default);
+
+    Task<EgressProbeResult> ProbeProxyHealthAsync(
+        OutboundProxy proxy,
+        string stableAccountKey,
+        CancellationToken cancellationToken = default) =>
+        ProbeProxyAsync(proxy, stableAccountKey, cancellationToken);
 }
 
 /// <summary>
-/// 通过 Cloudflare Trace 检测代理和面板的公网出口。
+/// 检测代理和面板的公网出口；手动元数据检测使用 Trace，后台健康巡检使用轻量 ProbeUrl。
 /// </summary>
 public sealed class ProxyEgressProbeService : IProxyEgressProbeService
 {
-    private static readonly Uri ProbeUri = new("https://cloudflare.com/cdn-cgi/trace");
     private static readonly Uri GeoLookupBaseUri = new("https://ipwhois.app/json/");
     private static readonly ConcurrentDictionary<string, GeoCacheEntry> GeoCache = new();
     private static readonly object GeoCacheWriteLock = new();
     private static readonly TimeSpan GeoCacheLifetime = TimeSpan.FromHours(6);
     private static readonly TimeSpan GeoFailureCacheLifetime = TimeSpan.FromMinutes(15);
+    private readonly IConfiguration? _configuration;
     internal const int MaxGeoCacheEntries = 4096;
     private const int MaxResponseBytes = 256 * 1024;
+
+    public ProxyEgressProbeService(IConfiguration? configuration = null)
+    {
+        _configuration = configuration;
+    }
 
     public Task<EgressProbeResult> ProbePanelAsync(CancellationToken cancellationToken = default)
     {
@@ -48,7 +60,11 @@ public sealed class ProxyEgressProbeService : IProxyEgressProbeService
             ConnectTimeout = TimeSpan.FromSeconds(10),
             PooledConnectionLifetime = TimeSpan.FromMinutes(1)
         };
-        return ProbeAsync(handler, requireWarp: false, cancellationToken);
+        return ProbeMetadataAsync(
+            handler,
+            new Uri(ProbeOptions.MetadataUrl),
+            requireWarp: false,
+            cancellationToken);
     }
 
     public Task<EgressProbeResult> ProbeProxyAsync(
@@ -59,7 +75,7 @@ public sealed class ProxyEgressProbeService : IProxyEgressProbeService
         var options = AccountProxyResolver.BuildConnectionOptions(proxy, stableAccountKey);
         return ProbeProxyAsync(
             options,
-            requireWarp: proxy.Kind == OutboundProxyKinds.Warp,
+            requireWarp: proxy.Kind is OutboundProxyKinds.Warp or OutboundProxyKinds.WireGuardWarp,
             cancellationToken);
     }
 
@@ -69,8 +85,102 @@ public sealed class ProxyEgressProbeService : IProxyEgressProbeService
         CancellationToken cancellationToken = default)
     {
         if (options.Protocol == OutboundProxyProtocols.MtProto)
+            return MtProxyProbeFailure();
+
+        return ProbeMetadataAsync(
+            CreateProxyHandler(options),
+            new Uri(ProbeOptions.MetadataUrl),
+            requireWarp,
+            cancellationToken);
+    }
+
+    public Task<EgressProbeResult> ProbeProxyHealthAsync(
+        OutboundProxy proxy,
+        string stableAccountKey,
+        CancellationToken cancellationToken = default)
+    {
+        var options = AccountProxyResolver.BuildConnectionOptions(proxy, stableAccountKey);
+        if (options.Protocol == OutboundProxyProtocols.MtProto)
+            return MtProxyProbeFailure();
+
+        return ProbeHealthAsync(
+            CreateProxyHandler(options),
+            new Uri(ProbeOptions.ProbeUrl),
+            cancellationToken);
+    }
+
+    private ProxyEgressProbeOptions ProbeOptions =>
+        ProxyEgressProbeOptions.From(_configuration);
+
+    private static SocketsHttpHandler CreateProxyHandler(ProxyConnectionOptions options) => new()
+    {
+        UseProxy = false,
+        AllowAutoRedirect = false,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(1),
+        ConnectCallback = async (context, token) =>
         {
-            return Task.FromResult(new EgressProbeResult(
+            var tcpClient = await ProxyTcpConnector.ConnectAsync(
+                context.DnsEndPoint.Host,
+                context.DnsEndPoint.Port,
+                options,
+                token);
+            return tcpClient.GetStream();
+        }
+    };
+
+    private static Task<EgressProbeResult> MtProxyProbeFailure() =>
+        Task.FromResult(new EgressProbeResult(
+            false,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            DateTime.UtcNow,
+            "MTProxy 仅用于 Telegram MTProto，不能通过 HTTP 请求检测公网 IP"));
+
+    private static async Task<EgressProbeResult> ProbeHealthAsync(
+        SocketsHttpHandler handler,
+        Uri probeUri,
+        CancellationToken cancellationToken)
+    {
+        var checkedAtUtc = DateTime.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            using (handler)
+            using (var client = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(15)
+            })
+            using (var request = new HttpRequestMessage(HttpMethod.Get, probeUri))
+            {
+                request.Headers.UserAgent.ParseAdd("TelegramPanel-EgressProbe/1.0");
+                request.Headers.Accept.ParseAdd("*/*");
+
+                using var response = await client.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+                stopwatch.Stop();
+                return new EgressProbeResult(
+                    true,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
+                    checkedAtUtc,
+                    null);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            stopwatch.Stop();
+            return new EgressProbeResult(
                 false,
                 null,
                 null,
@@ -78,31 +188,14 @@ public sealed class ProxyEgressProbeService : IProxyEgressProbeService
                 null,
                 null,
                 null,
-                DateTime.UtcNow,
-                "MTProxy 仅用于 Telegram MTProto，不能通过 HTTP 请求检测公网 IP"));
+                checkedAtUtc,
+                SanitizeError(ex));
         }
-
-        var handler = new SocketsHttpHandler
-        {
-            UseProxy = false,
-            AllowAutoRedirect = false,
-            ConnectTimeout = TimeSpan.FromSeconds(10),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(1),
-            ConnectCallback = async (context, token) =>
-            {
-                var tcpClient = await ProxyTcpConnector.ConnectAsync(
-                    context.DnsEndPoint.Host,
-                    context.DnsEndPoint.Port,
-                    options,
-                    token);
-                return tcpClient.GetStream();
-            }
-        };
-        return ProbeAsync(handler, requireWarp, cancellationToken);
     }
 
-    private static async Task<EgressProbeResult> ProbeAsync(
+    private static async Task<EgressProbeResult> ProbeMetadataAsync(
         SocketsHttpHandler handler,
+        Uri metadataUri,
         bool requireWarp,
         CancellationToken cancellationToken)
     {
@@ -115,7 +208,7 @@ public sealed class ProxyEgressProbeService : IProxyEgressProbeService
             {
                 Timeout = TimeSpan.FromSeconds(25)
             })
-            using (var request = new HttpRequestMessage(HttpMethod.Get, ProbeUri))
+            using (var request = new HttpRequestMessage(HttpMethod.Get, metadataUri))
             {
                 request.Headers.UserAgent.ParseAdd("TelegramPanel-EgressProbe/1.0");
                 request.Headers.Accept.ParseAdd("text/plain");

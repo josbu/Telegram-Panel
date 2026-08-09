@@ -19,12 +19,32 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 - `POST /api/panel/accounts/login/code`：提交手机号验证码
 - `POST /api/panel/accounts/login/password`：提交 2FA 密码
 - `DELETE /api/panel/accounts/{id}`：删除账号
+- `POST /api/panel/accounts/{id}/telegram-status`：刷新单个账号 Telegram 状态
+- `POST /api/panel/accounts/telegram-status`：批量刷新账号 Telegram 状态
+- `POST /api/panel/accounts/cleanup-waste`：复查并清理明确失效的账号
 - `GET /api/panel/accounts/{id}/devices`：读取账号在线设备
 
 前端会为登录和导入请求明确携带 `proxyStrategy`；自定义调用也必须显式传入。省略策略、
 策略无效或所选代理不可用时，服务端会在连接 Telegram 前拒绝请求，不会回退直连。不要
 绕过这些入口自行先直连创建 Session。
 
+
+### Telegram API 配置池设置
+
+`GET /api/panel/settings` 的 `telegram` 字段包含兼容旧版的 `apiId`、`apiHash`，以及可选 `profiles` 数组。`POST /api/panel/settings/telegram-api` 接收相同结构并写入 `appsettings.local.json`：
+
+```json
+{
+  "apiId": "123456",
+  "apiHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "profiles": [
+    { "name": "api-a", "apiId": "123456", "apiHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "enabled": true, "weight": 1, "notes": "主配置" },
+    { "name": "api-b", "apiId": "234567", "apiHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "enabled": true, "weight": 1 }
+  ]
+}
+```
+
+`profiles` 省略时保留当前配置池；传空数组表示清空配置池。默认 `apiId/apiHash` 可留空，但此时必须至少有一个启用的 profile。服务端会校验每个 ApiHash 为 32 位十六进制字符串，名称不可重复，`weight` 规范到 `1-1000`。新账号登录和不自带 API 的导入入口使用启用 profile 做最少使用量分配；已有账号继续使用数据库中保存的 `ApiId/ApiHash`。
 `POST /api/panel/settings/username` 的以下合同适用于 v1.31.42 及以上版本。调用方必须
 已经通过管理员 Cookie 认证，请求 JSON 必须提供 `currentPassword` 和 `newUsername`。
 新用户名要求 4-32 位，只包含字母、数字、下划线、短横线或点，且不能使用 `admin`、
@@ -49,6 +69,18 @@ Telegram 的限流、权限和 Session 等业务错误不会重试，避免扩�
 检测账号当前出口，再检查 Session 是否仍有效；不需要通过“切换代理再应用”手工清理客户端。
 成功判据是代理出口短暂变化后再次打开“在线设备”仍返回 `200`，日志至多记录一次客户端重建。
 如需回滚，恢复到 v1.31.42；本改动不包含数据库迁移，也不会改变账号代理绑定。
+
+### 账号状态恢复与安全清理（v1.31.46 及以上）
+
+状态刷新端点遇到动态代理连接关闭、IO 错误、请求超时或非调用方触发的取消时，会清理账号缓存
+客户端、重新解析当前代理并重试一次。调用方主动取消以及 Telegram RPC、权限、限流和 Session
+错误不会重试。单账号端点仍返回 `TelegramStatusDto`，批量端点仍逐项返回结果，响应结构不变。
+
+`POST /api/panel/accounts/cleanup-waste` 会在删除前重新检测账号，但只删除明确封禁、注销、受限、
+冻结、需要两步验证密码或 Session 永久失效的账号。`连接失败`、`请求超时`、`刷新失败`、
+创建频道探测失败和无法获取账号资料不会删除，
+也不会被 `GET /api/panel/accounts?onlyWaste=true` 返回。成功判据是临时故障账号得到“跳过”结果且
+数据库记录与 Session 文件均保留。持续连接失败时先检查代理出口；回滚到 v1.31.45 无需迁移数据。
 
 ### Zip 逐账号批量代理
 
@@ -161,6 +193,13 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 失败原因来自当次执行，最长 500 字符。接口调用方不得把其中内容当作稳定错误码；需要自动化
 判断时应优先匹配 Telegram/RPC 的明确错误标识。回滚到 v1.31.43 或更早版本无需修改数据库，
 但旧版本不会继续写入该字段。
+
+`auto_change_login_email` 任务使用 `config.items` 返回最近账号级结果，字段包括 `time_utc`、
+`account_id`、`phone`、`email`、`result`、`message`、`matched_message_id` 和
+`matched_message_date_utc`。`result` 只表示该账号在本轮任务中的处理结果：`success` 表示已发送
+并在开启自动确认时完成登录邮箱验证码确认，`skipped` 表示因 Cloud Mail 配置、目标邮箱或通知匹配
+条件不足而未操作，`failed` 表示 Telegram/Cloud Mail 调用失败或收码确认失败。默认不会删除、停用
+或禁用账号；除非配置 `force=true`，否则没有匹配 777000 登录邮箱重置通知的账号不会被换绑。
 
 需要给外部系统调用时，优先使用模块的 `MapEndpoints` 明确设计鉴权、限流和响应模型，
 不要直接把管理 Cookie 接口暴露到公网。

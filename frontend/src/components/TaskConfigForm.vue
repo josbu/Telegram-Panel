@@ -4,7 +4,7 @@
 
     <template v-if="taskType === 'user_chat_active'">
       <el-alert
-        title="MaxMessages=0 表示持续运行，直到在任务中心手动取消。词典消息支持 {time} 和文本字典变量。"
+        title="MaxMessages=0 表示持续运行，直到在任务中心手动取消；MaxMessages>0 时每次运行最多按可用账号数发送，每个账号最多 1 条。词典消息支持 {time} 和文本字典变量。"
         type="info"
         :closable="false"
         class="mb-3"
@@ -279,6 +279,67 @@
       />
     </template>
 
+    <template v-else-if="taskType === 'auto_change_login_email'">
+      <el-alert
+        title="默认只处理匹配 777000 登录邮箱重置通知的账号；强制执行仅用于人工确认后的补救场景。Cloud Mail URL/Token 使用系统设置页配置。"
+        type="info"
+        :closable="false"
+        class="mb-3"
+      />
+      <el-form-item label="账号分类">
+        <el-select v-model="forms.autoLoginEmail.categoryIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择执行账号分类">
+          <el-option v-for="item in accountCategories" :key="item.id" :label="categoryLabel(item)" :value="item.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="邮箱域名">
+        <el-input v-model="forms.autoLoginEmail.domain" placeholder="example.com" />
+        <div class="form-hint no-offset">将生成 手机号数字@域名；留空时使用系统 CloudMail:Domain。</div>
+      </el-form-item>
+      <el-row :gutter="12">
+        <el-col :span="8">
+          <el-form-item label="通知距今天数">
+            <el-input-number v-model="forms.autoLoginEmail.triggerDaysAgo" :min="0" :max="30" class="full" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
+          <el-form-item label="通知窗口(小时)">
+            <el-input-number v-model="forms.autoLoginEmail.triggerWindowHours" :min="1" :max="336" class="full" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
+          <el-form-item label="最多扫描通知">
+            <el-input-number v-model="forms.autoLoginEmail.maxSystemMessages" :min="20" :max="1000" class="full" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-form-item label="触发短语">
+        <el-input v-model="forms.autoLoginEmail.triggerPhrasesText" type="textarea" :rows="3" placeholder="可留空使用默认短语；每行一个额外匹配短语" />
+      </el-form-item>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="强制执行">
+            <el-switch v-model="forms.autoLoginEmail.force" active-text="启用" inactive-text="关闭" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="自动确认">
+            <el-switch v-model="forms.autoLoginEmail.autoConfirm" active-text="启用" inactive-text="关闭" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row v-if="forms.autoLoginEmail.autoConfirm" :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="收码间隔(秒)">
+            <el-input-number v-model="forms.autoLoginEmail.pollIntervalSeconds" :min="2" :max="30" class="full" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="收码超时(秒)">
+            <el-input-number v-model="forms.autoLoginEmail.pollTimeoutSeconds" :min="10" :max="600" class="full" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+    </template>
 
     <el-alert v-if="draft.validationError" :title="draft.validationError" type="warning" :closable="false" class="mt-2" />
   </div>
@@ -330,6 +391,7 @@ const forms = reactive({
   userChatActive: defaultUserChatActiveForm(),
   privateCreate: defaultPrivateCreateForm(),
   publicize: defaultPublicizeForm(),
+  autoLoginEmail: defaultAutoLoginEmailForm(),
 })
 
 const textDictionaryNames = computed(() =>
@@ -392,6 +454,9 @@ async function loadMetadata() {
     selectableAiModels.value = Array.from(new Set(settings.ai.presetModels.map((x) => x.trim()).filter(Boolean)))
     globalDefaultAiModel.value = settings.ai.defaultModel || ''
     applyAiModelSelection(forms.userChatActive.aiModel)
+    if (!forms.autoLoginEmail.domain.trim()) {
+      forms.autoLoginEmail.domain = (settings.cloudMail.domain || '').replace(/^@+/, '')
+    }
   } finally {
     loading.value = false
     pushDraft()
@@ -402,6 +467,7 @@ function resetForms() {
   Object.assign(forms.userChatActive, defaultUserChatActiveForm())
   Object.assign(forms.privateCreate, defaultPrivateCreateForm())
   Object.assign(forms.publicize, defaultPublicizeForm())
+  Object.assign(forms.autoLoginEmail, defaultAutoLoginEmailForm())
 }
 
 function applyInitialConfig() {
@@ -482,6 +548,21 @@ function applyInitialConfig() {
     form.assetScopeId = readString(cfg.asset_scope_id) || newScopeId()
     return
   }
+  if (props.taskType === 'auto_change_login_email') {
+    const form = forms.autoLoginEmail
+    form.categoryIds = normalizeIds(cfg.category_ids)
+    form.domain = readString(cfg.domain)
+    form.triggerDaysAgo = clamp(readNumber(cfg.trigger_days_ago, 6), 0, 30)
+    form.triggerWindowHours = clamp(readNumber(cfg.trigger_window_hours, 24), 1, 336)
+    form.maxSystemMessages = clamp(readNumber(cfg.max_system_messages, 300), 20, 1000)
+    form.force = readBoolean(cfg.force)
+    form.autoConfirm = cfg.auto_confirm === undefined ? true : readBoolean(cfg.auto_confirm)
+    form.pollIntervalSeconds = clamp(readNumber(cfg.poll_interval_seconds, 5), 2, 30)
+    form.pollTimeoutSeconds = clamp(readNumber(cfg.poll_timeout_seconds, 90), 10, 600)
+    form.triggerPhrasesText = readStringArray(cfg.trigger_phrases).join('\n')
+    return
+  }
+
 
 }
 
@@ -496,6 +577,8 @@ function pushDraft() {
       next = buildPrivateCreateDraft()
     } else if (props.taskType === 'channel_group_publicize') {
       next = buildPublicizeDraft()
+    } else if (props.taskType === 'auto_change_login_email') {
+      next = buildAutoLoginEmailDraft()
     } else {
       next = invalidDraft('该任务类型没有专用配置表单')
     }
@@ -643,6 +726,29 @@ function buildPublicizeDraft(): TaskConfigDraft {
   }
 
   return validDraft(automationTotal(categoryIds, form.perAccountBatchSize), config)
+}
+
+function buildAutoLoginEmailDraft(): TaskConfigDraft {
+  const form = forms.autoLoginEmail
+  const categoryIds = normalizedSelectedIds(form.categoryIds)
+  const selectedCategories = selectedAccountCategories(categoryIds)
+  if (categoryIds.length === 0 || selectedCategories.length === 0) throw new Error('请至少选择一个执行账号分类')
+  const triggerPhrases = uniqueLines(form.triggerPhrasesText)
+  const config = {
+    category_ids: categoryIds,
+    category_names: selectedCategories.map((x) => x.name),
+    domain: form.domain.trim().replace(/^@+/, '') || null,
+    trigger_days_ago: clamp(form.triggerDaysAgo, 0, 30),
+    trigger_window_hours: clamp(form.triggerWindowHours, 1, 336),
+    max_system_messages: clamp(form.maxSystemMessages, 20, 1000),
+    force: form.force,
+    auto_confirm: form.autoConfirm,
+    poll_interval_seconds: clamp(form.pollIntervalSeconds, 2, 30),
+    poll_timeout_seconds: clamp(form.pollTimeoutSeconds, 10, 600),
+    trigger_phrases: triggerPhrases,
+  }
+
+  return validDraft(automationTotal(categoryIds, 1), config)
 }
 
 
@@ -803,6 +909,21 @@ function defaultPublicizeForm() {
   }
 }
 
+function defaultAutoLoginEmailForm() {
+  return {
+    categoryIds: [] as number[],
+    domain: '',
+    triggerDaysAgo: 6,
+    triggerWindowHours: 24,
+    maxSystemMessages: 300,
+    force: false,
+    autoConfirm: true,
+    pollIntervalSeconds: 5,
+    pollTimeoutSeconds: 90,
+    triggerPhrasesText: '',
+  }
+}
+
 
 function parseLines(value: string) {
   return value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)
@@ -942,6 +1063,7 @@ const AvatarFields = defineComponent({
     avatarSource: { type: String, required: true },
     fixedAvatarAssetPath: { type: String, required: true },
     avatarDictionaryName: { type: String, required: true },
+
     imageDictionaries: { type: Array<string>, required: true },
     uploading: { type: Boolean, required: true },
   },
@@ -1000,6 +1122,10 @@ const AvatarFields = defineComponent({
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.form-hint.no-offset {
+  margin-left: 0;
 }
 
 .avatar-path {

@@ -41,11 +41,14 @@ public sealed partial class ProxyManagementService
             .Trim()
             .ToLowerInvariant();
         if (!OutboundProxyKinds.IsSupported(kind))
-            throw new ArgumentException("代理类型仅支持 manual、resin 或 warp");
+            throw new ArgumentException("代理类型仅支持 manual、resin、warp 或 wireguard_warp");
         if (!OutboundProxyProtocols.IsSupported(protocol))
             throw new ArgumentException("代理协议仅支持 http、socks5 或 mtproto");
-        if (kind == OutboundProxyKinds.Resin && protocol == OutboundProxyProtocols.MtProto)
-            throw new ArgumentException("Resin 仅支持 HTTP 或 SOCKS5 数据面接入");
+        if ((kind == OutboundProxyKinds.Resin || kind == OutboundProxyKinds.WireGuardWarp)
+            && protocol == OutboundProxyProtocols.MtProto)
+            throw new ArgumentException(kind == OutboundProxyKinds.Resin
+                ? "Resin 仅支持 HTTP 或 SOCKS5 数据面接入"
+                : "外部 WireGuard WARP 端点仅支持 HTTP 或 SOCKS5 监听");
 
         var host = NormalizeHost(input.Host ?? existing?.Host);
         var port = input.Port > 0 ? input.Port : existing?.Port ?? 0;
@@ -223,7 +226,21 @@ public sealed partial class ProxyManagementService
             throw new ArgumentException("代理地址格式无效，请检查协议、主机和端口");
         }
 
-        var protocol = uri.Scheme.ToLowerInvariant() switch
+        var scheme = uri.Scheme.ToLowerInvariant();
+        var kind = OutboundProxyKinds.Manual;
+        if (scheme is "wireguard-warp+http" or "wg-warp+http")
+        {
+            kind = OutboundProxyKinds.WireGuardWarp;
+            scheme = "http";
+        }
+        else if (scheme is "wireguard-warp+socks" or "wireguard-warp+socks5" or "wireguard-warp+socks5h"
+            or "wg-warp+socks" or "wg-warp+socks5" or "wg-warp+socks5h")
+        {
+            kind = OutboundProxyKinds.WireGuardWarp;
+            scheme = "socks5";
+        }
+
+        var protocol = scheme switch
         {
             "http" => OutboundProxyProtocols.Http,
             "https" => throw new ArgumentException(
@@ -245,8 +262,10 @@ public sealed partial class ProxyManagementService
             ? GetQueryValue(uri.Query, "secret")
             : null;
         return new OutboundProxyInput(
-            Name: $"{protocol}://{uri.Host}:{uri.Port}",
-            Kind: OutboundProxyKinds.Manual,
+            Name: kind == OutboundProxyKinds.WireGuardWarp
+                ? $"WireGuard WARP {protocol}://{uri.Host}:{uri.Port}"
+                : $"{protocol}://{uri.Host}:{uri.Port}",
+            Kind: kind,
             Protocol: protocol,
             Host: uri.Host,
             Port: uri.Port,

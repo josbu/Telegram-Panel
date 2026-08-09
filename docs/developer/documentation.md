@@ -50,7 +50,7 @@ uv run mkdocs build
 
 当前最近一批改动的文档落点如下，后续开发按同一规则维护：
 
-- WARP 默认协议、HTTP/SOCKS5 选择和 Compose 配置：`README.zh-CN.md`、`.env.example`、`docker-compose.warp.yml`；实现合同和模块影响见 `docs/developer/modules.md`。
+- WARP 默认协议、HTTP/SOCKS5 选择、资源限制模板、数量上限和轻量出口巡检配置：`README.zh-CN.md`、`.env.example`、`docker-compose.yml`、`docker-compose.warp.yml`、`docs/guides/proxy-management.md`；实现合同和模块影响见 `docs/developer/modules.md`。
 - 任务中心只展示宿主验证通过的可创建编辑器、独立配置页编辑已有任务：`docs/developer/modules.md`。
 - 模块页面内嵌链路、运行态字段、打包校验和生产复核：`docs/developer/modules.md` 及 `skills/tgpanel-module-workflow/references/`。
 - `dev -> 云端验收 -> main` 的发布顺序：[`开发发布流程`](release-process.md)。

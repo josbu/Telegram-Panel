@@ -1,4 +1,5 @@
 using System.Net;
+using System.Globalization;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text;
@@ -185,6 +186,8 @@ public sealed class WarpContainerManager
             using var operationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             operationTimeout.CancelAfter(TimeSpan.FromMinutes(12));
             var token = operationTimeout.Token;
+            await EnsureManagedWarpCapacityAsync(settings.MaxManagedProxyCount, token);
+
 
             var profileKey = Guid.NewGuid().ToString("N");
             var shortKey = profileKey[..12];
@@ -503,6 +506,25 @@ public sealed class WarpContainerManager
         await _db.SaveChangesAsync(cancellationToken);
     }
 
+    private async Task EnsureManagedWarpCapacityAsync(
+        int maxManagedProxyCount,
+        CancellationToken cancellationToken)
+    {
+        if (maxManagedProxyCount <= 0)
+            return;
+
+        var current = await _db.WarpProfiles
+            .AsNoTracking()
+            .CountAsync(
+                x => x.OutboundProxyId != null && x.Status != "deleted",
+                cancellationToken);
+        if (current >= maxManagedProxyCount)
+        {
+            throw new InvalidOperationException(
+                $"受管 WARP 数量已达到上限 {maxManagedProxyCount}，请删除不用的 WARP 或调整 Proxy:Warp:MaxManagedProxyCount");
+        }
+    }
+
     private static async Task RemoveDockerResourcesStrictAsync(
         IWarpDockerClient docker,
         WarpProfile profile,
@@ -772,7 +794,9 @@ public sealed class WarpContainerManager
         int HostPortStart,
         string ProxyHostMode,
         string ProxyHost,
-        bool PullIfMissing)
+        bool PullIfMissing,
+        int MaxManagedProxyCount,
+        WarpContainerLimits ContainerLimits)
     {
         public static WarpSettings From(IConfiguration configuration)
         {
@@ -795,7 +819,12 @@ public sealed class WarpContainerManager
                 ReadInt(configuration, "Proxy:Warp:HostPortStart", 42080, 1024, 65000),
                 mode,
                 Read(configuration, "Proxy:Warp:ProxyHost", "127.0.0.1"),
-                ReadBool(configuration, "Proxy:Warp:PullIfMissing", true));
+                ReadBool(configuration, "Proxy:Warp:PullIfMissing", true),
+                ReadInt(configuration, "Proxy:Warp:MaxManagedProxyCount", 0, 0, 10000),
+                new WarpContainerLimits(
+                    ReadOptionalPositiveLong(configuration, "Proxy:Warp:Container:MemoryLimitBytes", 1024L * 1024 * 1024 * 1024),
+                    ReadOptionalNanoCpus(configuration, "Proxy:Warp:Container:CpuLimit"),
+                    ReadOptionalPositiveLong(configuration, "Proxy:Warp:Container:PidsLimit", 1_000_000)));
         }
 
         private static string Read(IConfiguration configuration, string key, string fallback) =>
@@ -817,6 +846,39 @@ public sealed class WarpContainerManager
                 ? value
                 : fallback;
 
+        private static long? ReadOptionalPositiveLong(
+            IConfiguration configuration,
+            string key,
+            long max)
+        {
+            var raw = configuration[key];
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            return long.TryParse(raw.Trim(), out var value) && value > 0 && value <= max
+                ? value
+                : null;
+        }
+
+        private static long? ReadOptionalNanoCpus(IConfiguration configuration, string key)
+        {
+            var raw = configuration[key];
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+            if (!decimal.TryParse(
+                    raw.Trim(),
+                    NumberStyles.AllowDecimalPoint,
+                    CultureInfo.InvariantCulture,
+                    out var cpus)
+                || cpus <= 0
+                || cpus > 128)
+            {
+                return null;
+            }
+
+            return (long)Math.Round(cpus * 1_000_000_000M, MidpointRounding.AwayFromZero);
+        }
+
         private static string NormalizeContainerPrefix(string value)
         {
             var normalized = new string(value
@@ -826,6 +888,12 @@ public sealed class WarpContainerManager
             return string.IsNullOrWhiteSpace(normalized) ? "telegram-panel-warp" : normalized;
         }
     }
+
+    internal sealed record WarpContainerLimits(
+        long? MemoryLimitBytes,
+        long? NanoCpus,
+        long? PidsLimit);
+
 
     internal interface IWarpDockerClientFactory
     {
@@ -864,6 +932,55 @@ public sealed class WarpContainerManager
             CancellationToken cancellationToken);
         Task RemoveContainerAsync(string containerId, CancellationToken cancellationToken);
         Task RemoveVolumeAsync(string volumeName, CancellationToken cancellationToken);
+    }
+
+    internal static Dictionary<string, object> BuildDockerHostConfig(
+        WarpSettings settings,
+        string portKey,
+        int hostPort,
+        string volumeName)
+    {
+        var portBindings = settings.ProxyHostMode == "published"
+            ? new Dictionary<string, object>
+            {
+                [portKey] = new[] { new { HostIp = "127.0.0.1", HostPort = hostPort.ToString() } }
+            }
+            : new Dictionary<string, object>();
+        var hostConfig = new Dictionary<string, object>
+        {
+            ["NetworkMode"] = settings.Network,
+            ["PortBindings"] = portBindings,
+            ["CapAdd"] = new[] { "NET_ADMIN", "MKNOD", "AUDIT_WRITE" },
+            ["DeviceCgroupRules"] = new[] { "c 10:200 rwm" },
+            ["Sysctls"] = new Dictionary<string, string>
+            {
+                ["net.ipv6.conf.all.disable_ipv6"] = "0",
+                ["net.ipv4.conf.all.src_valid_mark"] = "1"
+            },
+            ["RestartPolicy"] = new { Name = "unless-stopped", MaximumRetryCount = 0 },
+            ["Mounts"] = new[]
+            {
+                new { Type = "volume", Source = volumeName, Target = "/var/lib/cloudflare-warp" }
+            },
+            ["LogConfig"] = new
+            {
+                Type = "json-file",
+                Config = new Dictionary<string, string>
+                {
+                    ["max-size"] = "10m",
+                    ["max-file"] = "2"
+                }
+            }
+        };
+
+        if (settings.ContainerLimits.MemoryLimitBytes is { } memoryLimitBytes)
+            hostConfig["Memory"] = memoryLimitBytes;
+        if (settings.ContainerLimits.NanoCpus is { } nanoCpus)
+            hostConfig["NanoCpus"] = nanoCpus;
+        if (settings.ContainerLimits.PidsLimit is { } pidsLimit)
+            hostConfig["PidsLimit"] = pidsLimit;
+
+        return hostConfig;
     }
 
     private sealed class DockerEngineClientFactory : IWarpDockerClientFactory
@@ -1000,12 +1117,6 @@ public sealed class WarpContainerManager
         {
             using var timeout = TimeoutAfter(cancellationToken, MutationTimeout);
             var portKey = $"{settings.ContainerPort}/tcp";
-            var portBindings = settings.ProxyHostMode == "published"
-                ? new Dictionary<string, object>
-                {
-                    [portKey] = new[] { new { HostIp = "127.0.0.1", HostPort = hostPort.ToString() } }
-                }
-                : new Dictionary<string, object>();
 
             var payload = new
             {
@@ -1013,32 +1124,7 @@ public sealed class WarpContainerManager
                 Env = new[] { "WARP_SLEEP=2", $"GOST_ARGS=-L :{settings.ContainerPort}" },
                 ExposedPorts = new Dictionary<string, object> { [portKey] = new { } },
                 Labels = Labels(profileId),
-                HostConfig = new
-                {
-                    NetworkMode = settings.Network,
-                    PortBindings = portBindings,
-                    CapAdd = new[] { "NET_ADMIN", "MKNOD", "AUDIT_WRITE" },
-                    DeviceCgroupRules = new[] { "c 10:200 rwm" },
-                    Sysctls = new Dictionary<string, string>
-                    {
-                        ["net.ipv6.conf.all.disable_ipv6"] = "0",
-                        ["net.ipv4.conf.all.src_valid_mark"] = "1"
-                    },
-                    RestartPolicy = new { Name = "unless-stopped", MaximumRetryCount = 0 },
-                    Mounts = new[]
-                    {
-                        new { Type = "volume", Source = volumeName, Target = "/var/lib/cloudflare-warp" }
-                    },
-                    LogConfig = new
-                    {
-                        Type = "json-file",
-                        Config = new Dictionary<string, string>
-                        {
-                            ["max-size"] = "10m",
-                            ["max-file"] = "2"
-                        }
-                    }
-                }
+                HostConfig = BuildDockerHostConfig(settings, portKey, hostPort, volumeName)
             };
 
             using var response = await _http.PostAsJsonAsync(

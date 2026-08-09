@@ -10,9 +10,10 @@ public static class OutboundProxyKinds
     public const string Manual = "manual";
     public const string Resin = "resin";
     public const string Warp = "warp";
+    public const string WireGuardWarp = "wireguard_warp";
 
     public static bool IsSupported(string? value) =>
-        value is Manual or Resin or Warp;
+        value is Manual or Resin or Warp or WireGuardWarp;
 }
 
 /// <summary>
@@ -229,8 +230,38 @@ public sealed record WarpMaintenanceBatchResult(
     int Failed,
     IReadOnlyList<WarpMaintenanceResult> Items);
 
+
 /// <summary>
-/// 普通代理和 Resin 代理的出口巡检配置。巡检只更新出口元数据，不会重启或修改代理资源。
+/// 代理出口检测端点配置。定时巡检使用轻量 ProbeUrl；手动检测和 WARP 元数据仍使用 Trace 兼容的 MetadataUrl。
+/// </summary>
+public sealed record ProxyEgressProbeOptions(
+    string ProbeUrl,
+    string MetadataUrl)
+{
+    public const string DefaultProbeUrl = "https://208.67.222.222/";
+    public const string DefaultMetadataUrl = "https://cloudflare.com/cdn-cgi/trace";
+
+    public static ProxyEgressProbeOptions From(IConfiguration? configuration) => new(
+        ReadHttpUrl(configuration, "Proxy:Egress:ProbeUrl", DefaultProbeUrl),
+        ReadHttpUrl(configuration, "Proxy:Egress:MetadataUrl", DefaultMetadataUrl));
+
+    private static string ReadHttpUrl(
+        IConfiguration? configuration,
+        string key,
+        string fallback)
+    {
+        var value = configuration == null || string.IsNullOrWhiteSpace(configuration[key])
+            ? fallback
+            : configuration[key]!.Trim();
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
+               && uri.Scheme is "http" or "https"
+            ? value
+            : fallback;
+    }
+}
+
+/// <summary>
+/// 普通代理和 Resin 代理的轻量出口健康巡检配置。巡检不重启或修改代理资源。
 /// </summary>
 public sealed record ProxyEgressMaintenanceOptions(
     bool Enabled,
