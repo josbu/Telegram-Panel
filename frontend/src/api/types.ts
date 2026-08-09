@@ -25,7 +25,7 @@ export interface ProxyBatchResult {
   items: ProxyBatchItem[]
 }
 
-export type ProxyKind = 'manual' | 'resin' | 'warp'
+export type ProxyKind = 'manual' | 'resin' | 'warp' | 'wireguard_warp'
 
 export type ProxyProtocol = 'http' | 'socks5' | 'mtproto'
 export type WarpProxyProtocol = Extract<ProxyProtocol, 'http' | 'socks5'>
@@ -92,7 +92,7 @@ export interface OutboundProxy {
 
 export interface SaveOutboundProxyRequest {
   name: string
-  kind: 'manual' | 'resin'
+  kind: 'manual' | 'resin' | 'wireguard_warp'
   protocol: ProxyProtocol
   host: string
   port: number
@@ -405,6 +405,16 @@ export interface SettingsPayload {
 export interface TelegramApiSettings {
   apiId: string
   apiHash: string
+  profiles?: TelegramApiProfile[] | null
+}
+
+export interface TelegramApiProfile {
+  name?: string | null
+  apiId?: string | null
+  apiHash?: string | null
+  enabled: boolean
+  weight: number
+  notes?: string | null
 }
 
 export interface GlobalProxySettings {

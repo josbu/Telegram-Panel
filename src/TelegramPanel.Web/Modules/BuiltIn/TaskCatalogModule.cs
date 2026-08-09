@@ -147,6 +147,25 @@ public sealed class TaskCatalogModule : ITelegramPanelModule, IModuleTaskProvide
 
         yield return new ModuleTaskDefinition
         {
+            Category = "user",
+            TaskType = BatchTaskTypes.AutoChangeLoginEmail,
+            DisplayName = "自动更改登录邮箱",
+            Description = "按账号分类扫描 777000 登录邮箱重置通知，匹配后用 Cloud Mail 邮箱验证码自动换绑登录邮箱。",
+            Icon = Icons.Material.Filled.MarkEmailRead,
+            EditorComponentType = typeof(TelegramPanel.Web.Components.Dialogs.AutoChangeLoginEmailTaskEditor).AssemblyQualifiedName ?? "",
+            TaskCenter = new ModuleTaskCenterCapabilities
+            {
+                CanPause = false,
+                CanResume = false,
+                CanEdit = true,
+                CanRerun = true,
+                EditComponentType = typeof(TelegramPanel.Web.Components.Dialogs.AutoChangeLoginEmailTaskEditor).AssemblyQualifiedName ?? ""
+            },
+            Order = 150
+        };
+
+        yield return new ModuleTaskDefinition
+        {
             Category = "bot",
             TaskType = BatchTaskTypes.BotChannelInviteUsers,
             DisplayName = "Bot频道批量邀请用户",

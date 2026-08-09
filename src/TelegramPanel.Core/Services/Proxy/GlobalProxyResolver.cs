@@ -44,6 +44,13 @@ public sealed class GlobalProxyResolver
             throw new InvalidOperationException(
                 "Telegram 全局代理引用的已有代理不存在或已停用，已阻止降级为直连");
         }
+        if (proxy.Kind == OutboundProxyKinds.WireGuardWarp
+            && (proxy.TestStatus != "ok" || string.IsNullOrWhiteSpace(proxy.EgressIp)))
+        {
+            throw new InvalidOperationException(
+                "Telegram 全局代理引用的外部 WireGuard WARP 端点尚未检测成功，已阻止降级为直连");
+        }
+
 
         return AccountProxyResolver.BuildConnectionOptions(proxy, stableAccountKey);
     }

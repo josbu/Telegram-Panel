@@ -16,6 +16,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<TelegramAccountUpdateHub>();
         services.AddSingleton<IAccountProxyResolver, AccountProxyResolver>();
         services.AddSingleton<ISessionPathResolver, SessionPathResolver>();
+        services.AddSingleton<TelegramApiProfilePool>();
         services.AddSingleton<TemporaryWarpClaimStore>();
 
         // 注册 Telegram 客户端池（单例）

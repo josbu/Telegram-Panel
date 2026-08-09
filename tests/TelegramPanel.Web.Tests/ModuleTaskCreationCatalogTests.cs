@@ -93,10 +93,11 @@ public sealed class ModuleTaskCreationCatalogTests
             .Select(x => x.Definition.TaskType)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        Assert.Equal(3, creatableTypes.Count);
+        Assert.Equal(4, creatableTypes.Count);
         Assert.Contains(BatchTaskTypes.UserChatActive, creatableTypes);
         Assert.Contains(BatchTaskTypes.ChannelGroupPrivateCreate, creatableTypes);
         Assert.Contains(BatchTaskTypes.ChannelGroupPublicize, creatableTypes);
+        Assert.Contains(BatchTaskTypes.AutoChangeLoginEmail, creatableTypes);
         Assert.DoesNotContain(BatchTaskTypes.ChannelInviteUsers, creatableTypes);
         Assert.DoesNotContain(BatchTaskTypes.BotSetAdmins, creatableTypes);
     }

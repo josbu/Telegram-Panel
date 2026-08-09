@@ -161,6 +161,78 @@ public sealed class WarpLifecycleRegressionTests
     }
 
     [Fact]
+    public void WARP容器资源限制配置会映射到Docker创建模板()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Proxy:Warp:Enabled"] = "true",
+                ["Proxy:Warp:Container:MemoryLimitBytes"] = "134217728",
+                ["Proxy:Warp:Container:CpuLimit"] = "0.5",
+                ["Proxy:Warp:Container:PidsLimit"] = "64"
+            })
+            .Build();
+
+        var settings = WarpContainerManager.WarpSettings.From(configuration);
+        var hostConfig = WarpContainerManager.BuildDockerHostConfig(
+            settings,
+            "1080/tcp",
+            42080,
+            "warp-volume");
+
+        Assert.Equal(134217728L, hostConfig["Memory"]);
+        Assert.Equal(500000000L, hostConfig["NanoCpus"]);
+        Assert.Equal(64L, hostConfig["PidsLimit"]);
+    }
+
+    [Fact]
+    public async Task WARP创建达到配置上限时不会创建Docker资源()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var dbOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var db = new AppDbContext(dbOptions);
+        await db.Database.EnsureCreatedAsync();
+        var existingProfile = Profile("existing-cap-profile", "active", 42100);
+        existingProfile.Proxy = new OutboundProxy
+        {
+            Name = "existing-cap-warp",
+            Kind = OutboundProxyKinds.Warp,
+            Protocol = OutboundProxyProtocols.Http,
+            Host = existingProfile.ContainerName,
+            Port = 1080,
+            IsEnabled = true
+        };
+        db.WarpProfiles.Add(existingProfile);
+        await db.SaveChangesAsync();
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Proxy:Warp:Enabled"] = "true",
+                ["Proxy:Warp:DockerSocketPath"] = Path.Combine(Path.GetTempPath(), "fake-docker.sock"),
+                ["Proxy:Warp:MaxManagedProxyCount"] = "1"
+            })
+            .Build();
+        var docker = new FakeWarpDockerClient();
+        var manager = new WarpContainerManager(
+            db,
+            configuration,
+            new SequenceProbeService(SuccessfulWarpProbe("2606:4700:100::9")),
+            NullLogger<WarpContainerManager>.Instance,
+            new FakeWarpDockerClientFactory(docker));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            manager.CreateAsync(requestId: "over-cap"));
+
+        Assert.Contains("受管 WARP 数量已达到上限 1", error.Message);
+        Assert.Equal(0, docker.CreateVolumeCalls);
+        Assert.Single(await db.OutboundProxies.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public void WARP维护默认启用但不主动刷新健康出口()
     {
         var configuration = new ConfigurationBuilder()

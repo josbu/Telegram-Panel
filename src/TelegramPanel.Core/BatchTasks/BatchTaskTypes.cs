@@ -20,6 +20,7 @@ public static class BatchTaskTypes
     public const string GroupInviteUsers = "group_invite_users";
     public const string ChannelGroupPrivateCreate = "channel_group_private_create";
     public const string ChannelGroupPublicize = "channel_group_publicize";
+    public const string AutoChangeLoginEmail = "auto_change_login_email";
 
     // System 任务（记录到任务中心）
     public const string AccountAutoSync = "account_auto_sync";

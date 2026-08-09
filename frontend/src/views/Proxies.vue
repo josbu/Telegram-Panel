@@ -132,7 +132,7 @@
                 v-model="globalProxyDialog.form.proxyId"
                 class="full"
                 filterable
-                placeholder="选择普通代理、Resin 或 WARP"
+                placeholder="选择普通代理、外部 WireGuard WARP、Resin 或受管 WARP"
               >
                 <el-option-group
                   v-for="group in globalProxyGroups"
@@ -171,7 +171,7 @@
               v-else-if="proxies.length === 0"
               type="warning"
               :closable="false"
-              title="还没有可选代理，请先创建 WARP、Resin 或普通代理"
+              title="还没有可选代理，请先创建 WARP、导入外部 WireGuard WARP、Resin 或普通代理"
             />
             <div class="global-proxy-actions">
               <el-button
@@ -185,6 +185,9 @@
               </el-button>
               <el-button plain :icon="CirclePlus" @click="openProxyCreateForGlobal('resin')">
                 新增 Resin
+              </el-button>
+              <el-button plain :icon="CirclePlus" @click="openProxyCreateForGlobal('wireguard_warp')">
+                新增外部 WireGuard WARP
               </el-button>
               <el-button plain :icon="CirclePlus" @click="openProxyCreateForGlobal('manual')">
                 新增普通代理
@@ -601,9 +604,19 @@
         <el-form-item label="代理类型" prop="kind" required>
           <el-radio-group v-model="proxyDialog.form.kind" @change="onProxyKindChange">
             <el-radio-button value="manual">普通代理</el-radio-button>
+            <el-radio-button value="wireguard_warp">外部 WireGuard WARP</el-radio-button>
             <el-radio-button value="resin">Resin 动态代理</el-radio-button>
           </el-radio-group>
         </el-form-item>
+        <el-alert
+          v-if="proxyDialog.form.kind === 'wireguard_warp'"
+          class="mb-3"
+          type="info"
+          :closable="false"
+          show-icon
+          title="面板只管理 HTTP/SOCKS 监听，不管理宿主 WireGuard"
+          description="请先在面板外运行 wg/gost 等服务，并填写它暴露给面板容器访问的 HTTP 或 SOCKS5 地址；保存后检测会要求 Cloudflare Trace 返回 WARP 已启用。"
+        />
         <div class="form-grid">
           <el-form-item label="名称" prop="name" required>
             <el-input v-model="proxyDialog.form.name" maxlength="80" placeholder="例如：香港 Socks5" />
@@ -744,7 +757,7 @@
             v-model="importDialog.text"
             type="textarea"
             :rows="10"
-            placeholder="每行一个代理，例如 socks5://user:password@host:port"
+            placeholder="每行一个代理，例如 socks5://user:password@host:port；外部 WireGuard WARP 可用 wg-warp+socks5://127.0.0.1:1080 或 wg-warp+http://127.0.0.1:8080"
           />
         </el-form-item>
         <el-checkbox v-model="importDialog.testAfterImport">导入后逐个检测出口</el-checkbox>
@@ -979,9 +992,10 @@ const filteredProxies = computed(() => proxies.value.filter((proxy) => {
   return true
 }))
 const globalProxyGroups = computed(() => ([
+  { kind: 'wireguard_warp' as const, label: '外部 WireGuard WARP', items: proxies.value.filter((proxy) => proxy.kind === 'wireguard_warp') },
   { kind: 'manual' as const, label: '普通代理', items: proxies.value.filter((proxy) => proxy.kind === 'manual') },
   { kind: 'resin' as const, label: 'Resin 动态代理', items: proxies.value.filter((proxy) => proxy.kind === 'resin') },
-  { kind: 'warp' as const, label: 'WARP', items: proxies.value.filter((proxy) => proxy.kind === 'warp') },
+  { kind: 'warp' as const, label: '受管 WARP', items: proxies.value.filter((proxy) => proxy.kind === 'warp') },
 ]).filter((group) => group.items.length > 0))
 const globalSelectedProxy = computed(() => proxies.value.find(
   (proxy) => proxy.id === globalProxyDialog.form.proxyId,
@@ -1067,13 +1081,15 @@ function normalizeOptional(value?: string | null) {
 }
 
 function kindLabel(kind: ProxyKind) {
+  if (kind === 'wireguard_warp') return 'WireGuard WARP'
   if (kind === 'resin') return 'Resin'
-  if (kind === 'warp') return 'WARP'
+  if (kind === 'warp') return '受管 WARP'
   return '普通'
 }
 
 function kindTagType(kind: ProxyKind) {
   if (kind === 'warp') return 'success'
+  if (kind === 'wireguard_warp') return 'primary'
   if (kind === 'resin') return 'warning'
   return 'info'
 }
@@ -1538,6 +1554,10 @@ async function saveGlobalProxy() {
         ElMessage.warning('所选代理已停用，请先启用或选择其他代理')
         return
       }
+      if (selected.kind === 'wireguard_warp' && (selected.testStatus !== 'ok' || !selected.egressIp)) {
+        ElMessage.warning('外部 WireGuard WARP 端点必须先检测成功后才能作为全局代理')
+        return
+      }
     } else {
       if (!form.server.trim() || form.port < 1 || form.port > 65535) {
         ElMessage.warning('请填写有效的全局代理主机和端口')
@@ -1583,7 +1603,7 @@ function openCreate() {
   proxyDialog.visible = true
 }
 
-function openProxyCreateForGlobal(kind: 'manual' | 'resin') {
+function openProxyCreateForGlobal(kind: 'manual' | 'resin' | 'wireguard_warp') {
   openCreate()
   proxyDialog.selectForGlobal = true
   proxyDialog.form.kind = kind
@@ -1617,7 +1637,7 @@ function openEdit(proxy: OutboundProxy) {
   proxyDialog.hasResinAdminToken = Boolean(proxy.hasResinAdminToken)
   proxyDialog.form = {
     name: proxy.name,
-    kind: proxy.kind === 'resin' ? 'resin' : 'manual',
+    kind: proxy.kind === 'resin' ? 'resin' : proxy.kind === 'wireguard_warp' ? 'wireguard_warp' : 'manual',
     protocol: proxy.protocol,
     host: proxy.host,
     port: proxy.port,
@@ -1654,7 +1674,7 @@ function closeImportDialog() {
   importDialog.visible = false
 }
 function onProxyKindChange(kind: string | number | boolean | undefined) {
-  if (kind === 'resin' && proxyDialog.form.protocol === 'mtproto') {
+  if ((kind === 'resin' || kind === 'wireguard_warp') && proxyDialog.form.protocol === 'mtproto') {
     proxyDialog.form.protocol = 'socks5'
   }
 }

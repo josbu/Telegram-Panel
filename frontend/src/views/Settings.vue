@@ -19,8 +19,47 @@
             </el-form-item>
             <el-form-item label="默认 API Hash">
               <el-input v-model="telegram.apiHash" />
-              <div class="muted mt-2">用于新账号登录和导入，通常是 32 位十六进制字符串。</div>
+              <div class="muted mt-2">兼容旧配置；未启用 API 配置池时用于新账号登录和导入。</div>
             </el-form-item>
+            <el-divider />
+            <div class="section-title">API 配置池</div>
+            <el-alert type="info" :closable="false" show-icon class="mb-3">
+              <template #title>新账号登录、Session 文件、StringSession 和 tdata 导入会在启用的配置间按已保存账号数均衡分配；Zip 内自带 api_id/api_hash 的账号保持包内配置。</template>
+            </el-alert>
+            <div v-for="(profile, index) in telegram.profiles" :key="index" class="api-profile-row">
+              <el-row :gutter="8">
+                <el-col :xs="24" :sm="6">
+                  <el-form-item label="名称">
+                    <el-input v-model="profile.name" placeholder="主 API" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :sm="5">
+                  <el-form-item label="ApiId">
+                    <el-input v-model="profile.apiId" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :sm="7">
+                  <el-form-item label="ApiHash">
+                    <el-input v-model="profile.apiHash" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="12" :sm="3">
+                  <el-form-item label="权重">
+                    <el-input-number v-model="profile.weight" :min="1" :max="1000" class="full" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="12" :sm="3">
+                  <el-form-item label="启用">
+                    <el-switch v-model="profile.enabled" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-form-item label="备注">
+                <el-input v-model="profile.notes" placeholder="可选" />
+              </el-form-item>
+              <el-button text type="danger" @click="removeApiProfile(index)">删除此配置</el-button>
+            </div>
+            <el-button plain @click="addApiProfile">添加 API 配置</el-button>
           </el-form>
           <el-alert type="info" :closable="false" show-icon class="mb-3">
             <template #title>Telegram API 状态</template>
@@ -249,11 +288,11 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { panelApi } from '@/api/panel'
-import type { SettingsPayload } from '@/api/types'
+import type { SettingsPayload, TelegramApiSettings, TelegramApiProfile } from '@/api/types'
 
 const router = useRouter()
 const settings = ref<SettingsPayload | null>(null)
-const telegram = reactive({ apiId: '', apiHash: '' })
+const telegram = reactive({ apiId: '', apiHash: '', profiles: [] as TelegramApiProfile[] })
 const cloudMail = reactive({ baseUrl: '', domain: '', token: '' })
 const cloudToken = reactive({ adminEmail: '', adminPassword: '' })
 const ai = reactive({ endpoint: '', apiKey: '', defaultModel: '', presetModels: [] as string[], retryCount: 2 })
@@ -289,10 +328,24 @@ function assign<T extends object>(target: T, source: Partial<T>) {
   Object.assign(target, source)
 }
 
+function normalizeTelegramSettings(source: TelegramApiSettings) {
+  telegram.apiId = source.apiId || ''
+  telegram.apiHash = source.apiHash || ''
+  const profiles = source.profiles || []
+  telegram.profiles = profiles.map((profile) => ({
+    name: profile.name || '',
+    apiId: profile.apiId || '',
+    apiHash: profile.apiHash || '',
+    enabled: profile.enabled !== false,
+    weight: profile.weight || 1,
+    notes: profile.notes || '',
+  }))
+}
+
 async function load() {
   const data = await panelApi.settings()
   settings.value = data
-  assign(telegram, data.telegram)
+  normalizeTelegramSettings(data.telegram)
   assign(cloudMail, data.cloudMail)
   assign(ai, data.ai)
   assign(batch, data.batch)
@@ -312,6 +365,14 @@ async function run(key: keyof typeof saving, action: () => Promise<{ message?: s
   } finally {
     saving[key] = false
   }
+}
+
+function addApiProfile() {
+  telegram.profiles.push({ name: '', apiId: '', apiHash: '', enabled: true, weight: 1, notes: '' })
+}
+
+function removeApiProfile(index: number) {
+  telegram.profiles.splice(index, 1)
 }
 
 function saveTelegram() {
@@ -429,6 +490,13 @@ onMounted(load)
 .section-title {
   font-weight: 600;
   margin-bottom: 8px;
+}
+
+.api-profile-row {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
 }
 
 @media (max-width: 960px) {

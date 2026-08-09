@@ -1,13 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using TelegramPanel.Core.Models;
+using TelegramPanel.Data.Entities;
 
 namespace TelegramPanel.Core.Services.Proxy;
 
 public sealed partial class ProxyManagementService
 {
     /// <summary>
-    /// 刷新所有启用的普通代理和 Resin 代理出口。
+    /// 轻量巡检所有启用的普通代理和 Resin 代理连通性。
     /// 受管 WARP 由专用维护服务处理，避免与容器恢复和首次连接冻结保护发生竞争。
+    /// 巡检不拉取出口 IP/地理元数据，避免每 5 分钟调用 Trace 元数据端点。
     /// </summary>
     public async Task<ProxyEgressMaintenanceBatchResult> RefreshAllNonWarpProxyEgressAsync(
         CancellationToken cancellationToken = default)
@@ -26,7 +28,7 @@ public sealed partial class ProxyManagementService
         {
             try
             {
-                var proxy = await TestAsync(candidate.Id, cancellationToken);
+                var proxy = await TestHealthAsync(candidate.Id, cancellationToken);
                 items.Add(new ProxyEgressMaintenanceItem(
                     proxy.Id,
                     proxy.Name,
@@ -54,5 +56,71 @@ public sealed partial class ProxyManagementService
             items.Count(x => x.Success),
             items.Count(x => !x.Success),
             items);
+    }
+    private async Task<OutboundProxy> TestHealthAsync(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        await MutationLock.WaitAsync(cancellationToken);
+        try
+        {
+            var proxy = await _db.OutboundProxies
+                .FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
+                ?? throw new KeyNotFoundException("代理不存在");
+            var probeKey = $"telegram_panel_probe_{proxy.Id}";
+            try
+            {
+                EgressProbeResult result;
+                if (proxy.Kind == OutboundProxyKinds.Resin)
+                {
+                    var controlError = await ValidateResinControlPlaneAsync(proxy, cancellationToken);
+                    result = controlError == null
+                        ? await _probeService.ProbeProxyHealthAsync(
+                            proxy,
+                            probeKey,
+                            cancellationToken)
+                        : new EgressProbeResult(
+                            false,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            DateTime.UtcNow,
+                            controlError);
+                }
+                else
+                {
+                    result = await _probeService.ProbeProxyHealthAsync(
+                        proxy,
+                        probeKey,
+                        cancellationToken);
+                }
+
+                proxy.TestStatus = result.Success ? "ok" : "fail";
+                proxy.LastError = result.Error;
+                proxy.LastLatencyMs = result.Success ? result.LatencyMs : null;
+                proxy.LastTestedAtUtc = result.CheckedAtUtc;
+                proxy.UpdatedAtUtc = DateTime.UtcNow;
+                await _db.SaveChangesAsync(cancellationToken);
+                return proxy;
+            }
+            finally
+            {
+                if (proxy.Kind == OutboundProxyKinds.Resin)
+                {
+                    await ReleaseResinLeaseBestEffortAsync(
+                        proxy,
+                        probeKey,
+                        $"巡检身份 {probeKey}",
+                        CancellationToken.None);
+                }
+            }
+        }
+        finally
+        {
+            MutationLock.Release();
+        }
     }
 }

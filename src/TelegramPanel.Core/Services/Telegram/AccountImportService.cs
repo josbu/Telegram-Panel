@@ -31,6 +31,7 @@ public class AccountImportService
     private readonly ProxyManagementService _proxyManagement;
     private readonly TemporaryWarpClaimStore _temporaryWarpClaims;
     private readonly IWarpProxyUsageGuard? _warpProxyUsageGuard;
+    private readonly TelegramApiProfilePool _apiProfilePool;
 
     public static bool IsManagedWarpRequestId(string? requestId) =>
         !string.IsNullOrWhiteSpace(requestId)
@@ -46,7 +47,8 @@ public class AccountImportService
         IConfiguration configuration,
         ProxyManagementService proxyManagement,
         TemporaryWarpClaimStore temporaryWarpClaims,
-        IWarpProxyUsageGuard? warpProxyUsageGuard = null)
+        IWarpProxyUsageGuard? warpProxyUsageGuard = null,
+        TelegramApiProfilePool? apiProfilePool = null)
     {
         _sessionImporter = sessionImporter;
         _db = db;
@@ -56,6 +58,7 @@ public class AccountImportService
         _proxyManagement = proxyManagement;
         _temporaryWarpClaims = temporaryWarpClaims;
         _warpProxyUsageGuard = warpProxyUsageGuard;
+        _apiProfilePool = apiProfilePool ?? new TelegramApiProfilePool(configuration);
     }
 
     /// <summary>
@@ -145,6 +148,45 @@ public class AccountImportService
         return results;
     }
 
+    public async Task<List<ImportResult>> ImportFromSessionFileStreamsBalancedAsync(
+        IReadOnlyList<AccountImportFile> files,
+        int? categoryId = null,
+        AccountProxyBindingInput? proxyBinding = null,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<ImportResult>();
+        var importedPhones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in files)
+        {
+            var api = await _apiProfilePool.SelectForNewAccountAsync(_accountManagement);
+            results.Add(await ExecuteImportWithProxyAsync(
+                file.FileName,
+                proxyBinding,
+                importedPhones,
+                proxy => ImportFromSessionFileStreamAsync(
+                    file.FileName,
+                    file.Content,
+                    api.ApiId,
+                    api.ApiHash,
+                    proxy,
+                    cancellationToken),
+                cancellationToken,
+                result => PersistImportedSessionAsync(
+                    result,
+                    api.ApiId,
+                    api.ApiHash,
+                    categoryId,
+                    twoFactorPassword: null)));
+            await Task.Delay(500, cancellationToken);
+        }
+
+        var successCount = results.Count(r => r.Success);
+        _logger.LogInformation("Balanced stream file import completed: {Success}/{Total} successful", successCount, results.Count);
+
+        return results;
+    }
+
     private async Task<ImportResult> ImportFromSessionFileStreamAsync(
         string fileName,
         Stream content,
@@ -226,6 +268,22 @@ public class AccountImportService
                     apiHash,
                     categoryId,
                     twoFactorPassword: null));
+    }
+
+    public async Task<ImportResult> ImportFromStringSessionBalancedAsync(
+        string sessionString,
+        int? categoryId = null,
+        AccountProxyBindingInput? proxyBinding = null,
+        CancellationToken cancellationToken = default)
+    {
+        var api = await _apiProfilePool.SelectForNewAccountAsync(_accountManagement);
+        return await ImportFromStringSessionAsync(
+            sessionString,
+            api.ApiId,
+            api.ApiHash,
+            categoryId,
+            proxyBinding,
+            cancellationToken);
     }
 
     /// <summary>
@@ -311,9 +369,9 @@ public class AccountImportService
             if (perAccountProxyText != null && proxyBinding != null)
                 throw new AccountImportProxyBatchException("逐账号批量代理不能与其他代理策略同时使用");
 
-            // 纯 tdata 导入共享同一组全局 Telegram API 配置。这是整批的
-            // 本地前置条件，必须在代理检测和持久化之前失败。
-            if (jsonFiles.Count == 0 && !TryGetGlobalTelegramApi(out _, out _))
+            // 纯 tdata 导入需要系统配置至少一个可用 Telegram API。每个账号会在导入时
+            // 按 API 配置池重新选择，避免整批固定在同一个 API 上。
+            if (jsonFiles.Count == 0 && !_apiProfilePool.HasUsableApi())
             {
                 results.Add(new ImportResult(
                     false,
@@ -682,7 +740,7 @@ public class AccountImportService
     {
         var results = new List<ImportResult>();
 
-        if (!TryGetGlobalTelegramApi(out var apiId, out var apiHash))
+        if (!_apiProfilePool.HasUsableApi())
         {
             results.Add(new ImportResult(
                 false,
@@ -690,7 +748,7 @@ public class AccountImportService
                 null,
                 null,
                 null,
-                "检测到 tdata 数据包，但系统未配置全局 Telegram API（ApiId/ApiHash）；请先到【系统设置】配置后再导入"));
+                "检测到 tdata 数据包，但系统未配置全局 Telegram API（ApiId/ApiHash）或启用的 API 配置；请先到【系统设置】配置后再导入"));
             return results;
         }
 
@@ -700,21 +758,22 @@ public class AccountImportService
             var tdataDir = tdataDirectories[index];
             var assignment = proxyAssignments?[index];
             var effectiveBinding = BuildZipProxyBinding(proxyBinding, assignment);
+            var api = await _apiProfilePool.SelectForNewAccountAsync(_accountManagement);
             var result = await ExecuteImportWithProxyAsync(
                 Path.GetFileName(tdataDir),
                 effectiveBinding,
                 importedPhones,
                 proxy => ImportFromTdataDirectoryAsync(
                     tdataDir,
-                    apiId,
-                    apiHash,
+                    api.ApiId,
+                    api.ApiHash,
                     proxy,
                     cancellationToken),
                 cancellationToken,
                 result => PersistImportedSessionAsync(
                     result,
-                    apiId,
-                    apiHash,
+                    api.ApiId,
+                    api.ApiHash,
                     categoryId,
                     twoFactorPassword));
             results.Add(AttachZipImportMetadata(
@@ -1569,10 +1628,16 @@ public class AccountImportService
 
     private bool TryGetGlobalTelegramApi(out int apiId, out string apiHash)
     {
-        apiHash = (_configuration["Telegram:ApiHash"] ?? string.Empty).Trim();
-        return int.TryParse(_configuration["Telegram:ApiId"], out apiId)
-               && apiId > 0
-               && !string.IsNullOrWhiteSpace(apiHash);
+        if (!TelegramApiProfilePool.TrySelectDefault(_configuration, out var credentials, out _))
+        {
+            apiId = 0;
+            apiHash = string.Empty;
+            return false;
+        }
+
+        apiId = credentials.ApiId;
+        apiHash = credentials.ApiHash;
+        return true;
     }
 
     private static bool IsPathInsideAnyDirectory(string filePath, IReadOnlyCollection<string> directories)

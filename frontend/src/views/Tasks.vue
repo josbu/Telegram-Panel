@@ -574,6 +574,7 @@ function fallbackTaskName(type: string) {
   if (type === 'bot_channel_set_admins_by_account') return 'Bot频道批量设置管理员（账号执行）'
   if (type === 'bot_set_admins') return 'Bot频道批量设置管理员（机器人执行）'
   if (type === 'account_auto_sync') return '账号数据同步'
+  if (type === 'auto_change_login_email') return '自动更改登录邮箱'
   return type
 }
 
@@ -800,6 +801,7 @@ function hasTaskConfigForm(taskType: string) {
   return taskType === 'user_chat_active'
     || taskType === 'channel_group_private_create'
     || taskType === 'channel_group_publicize'
+    || taskType === 'auto_change_login_email'
 }
 
 function emptyDraft(): TaskConfigDraft {
@@ -1111,6 +1113,7 @@ function parseJsonObject(config: string): Record<string, any> | null {
 function stripRuntimeFields(config: string) {
   const obj = parseJsonObject(config)
   if (!obj) return config
+  delete obj.items
   delete obj.recent_failures
   return JSON.stringify(obj, null, 2)
 }
@@ -1122,6 +1125,7 @@ function buildReadableConfigDetails(taskType: string, config: string) {
   if (taskType === 'channel_group_private_create') return buildPrivateCreateDetails(obj)
   if (taskType === 'channel_group_publicize') return buildPublicizeDetails(obj)
   if (taskType === 'account_auto_sync') return buildAccountSyncDetails(obj)
+  if (taskType === 'auto_change_login_email') return buildAutoLoginEmailDetails(obj)
 
   return buildGenericConfigDetails(obj)
 }
@@ -1198,6 +1202,30 @@ function buildAccountSyncDetails(obj: Record<string, any>) {
   }
   if (Array.isArray(obj.failures) && obj.failures.length > 0) lines.push(`失败记录: ${obj.failures.length} 条`)
   if (obj.error) lines.push(`错误: ${formatConfigValue(obj.error)}`)
+  return lines
+}
+
+function buildAutoLoginEmailDetails(obj: Record<string, any>) {
+  const windowHours = Number(obj.trigger_window_hours ?? 24)
+  const lines = [
+    `账号分类: ${buildSelectedCategorySummary(obj)}`,
+    `邮箱域名: ${formatConfigValue(obj.domain)}`,
+    `通知窗口: 距今 ${formatNumberValue(obj.trigger_days_ago, 6)} 天，±${Number.isFinite(windowHours) ? windowHours / 2 : 12} 小时`,
+    `最多扫描通知: ${formatNumberValue(obj.max_system_messages, 300)}`,
+    `强制执行: ${obj.force ? '是' : '否'}`,
+    `自动确认: ${obj.auto_confirm === false ? '否' : '是'}`,
+  ]
+  if (Array.isArray(obj.items) && obj.items.length > 0) {
+    lines.push('', '最近结果:')
+    lines.push(...obj.items.slice(-20).map((item: any) => {
+      const accountId = Number(item?.account_id || 0)
+      const phone = String(item?.phone || '').trim() || '-'
+      const result = String(item?.result || '').trim() || '-'
+      const message = String(item?.message || '').trim() || '-'
+      const time = formatTime(item?.time_utc || '', '')
+      return `账号 #${accountId || '-'} ${phone}：${result}，${message}${time ? `（${time}）` : ''}`
+    }))
+  }
   return lines
 }
 

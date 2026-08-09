@@ -508,6 +508,12 @@ public sealed class MyHandler : IModuleTaskHandler
 }
 ```
 
+内置 `auto_change_login_email` 任务也复用同一服务：处理器先按任务配置扫描 777000 系统通知窗口，
+只在匹配登录邮箱重置提示（默认包含 `Settings > Privacy & Security > Login Email`）或显式
+`force=true` 时调用 `AccountTelegramToolsService.SetLoginEmailAsync`，再通过 Cloud Mail 取码并调用
+`ConfirmLoginEmailAsync`。模块若实现相同场景，应复用这些宿主服务，不要重复创建 Telegram 客户端或
+绕过 Cloud Mail 配置。
+
 ### 调用宿主 AI 服务（推荐给模块复用）
 
 宿主提供 `ITelegramPanelAiService`，模块可以直接复用主程序里已配置好的 OpenAI 兼容 AI 能力，不需要在模块里重复保存端点、Key 或自己再接一套 SDK。
@@ -1213,6 +1219,18 @@ API 配置页只负责保存通用 `Config` JSON；具体字段、校验和执�
 ### 账号同步任务的取消边界
 
 账号同步任务的执行器会区分“整个任务被暂停/停机”和“单个 Telegram 请求临时取消”。任务处理器不得把未触发任务取消令牌的 `OperationCanceledException` 当作 Session 失效；这类异常应保留账号当前状态，仅记录本轮账号失败，等待后续重试。只有明确的 Telegram Session 错误或账号权限错误才允许更新账号状态。
+
+### 账号状态与瞬时连接恢复边界
+
+适用于 v1.31.46 及以上宿主。账号状态刷新和任务准备阶段的只读 Telegram 操作必须把“获取客户端
+与发起请求”作为一个重试边界：遇到非调用方触发的取消、IO、Socket 或连接关闭时，先从
+`ITelegramClientPool` 删除旧客户端，再通过宿主重新获取客户端并解析账号当前代理，最多重试一次。
+不得在删除后继续复用局部变量中的旧 `Client`。调用方取消、RPC、权限、限流和 Session 错误不得重试。
+重试边界内的 Telegram 读取必须使用宿主请求超时和取消令牌，不能在无界 `await` 后才检查取消。
+
+临时连接异常只能记录为可复查状态，不能映射成 Session 永久失效，也不能进入废号删除判定。
+新增账号状态或清理入口时，必须分别覆盖“首次瞬时失败后恢复”“二次失败后保留账号”“调用方取消”
+和“明确 Session 错误不重试”四类测试。该合同不改变模块 ABI；回滚到 v1.31.45 无需迁移模块配置。
 
 同进程插件无法做到“绝对不崩”。为了降低风险：
 

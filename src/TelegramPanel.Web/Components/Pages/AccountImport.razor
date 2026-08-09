@@ -6,10 +6,13 @@
 @inject TelegramPanel.Core.Services.AccountRiskService RiskService
 @inject TelegramPanel.Core.Services.Proxy.ProxyManagementService ProxyManagement
 @inject IConfiguration Configuration
+@inject TelegramApiProfilePool ApiProfilePool
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @using TelegramPanel.Core.Models
+@using TelegramPanel.Core.Interfaces
 @using TelegramPanel.Core.Services.Proxy
+@using TelegramPanel.Core.Services.Telegram
 @using TelegramPanel.Core.Utils
 @using TelegramPanel.Data.Entities
 @using TelegramPanel.Web.Components.Dialogs
@@ -423,10 +426,16 @@
 
     private bool TryGetTelegramApi(out int apiId, out string apiHash)
     {
-        apiHash = Configuration["Telegram:ApiHash"] ?? "";
-        return int.TryParse(Configuration["Telegram:ApiId"], out apiId)
-               && apiId > 0
-               && !string.IsNullOrWhiteSpace(apiHash);
+        if (!TelegramApiProfilePool.TrySelectDefault(Configuration, out var credentials, out _))
+        {
+            apiId = 0;
+            apiHash = string.Empty;
+            return false;
+        }
+
+        apiId = credentials.ApiId;
+        apiHash = credentials.ApiHash;
+        return true;
     }
 
     private static string FormatProxyOption(OutboundProxy proxy)
@@ -538,24 +547,25 @@
         if (!TryBuildProxyBinding(out var proxyBinding))
             return;
 
-        if (!TryGetTelegramApi(out var apiId, out var apiHash))
-        {
-            Snackbar.Add("请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）", Severity.Error);
-            return;
-        }
-
         importing = true;
         importResults.Clear();
 
         try
         {
-            var results = await AccountImportService.ImportFromBrowserFilesAsync(
-                selectedFiles,
-                apiId,
-                apiHash,
-                proxyBinding: proxyBinding,
-                cancellationToken: _pageCts.Token
-            );
+            var files = selectedFiles.Select(file => new AccountImportFile(file.Name, file.OpenReadStream())).ToList();
+            List<ImportResult> results;
+            try
+            {
+                results = await AccountImportService.ImportFromSessionFileStreamsBalancedAsync(
+                    files,
+                    proxyBinding: proxyBinding,
+                    cancellationToken: _pageCts.Token);
+            }
+            finally
+            {
+                foreach (var file in files)
+                    await file.Content.DisposeAsync();
+            }
 
             importResults.AddRange(results);
             await MergeImportedFromResultsAsync(results);
@@ -564,16 +574,11 @@
             var failureCount = results.Count - successCount;
 
             if (successCount > 0)
-            {
                 Snackbar.Add($"成功导入 {successCount} 个账号", Severity.Success);
-            }
 
             if (failureCount > 0)
-            {
                 Snackbar.Add($"{failureCount} 个账号导入失败", Severity.Warning);
-            }
 
-            // 清空已选文件
             selectedFiles.Clear();
         }
         catch (Exception ex)
@@ -591,20 +596,14 @@
         if (!TryBuildProxyBinding(out var proxyBinding))
             return;
 
-        if (!TryGetTelegramApi(out var apiId, out var apiHash))
-        {
-            Snackbar.Add("请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）", Severity.Error);
-            return;
-        }
+
 
         importingString = true;
 
         try
         {
-            var result = await AccountImportService.ImportFromStringSessionAsync(
+            var result = await AccountImportService.ImportFromStringSessionBalancedAsync(
                 sessionString,
-                apiId,
-                apiHash,
                 proxyBinding: proxyBinding,
                 cancellationToken: _pageCts.Token
             );

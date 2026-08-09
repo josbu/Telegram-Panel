@@ -525,8 +525,15 @@ async function loadTelegramApiStatus() {
     const settings = await panelApi.settings()
     const apiId = (settings.telegram.apiId || '').trim()
     const apiHash = (settings.telegram.apiHash || '').trim()
-    effectiveApiId.value = (settings.system.effectiveApiId || apiId || '').trim()
-    telegramApiConfigured.value = !!apiId && !!apiHash
+    const enabledProfile = (settings.telegram.profiles || []).find((profile) => {
+      const profileApiId = (profile.apiId || '').trim()
+      const profileApiHash = (profile.apiHash || '').trim()
+      return profile.enabled && !!profileApiId && !!profileApiHash
+    })
+    const profileApiId = (enabledProfile?.apiId || '').trim()
+    const effectiveApiIdFromSettings = (settings.system.effectiveApiId || '').trim()
+    effectiveApiId.value = ((effectiveApiIdFromSettings !== '0' ? effectiveApiIdFromSettings : '') || (apiId !== '0' ? apiId : '') || profileApiId || '').trim()
+    telegramApiConfigured.value = (!!apiId && apiId !== '0' && !!apiHash) || !!enabledProfile
   } catch {
     telegramApiConfigured.value = true
   } finally {

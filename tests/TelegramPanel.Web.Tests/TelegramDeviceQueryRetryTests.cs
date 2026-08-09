@@ -33,6 +33,52 @@ public sealed class TelegramDeviceQueryRetryTests
         Assert.Equal(1, resets);
     }
 
+    [Theory]
+    [InlineData("task")]
+    [InlineData("operation")]
+    public async Task 非调用方取消会重建客户端并重试一次(string cancellationKind)
+    {
+        var attempts = 0;
+        var resets = 0;
+
+        var result = await TelegramTransientConnectionRetry.ExecuteAsync(
+            () => ++attempts == 1
+                ? Task.FromException<int>(cancellationKind == "task"
+                    ? new TaskCanceledException("A task was canceled.")
+                    : new OperationCanceledException("The operation was canceled."))
+                : Task.FromResult(54),
+            () =>
+            {
+                resets++;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        Assert.Equal(54, result);
+        Assert.Equal(2, attempts);
+        Assert.Equal(1, resets);
+    }
+
+    [Fact]
+    public void IO故障会识别为瞬时连接错误()
+    {
+        Assert.True(TelegramTransientConnectionRetry.ShouldRetry(
+            new IOException("unexpected EOF"),
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public void 会话加载包装异常中的取消会识别为瞬时故障()
+    {
+        var error = new InvalidOperationException(
+            "Telegram 会话加载失败",
+            new TaskCanceledException("A task was canceled."));
+
+        Assert.True(TelegramTransientConnectionRetry.ShouldRetry(
+            error,
+            CancellationToken.None));
+    }
+
     [Fact]
     public void WTelegram连接关闭错误会识别为瞬时故障()
     {
@@ -52,6 +98,34 @@ public sealed class TelegramDeviceQueryRetryTests
         var error = new TL.RpcException(420, "FLOOD_WAIT_30");
 
         var thrown = await Assert.ThrowsAsync<TL.RpcException>(() =>
+            TelegramTransientConnectionRetry.ExecuteAsync<int>(
+                () =>
+                {
+                    attempts++;
+                    return Task.FromException<int>(error);
+                },
+                () =>
+                {
+                    resets++;
+                    return Task.CompletedTask;
+                },
+                CancellationToken.None));
+
+        Assert.Same(error, thrown);
+        Assert.Equal(1, attempts);
+        Assert.Equal(0, resets);
+    }
+
+    [Theory]
+    [InlineData("Session 失效（AUTH_KEY_UNREGISTERED）")]
+    [InlineData("账号权限不足：CHAT_WRITE_FORBIDDEN")]
+    public async Task Session和权限错误不会重建或重试(string message)
+    {
+        var attempts = 0;
+        var resets = 0;
+        var error = new InvalidOperationException(message);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             TelegramTransientConnectionRetry.ExecuteAsync<int>(
                 () =>
                 {

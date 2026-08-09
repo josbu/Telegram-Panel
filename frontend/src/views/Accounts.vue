@@ -729,6 +729,7 @@ import type {
   TelegramSystemMessage,
 } from '@/api/types'
 import { formatTime } from '@/utils/format'
+import { isInconclusiveTelegramStatus, isTransientTelegramStatus } from '@/utils/telegramStatus'
 import { accountCategoryTagStyle } from '@/utils/categoryStyle'
 import { usePersistentColumnVisibility, type ColumnVisibilityOption } from '@/utils/columnVisibility'
 import { useMediaQuery } from '@/utils/useMediaQuery'
@@ -1077,6 +1078,8 @@ function telegramStatusText(row: Row) {
   if (isStatusRefreshing(row.id)) return '刷新中…'
   if (!row.isActive) return '停用'
   if (!row.telegramStatusSummary) return '未检测'
+  if (!row.telegramStatusOk && isTransientTelegramStatus(row.telegramStatusSummary)) return '连接异常'
+  if (!row.telegramStatusOk && isInconclusiveTelegramStatus(row.telegramStatusSummary)) return '检测异常'
   return row.telegramStatusOk ? row.telegramStatusSummary : '失效'
 }
 
@@ -1084,10 +1087,12 @@ function telegramStatusTagType(row: Row) {
   if (isStatusRefreshing(row.id)) return 'warning'
   if (!row.isActive) return 'info'
   if (!row.telegramStatusSummary) return 'info'
+  if (!row.telegramStatusOk && isInconclusiveTelegramStatus(row.telegramStatusSummary)) return 'warning'
   return row.telegramStatusOk ? 'success' : 'danger'
 }
 
 function proxyKindLabel(kind?: ProxyKind | null) {
+  if (kind === 'wireguard_warp') return 'WG WARP'
   if (kind === 'warp') return 'WARP'
   if (kind === 'resin') return 'Resin'
   return '代理'
@@ -1095,6 +1100,7 @@ function proxyKindLabel(kind?: ProxyKind | null) {
 
 function proxyKindTagType(kind?: ProxyKind | null) {
   if (kind === 'warp') return 'success'
+  if (kind === 'wireguard_warp') return 'primary'
   if (kind === 'resin') return 'warning'
   return 'info'
 }
