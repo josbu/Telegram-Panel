@@ -9,7 +9,7 @@ Telegram Panel 按账号管理 Telegram 连接出口。导入、登录，以及�
 对应代理或账号的出口，两者互不等价。
 
 - 顶部显示“未使用 WARP”：只表示面板服务自身没有通过 Cloudflare WARP。
-- WARP 代理行显示“WARP 已连接”：表示该独立 WARP 容器的出口检测成功。
+- WARP 代理行显示“WARP 已连接”：表示该独立受管 WARP 容器的出口检测成功。
 - 出口地址包含冒号时通常是 IPv6。IPv6 同样是有效公网出口。
 - 当前出口检测先使用 Cloudflare Trace 验证公网 IP，再按 IP 补充国家/地区、城市和 ISP。
   地理服务临时不可用时仍会保留已验证的 IP 和国家码，不会把代理误判为失败。
@@ -20,7 +20,9 @@ Telegram Panel 按账号管理 Telegram 连接出口。导入、登录，以及�
 
 - **明确直连**：绕过账号代理和全局代理。
 - **全局代理**：继承 `Telegram:Proxy` 配置。
-- **已有代理**：绑定代理管理中的 HTTP、SOCKS5、MTProxy 或 Resin。
+- **已有代理**：绑定代理管理中的 HTTP、SOCKS5、MTProxy、Resin 或外部 WireGuard WARP。
+- **外部 WireGuard WARP**：运营方在面板外运行 WireGuard/gost 等轻量出口，面板只保存
+  它暴露出的 HTTP/SOCKS5 监听并绑定账号。
 - **独立 WARP**：登录或账号管理可按需创建并绑定受管 WARP 容器；账号导入只会自动分配
   已有 WARP，不会按账号创建新容器。
 
@@ -47,7 +49,7 @@ Telegram Panel 按账号管理 Telegram 连接出口。导入、登录，以及�
 ## 配置全局代理
 
 在 **代理管理 → 全局代理** 中可以直接启用 HTTP、SOCKS5 或 MTProxy，也可以从已有的
-普通代理、Resin 或 WARP 中选择。选择已有代理时保存的是代理引用，后续编辑该代理会对
+普通代理、外部 WireGuard WARP、Resin 或受管 WARP 中选择。选择已有代理时保存的是代理引用，后续编辑该代理会对
 继承全局的账号生效。
 保存后面板会立即重载配置并清理 Telegram 客户端缓存；继承“全局设置”的账号会在下一次
 连接时使用新出口，账号已绑定的独立代理和明确直连不受全局代理覆盖。配置缺失或无效时
@@ -63,24 +65,70 @@ Telegram Panel 按账号管理 Telegram 连接出口。导入、登录，以及�
 - HTTP
 - SOCKS5
 - MTProxy
+- 外部 WireGuard WARP HTTP 或 SOCKS5 监听
 - Resin HTTP 或 SOCKS5 数据面
 
-HTTP 和 SOCKS5 可以通过 Cloudflare Trace 检测公网出口。MTProxy 只服务 Telegram
+HTTP 和 SOCKS5 可以通过 Cloudflare Trace 检测公网出口。外部 WireGuard WARP 也使用
+Cloudflare Trace，但必须返回 `warp=on` 或 `warp=plus` 才算检测成功。MTProxy 只服务 Telegram
 MTProto，不能通过普通 HTTP 请求检测公网 IP。
 
 代理列表支持按“使用中/未使用”和分类筛选；勾选多个代理后可以批量设置分类或删除。
 批量删除会逐项执行并列出失败原因；仍被账号或全局代理使用的项目会保留，
 其它可删除项目不受影响。使用中包括直接绑定账号，以及被全局代理引用的代理。
 
-从 v1.31.44 起，启用的普通代理和 Resin 默认每 5 分钟自动检测一次出口，并更新代理和
-账号列表复用的 IP、国家/地区、城市及 ISP 快照。该巡检只探测出口，不会修改代理连接
-参数，也不会尝试重启外部代理服务。Resin 使用独立检测身份并在探测后回收 Lease，不会占用账号的稳定
-身份；停用代理和 MTProxy 不会产生可用的 HTTP 出口元数据。
+从 v1.31.44 起，启用的普通代理、外部 WireGuard WARP 和 Resin 默认每 5 分钟自动做一次轻量
+健康巡检。巡检请求使用 `Proxy:Egress:ProbeUrl`（Docker 环境变量 `TP_PROXY_EGRESS_PROBE_URL`），
+默认是 `https://208.67.222.222/`；它只确认代理 HTTP/SOCKS 链路能发起出站请求，不调用
+Cloudflare Trace，也不会刷新 IP、国家/地区、城市或 ISP 快照。需要查看或更新出口元数据时，
+继续使用页面上的手动“检测出口”，该操作才会访问 `Proxy:Egress:MetadataUrl`（默认
+`https://cloudflare.com/cdn-cgi/trace`），外部 WireGuard WARP 仍要求 Trace 返回 `warp=on` 或
+`warp=plus`。
 
 可通过 `Proxy__Egress__Maintenance__Enabled=false` 回滚到仅手动检测；
-`Proxy__Egress__Maintenance__IntervalMinutes` 可调整周期（默认 5 分钟）。成功判据是代理行
-“最近检测”持续更新且出口信息同步变化；失败时查看服务日志中的
-`Proxy egress maintenance`，并先确认代理地址、认证和 Resin 控制面可达。
+`Proxy__Egress__Maintenance__IntervalMinutes` 可调整周期（默认 5 分钟）。成功判据是服务日志
+不再每 5 分钟出现 Cloudflare Trace 请求，代理行“最近检测”持续更新，手动检测仍能刷新出口 IP
+和 WARP 状态。失败时查看服务日志中的 `Proxy egress maintenance`，并先确认轻量探针 URL、代理地址、
+认证、外部 WireGuard 监听和 Resin 控制面可达；若自定义探针不可用，改回默认 ProbeUrl 或关闭巡检。
+
+
+## 外部 WireGuard WARP 多出口
+
+这是当前版本支持的轻量多出口路径：面板不尝试在宿主机创建 WireGuard 接口、不写入
+`wg-quick` 配置、不复制或改写 Cloudflare WARP 私钥，也不验证“只改 PrivateKey 就能生成
+新 Cloudflare peer”这类假设。Cloudflare 官方 Linux 文档只说明 WARP 客户端可以把隧道协议
+切换为 WireGuard，并未把复制配置改 key 声明为可由面板安全托管的生命周期接口；因此宿主
+网络和 WARP 注册仍由运营方在面板外管理。
+
+推荐拓扑是每个外部出口在宿主机或旁路容器中自行运行：
+
+1. 运营方准备独立、有效的 WARP/WireGuard 出口，并为每个出口启动本地 HTTP 或 SOCKS5
+   监听（例如 `127.0.0.1:1080`、`10.0.0.5:1081`）。
+2. 确认监听地址能被 Telegram Panel 容器访问；容器内的 `127.0.0.1` 指向面板容器自身，
+   访问宿主机监听时通常要使用 Docker 网络地址或 `host.docker.internal`。
+3. 在 **代理管理 → 新增代理 → 外部 WireGuard WARP** 中填写协议、主机、端口和可选认证，
+   或批量导入：
+
+```text
+wg-warp+socks5://user:password@host.docker.internal:1080
+wg-warp+http://10.0.0.5:8080
+```
+
+保存后建议保持“保存后检测出口”。检测成功的判据是：代理行显示可用、存在公网出口 IP，
+且 Cloudflare Trace 报告 WARP 已启用；未检测成功的外部 WireGuard WARP 端点不能绑定账号
+或作为全局已有代理生效。成功后它会作为普通已有代理参与账号绑定、导入首次连接、账号列表
+出口展示、分类筛选和每 5 分钟出口巡检，不会创建 Docker WARP 容器或数据卷。
+
+故障排查按边界分工处理：面板只负责保存连接参数、发起 HTTP/SOCKS 握手、验证 WARP 出口和
+绑定账号；`wg` 接口、路由表、gost/3proxy 进程、WARP 注册与私钥轮换由运营方负责。若检测失败，
+先在面板容器内确认能连到监听地址，再检查外部代理是否真的经 WARP 出口访问
+`https://www.cloudflare.com/cdn-cgi/trace`。需要回滚时，把账号切换到其它已有代理/全局设置/直连，
+或删除对应外部 WireGuard WARP 代理记录；面板不会停止外部 WireGuard 或代理进程。
+
+### 不支持的托管模式
+
+当前服务边界只安全托管 Docker WARP 容器。直接管理宿主 WireGuard 需要 root 级网络权限、
+路由表和防火墙改写，以及对 WARP 注册材料的生命周期保证；这些都超出当前面板服务权限，
+所以不会实现为“复制配置并改 key”的一键托管功能。
 
 ## 启用独立 WARP
 
@@ -102,6 +150,12 @@ TP_WARP_DOCKER_NETWORK=telegram-panel_default
 
 # 自动创建 WARP 的默认连接协议：http 或 socks5
 TP_WARP_PROXY_PROTOCOL=http
+
+# 受管 WARP 最大数量和单容器 Docker 创建模板；0 表示不设置，保持旧安装行为
+TP_WARP_MAX_MANAGED_PROXY_COUNT=0
+TP_WARP_CONTAINER_MEMORY_LIMIT_BYTES=0
+TP_WARP_CONTAINER_CPU_LIMIT=0
+TP_WARP_CONTAINER_PIDS_LIMIT=0
 ```
 
 WARP 镜像中的 GOST 端口同时支持 HTTP 和 SOCKS5。默认协议决定登录和批量绑定自动创建
@@ -109,9 +163,17 @@ WARP 时宿主使用哪种握手；代理管理中的一键创建弹窗可以覆
 自动分配已有 WARP 时沿用代理记录自身的协议，不读取该创建默认值。
 
 每个 WARP 都对应一个独立 Docker 容器和数据卷，并持续占用一定的服务器内存与 CPU。
+`TP_WARP_MAX_MANAGED_PROXY_COUNT` 可限制面板可创建的受管 WARP 数量，达到上限时会在创建
+Docker 卷或容器前失败。`TP_WARP_CONTAINER_MEMORY_LIMIT_BYTES`、`TP_WARP_CONTAINER_CPU_LIMIT`
+（例如 `0.5`）和 `TP_WARP_CONTAINER_PIDS_LIMIT` 会映射到 Docker HostConfig 的 `Memory`、
+`NanoCpus` 和 `PidsLimit`，只影响后续新建容器；值为 `0` 或留空时不写对应限制。
+
 账号导入的“自动分配已有 WARP”只复用这些现有容器，并优先选择绑定账号较少的 WARP；
 批量导入不会再按账号数量创建容器。没有健康候选项时导入会停止，需先在本页准备 WARP
-或改选其他出口。
+或改选其他出口。成功标准是新建容器 inspect 能看到配置的资源限制，或达到数量上限时没有
+新增代理记录和 Docker 资源；失败时检查 `.env` 是否由 Compose 注入、数值是否为正数，以及
+宿主 Docker 版本是否支持对应 HostConfig 字段。回滚时把模板值改回 `0` 并重建面板容器；
+已创建容器如需移除限制，需删除后重新创建。
 
 默认 `container` 模式由 Docker 网络按容器名访问，不占用宿主机代理端口。若在其他
 拓扑中把 `Proxy:Warp:ProxyHostMode` 配为 `published`，面板会从

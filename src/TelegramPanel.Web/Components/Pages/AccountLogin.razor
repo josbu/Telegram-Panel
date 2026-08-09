@@ -4,10 +4,12 @@
 @inject TelegramPanel.Core.Services.Proxy.ProxyManagementService ProxyManagement
 @inject TelegramPanel.Web.Services.AccountLoginProxyCoordinator LoginProxy
 @inject IConfiguration Configuration
+@inject TelegramApiProfilePool ApiProfilePool
 @inject ISnackbar Snackbar
 @inject NavigationManager Navigation
 @using TelegramPanel.Core.Models
 @using TelegramPanel.Core.Services.Proxy
+@using TelegramPanel.Core.Services.Telegram
 @using TelegramPanel.Data.Entities
 @implements IAsyncDisposable
 
@@ -307,11 +309,17 @@
 
     private bool TryGetTelegramApi(out int apiId, out string apiHash, out string configuredSessionsPath)
     {
-        apiHash = Configuration["Telegram:ApiHash"] ?? "";
         configuredSessionsPath = Configuration["Telegram:SessionsPath"] ?? "sessions";
-        return int.TryParse(Configuration["Telegram:ApiId"], out apiId)
-               && apiId > 0
-               && !string.IsNullOrWhiteSpace(apiHash);
+        if (!TelegramApiProfilePool.TrySelectDefault(Configuration, out var credentials, out _))
+        {
+            apiId = 0;
+            apiHash = string.Empty;
+            return false;
+        }
+
+        apiId = credentials.ApiId;
+        apiHash = credentials.ApiHash;
+        return true;
     }
 
     private bool IsApiConfigured => TryGetTelegramApi(out _, out _, out _);
@@ -483,7 +491,8 @@
                 var result = await AccountService.StartLoginAsync(
                     accountId,
                     phoneNumber,
-                    proxyState.Resolution);
+                    proxyState.Resolution,
+                    new TelegramApiCredentials(telegramApiId, telegramApiHash));
 
                 if (result.Success)
                 {

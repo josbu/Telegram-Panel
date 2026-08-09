@@ -24,7 +24,9 @@ services:
       # 后台登录凭据文件（持久化到 ./docker-data/admin_auth.json）
       AdminAuth__CredentialsPath: "/data/admin_auth.json"
 
-      # 普通代理和 Resin 只刷新出口快照，不会重启外部代理资源。
+      # 普通代理和 Resin 使用轻量 ProbeUrl 做健康巡检；手动检测才调用 MetadataUrl 获取出口元数据。
+      Proxy__Egress__ProbeUrl: "${TP_PROXY_EGRESS_PROBE_URL:-https://208.67.222.222/}"
+      Proxy__Egress__MetadataUrl: "${TP_PROXY_EGRESS_METADATA_URL:-https://cloudflare.com/cdn-cgi/trace}"
       Proxy__Egress__Maintenance__Enabled: "${TP_PROXY_EGRESS_MAINTENANCE_ENABLED:-true}"
       Proxy__Egress__Maintenance__InitialDelaySeconds: "${TP_PROXY_EGRESS_MAINTENANCE_INITIAL_DELAY_SECONDS:-30}"
       Proxy__Egress__Maintenance__IntervalMinutes: "${TP_PROXY_EGRESS_MAINTENANCE_INTERVAL_MINUTES:-5}"

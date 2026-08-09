@@ -1264,21 +1264,21 @@ public class GroupService : IGroupService
 
     private int ResolveApiId(TelegramPanel.Data.Entities.Account account)
     {
-        if (int.TryParse(_configuration["Telegram:ApiId"], out var globalApiId) && globalApiId > 0)
-            return globalApiId;
         if (account.ApiId > 0)
             return account.ApiId;
-        throw new InvalidOperationException("未配置全局 ApiId，且账号缺少 ApiId");
+        if (int.TryParse(_configuration["Telegram:ApiId"], out var globalApiId) && globalApiId > 0)
+            return globalApiId;
+        throw new InvalidOperationException("账号缺少 ApiId，且未配置全局 ApiId");
     }
 
     private string ResolveApiHash(TelegramPanel.Data.Entities.Account account)
     {
+        if (!string.IsNullOrWhiteSpace(account.ApiHash))
+            return account.ApiHash.Trim();
         var global = _configuration["Telegram:ApiHash"];
         if (!string.IsNullOrWhiteSpace(global))
             return global.Trim();
-        if (!string.IsNullOrWhiteSpace(account.ApiHash))
-            return account.ApiHash.Trim();
-        throw new InvalidOperationException("未配置全局 ApiHash，且账号缺少 ApiHash");
+        throw new InvalidOperationException("账号缺少 ApiHash，且未配置全局 ApiHash");
     }
 
     private static string ResolveSessionKey(TelegramPanel.Data.Entities.Account account, string apiHash)

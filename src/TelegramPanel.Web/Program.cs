@@ -516,6 +516,7 @@ builder.Services.AddScoped<IModuleTaskHandler, ChannelInviteUsersTaskHandler>();
 builder.Services.AddScoped<IModuleTaskHandler, GroupInviteUsersTaskHandler>();
 builder.Services.AddScoped<IModuleTaskHandler, ChannelGroupPrivateCreateTaskHandler>();
 builder.Services.AddScoped<IModuleTaskHandler, ChannelGroupPublicizeTaskHandler>();
+builder.Services.AddScoped<IModuleTaskHandler, AutoChangeLoginEmailTaskHandler>();
 builder.Services.AddScoped<IModuleTaskHandler, AccountAutoSyncTaskHandler>();
 builder.Services.AddSingleton<BatchTaskExecutionControlService>();
 builder.Services.AddHostedService<BatchTaskBackgroundService>();

@@ -1,0 +1,164 @@
+@inject AccountCategoryManagementService CategoryManagement
+@inject AccountManagementService AccountManagement
+@inject IConfiguration Configuration
+@using System.Text.Json
+@using TelegramPanel.Data.Entities
+@using TelegramPanel.Modules
+@using TelegramPanel.Web.Services
+@using Microsoft.AspNetCore.Components
+
+<MudStack Spacing="2">
+    @if (loading)
+    {
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+        <MudText Typo="Typo.caption">正在加载配置项...</MudText>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+            默认只处理 777000 系统通知中匹配“Settings &gt; Privacy &amp; Security &gt; Login Email”的账号；目标邮箱按“手机号数字@@域名”生成，并使用 Cloud Mail 收取验证码确认。
+        </MudAlert>
+
+        <MudSelect T="int"
+                   Label="执行账号分类（可多选）"
+                   Variant="Variant.Outlined"
+                   MultiSelection="true"
+                   SelectedValues="selectedCategoryIds"
+                   SelectedValuesChanged="OnSelectedCategoriesChanged">
+            @foreach (var item in categories)
+            {
+                <MudSelectItem Value="@item.Id">@item.Name</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudTextField @bind-Value="domain" @bind-Value:after="OnInputsChanged" Label="邮箱域名" Variant="Variant.Outlined" HelperText="@DomainHelperText" />
+
+        <MudGrid>
+            <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="triggerDaysAgo" @bind-Value:after="OnInputsChanged" Label="触发通知距今天数" Variant="Variant.Outlined" Min="0" Max="30" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="triggerWindowHours" @bind-Value:after="OnInputsChanged" Label="通知窗口(小时)" Variant="Variant.Outlined" Min="1" Max="336" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="maxSystemMessages" @bind-Value:after="OnInputsChanged" Label="最多扫描通知" Variant="Variant.Outlined" Min="20" Max="1000" />
+            </MudItem>
+        </MudGrid>
+
+        <MudSwitch T="bool" @bind-Value="force" @bind-Value:after="OnInputsChanged" Label="强制执行（不要求匹配系统通知）" Color="Color.Warning" />
+        <MudSwitch T="bool" @bind-Value="autoConfirm" @bind-Value:after="OnInputsChanged" Label="自动从 Cloud Mail 收码并确认" Color="Color.Primary" />
+
+        @if (autoConfirm)
+        {
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudNumericField T="int" @bind-Value="pollIntervalSeconds" @bind-Value:after="OnInputsChanged" Label="收码轮询间隔(秒)" Variant="Variant.Outlined" Min="2" Max="30" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudNumericField T="int" @bind-Value="pollTimeoutSeconds" @bind-Value:after="OnInputsChanged" Label="收码超时(秒)" Variant="Variant.Outlined" Min="10" Max="600" />
+                </MudItem>
+            </MudGrid>
+        }
+    }
+</MudStack>
+
+@code {
+    [Parameter] public ModuleTaskDraft Draft { get; set; }
+    [Parameter] public EventCallback<ModuleTaskDraft> DraftChanged { get; set; }
+    [Parameter] public string? InitialConfigJson { get; set; }
+
+    private bool loading = true;
+    private List<AccountCategory> categories = new();
+    private List<Account> activeAccounts = new();
+    private const string DomainHelperText = "留空时使用 CloudMail:Domain；将生成 手机号数字@域名";
+
+    private HashSet<int> selectedCategoryIds = new();
+    private string domain = string.Empty;
+    private int triggerDaysAgo = 6;
+    private int triggerWindowHours = 24;
+    private int maxSystemMessages = 300;
+    private bool force;
+    private bool autoConfirm = true;
+    private int pollIntervalSeconds = 5;
+    private int pollTimeoutSeconds = 90;
+
+    protected override async Task OnInitializedAsync()
+    {
+        categories = (await CategoryManagement.GetAllCategoriesAsync())
+            .Where(x => !x.ExcludeFromOperations)
+            .OrderBy(x => x.Name)
+            .ToList();
+        activeAccounts = (await AccountManagement.GetActiveAccountsAsync()).ToList();
+        domain = (Configuration["CloudMail:Domain"] ?? string.Empty).Trim().TrimStart('@');
+        ApplyInitialConfig();
+        loading = false;
+        await OnInputsChanged();
+    }
+
+    private void ApplyInitialConfig()
+    {
+        var raw = (InitialConfigJson ?? string.Empty).Trim();
+        if (raw.Length == 0)
+            return;
+
+        try
+        {
+            var config = JsonSerializer.Deserialize<AutoChangeLoginEmailTaskConfig>(raw, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (config == null)
+                return;
+
+            selectedCategoryIds = config.CategoryIds.Where(x => x > 0).ToHashSet();
+            if (!string.IsNullOrWhiteSpace(config.Domain))
+                domain = config.Domain.Trim().TrimStart('@');
+            triggerDaysAgo = config.TriggerDaysAgo;
+            triggerWindowHours = config.TriggerWindowHours;
+            maxSystemMessages = config.MaxSystemMessages;
+            force = config.Force;
+            autoConfirm = config.AutoConfirm;
+            pollIntervalSeconds = config.PollIntervalSeconds;
+            pollTimeoutSeconds = config.PollTimeoutSeconds;
+        }
+        catch
+        {
+            // 旧/损坏配置由校验阶段提示用户重新保存。
+        }
+    }
+
+    private async Task OnSelectedCategoriesChanged(IEnumerable<int> values)
+    {
+        selectedCategoryIds = values.Where(x => x > 0).ToHashSet();
+        await OnInputsChanged();
+    }
+
+    private async Task OnInputsChanged()
+    {
+        if (loading)
+            return;
+
+        var selectedIds = selectedCategoryIds.Where(x => x > 0).Distinct().ToList();
+        if (selectedIds.Count == 0)
+        {
+            await DraftChanged.InvokeAsync(new ModuleTaskDraft(0, null, false, "请至少选择一个账号分类"));
+            return;
+        }
+
+        var selectedAccountCount = activeAccounts.Count(x => x.IsActive && x.CategoryId.HasValue && selectedIds.Contains(x.CategoryId.Value) && x.Category?.ExcludeFromOperations != true);
+        var selectedCategoryNames = categories.Where(x => selectedIds.Contains(x.Id)).Select(x => x.Name).ToList();
+        var config = new AutoChangeLoginEmailTaskConfig
+        {
+            CategoryIds = selectedIds,
+            CategoryNames = selectedCategoryNames,
+            Domain = (domain ?? string.Empty).Trim().TrimStart('@'),
+            TriggerDaysAgo = Math.Clamp(triggerDaysAgo, 0, 30),
+            TriggerWindowHours = Math.Clamp(triggerWindowHours, 1, 336),
+            MaxSystemMessages = Math.Clamp(maxSystemMessages, 20, 1000),
+            Force = force,
+            AutoConfirm = autoConfirm,
+            PollIntervalSeconds = Math.Clamp(pollIntervalSeconds, 2, 30),
+            PollTimeoutSeconds = Math.Clamp(pollTimeoutSeconds, 10, 600)
+        };
+
+        var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+        await DraftChanged.InvokeAsync(new ModuleTaskDraft(selectedAccountCount, json, true, null));
+    }
+}

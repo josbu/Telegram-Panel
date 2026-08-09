@@ -50,16 +50,17 @@ public sealed partial class ProxyManagementService
         if (nextEnabled
             && normalizedSourceMode == GlobalTelegramProxyConfiguration.ExistingSourceMode)
         {
-            var selectedProxyAvailable = await _db.OutboundProxies
+            var selectedProxy = await _db.OutboundProxies
                 .AsNoTracking()
-                .AnyAsync(
+                .FirstOrDefaultAsync(
                     x => x.Id == nextProxyId!.Value && x.IsEnabled,
                     cancellationToken);
-            if (!selectedProxyAvailable)
+            if (selectedProxy == null)
             {
                 throw new KeyNotFoundException(
                     "所选全局代理不存在或已停用，未修改全局代理配置");
             }
+            EnsureWireGuardWarpReadyForBinding(selectedProxy);
         }
 
         var previousGlobalResin = await ResolveConfiguredGlobalResinProxyAsync(cancellationToken);
@@ -299,6 +300,7 @@ public sealed partial class ProxyManagementService
                         x => x.Id == targetProxyId.Value && x.IsEnabled,
                         cancellationToken)
                     ?? throw new KeyNotFoundException("所选代理不存在或已停用");
+                EnsureWireGuardWarpReadyForBinding(targetProxy);
             }
 
             ProxyConnectionOptions? currentGlobalConnection = null;
@@ -449,17 +451,30 @@ public sealed partial class ProxyManagementService
         {
             if (input.ProxyId is not > 0)
                 throw new ArgumentException("请选择已有代理");
-            var exists = await _db.OutboundProxies
+            var proxy = await _db.OutboundProxies
                 .AsNoTracking()
-                .AnyAsync(x => x.Id == input.ProxyId && x.IsEnabled, cancellationToken);
-            if (!exists)
+                .FirstOrDefaultAsync(x => x.Id == input.ProxyId && x.IsEnabled, cancellationToken);
+            if (proxy == null)
                 throw new KeyNotFoundException("所选代理不存在或已停用");
+            EnsureWireGuardWarpReadyForBinding(proxy);
         }
         else if (strategy == "warp_per_account")
         {
             var status = await _warpManager.GetStatusAsync(cancellationToken);
             if (!status.PlatformSupported || !status.Enabled || !status.DockerAvailable)
                 throw new InvalidOperationException(status.Error ?? "WARP 运行条件不可用");
+        }
+    }
+
+    private static void EnsureWireGuardWarpReadyForBinding(OutboundProxy proxy)
+    {
+        if (proxy.Kind != OutboundProxyKinds.WireGuardWarp)
+            return;
+
+        if (proxy.TestStatus != "ok" || string.IsNullOrWhiteSpace(proxy.EgressIp))
+        {
+            throw new InvalidOperationException(
+                "外部 WireGuard WARP 端点必须先检测成功并确认 Cloudflare Trace 报告 WARP 已启用，才能绑定账号");
         }
     }
 

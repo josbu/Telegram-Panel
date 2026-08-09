@@ -86,10 +86,6 @@ public class AccountRepository : Repository<Account>, IAccountRepository
                     || EF.Functions.Like(a.TelegramStatusSummary, "%账号已注销%")
                     || EF.Functions.Like(a.TelegramStatusSummary, "%已注销/被删除%")
                     || EF.Functions.Like(a.TelegramStatusSummary, "%被删除%")
-
-                    // 连接/探测失败（按“废号”处理）
-                    || EF.Functions.Like(a.TelegramStatusSummary, "%连接失败%")
-                    || EF.Functions.Like(a.TelegramStatusSummary, "%创建频道探测失败%")
                 ));
         }
 
@@ -304,7 +300,9 @@ public class AccountRepository : Repository<Account>, IAccountRepository
             .Where(a =>
                 EF.Functions.Like(a.TelegramStatusSummary!, "%连接失败%")
                 || EF.Functions.Like(a.TelegramStatusSummary!, "%请求超时%")
-                || EF.Functions.Like(a.TelegramStatusSummary!, "%刷新失败%"))
+                || EF.Functions.Like(a.TelegramStatusSummary!, "%刷新失败%")
+                || EF.Functions.Like(a.TelegramStatusSummary!, "%创建频道探测失败%")
+                || EF.Functions.Like(a.TelegramStatusSummary!, "%无法获取账号资料%"))
             .OrderBy(a => a.TelegramStatusCheckedAtUtc ?? DateTime.MinValue)
             .ThenBy(a => a.Id)
             .Take(count)

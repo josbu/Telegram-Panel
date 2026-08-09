@@ -22,6 +22,7 @@ public class AccountService : IAccountService
     // 临时存储登录状态（实际项目应该使用数据库或缓存）
     private readonly Dictionary<int, string> _pendingLogins = new();
     private static readonly ConcurrentDictionary<int, QrLoginSession> QrLoginSessions = new();
+    private static readonly ConcurrentDictionary<int, TelegramApiCredentials> PendingLoginApis = new();
 
     public AccountService(ITelegramClientPool clientPool, ILogger<AccountService> logger, IConfiguration configuration)
     {
@@ -33,27 +34,25 @@ public class AccountService : IAccountService
     public Task<LoginResult> StartLoginAsync(
         int accountId,
         string phone,
-        AccountProxyResolution proxyResolution)
+        AccountProxyResolution proxyResolution,
+        TelegramApiCredentials apiCredentials)
     {
         ArgumentNullException.ThrowIfNull(proxyResolution);
-        return StartLoginCoreAsync(accountId, phone, proxyResolution);
+        return StartLoginCoreAsync(accountId, phone, proxyResolution, apiCredentials);
     }
 
     private async Task<LoginResult> StartLoginCoreAsync(
         int accountId,
         string phone,
-        AccountProxyResolution proxyOverride)
+        AccountProxyResolution proxyOverride,
+        TelegramApiCredentials apiCredentials)
     {
-        if (!int.TryParse(_configuration["Telegram:ApiId"], out var apiId) || apiId <= 0)
+        if (!TelegramApiProfilePool.TryNormalizeCredentials(apiCredentials.ApiId, apiCredentials.ApiHash, out var apiHash, out var apiHashReason))
         {
-            return new LoginResult(false, null, "请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）");
+            return new LoginResult(false, null, $"Telegram API 配置无效：{apiHashReason}");
         }
 
-        if (!TelegramApiConfigValidator.TryNormalizeApiHash(_configuration["Telegram:ApiHash"], out var apiHash, out var apiHashReason))
-        {
-            return new LoginResult(false, null, $"全局 Telegram API 配置无效：{apiHashReason}");
-        }
-
+        var apiId = apiCredentials.ApiId;
         var sessionsPath = _configuration["Telegram:SessionsPath"] ?? "sessions";
         Directory.CreateDirectory(sessionsPath);
         var normalizedPhone = NormalizePhoneForLogin(phone);
@@ -107,7 +106,7 @@ public class AccountService : IAccountService
                 "name" => new LoginResult(false, "signup", "需要注册新账号"),
                 "email" => new LoginResult(false, "email", "该账号需要邮箱验证（请按提示填写邮箱并完成验证）"),
                 "email_verification_code" => new LoginResult(false, "email_code", "请输入邮箱验证码"),
-                _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client)),
+                _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client, apiId, apiHash)),
                 _ => new LoginResult(false, null, $"未知状态: {result}")
             };
 
@@ -116,6 +115,10 @@ public class AccountService : IAccountService
                 try { await _clientPool.RemoveClientStrictAsync(accountId); } catch { }
             }
 
+            if (loginResult.NextStep is "code" or "password")
+                PendingLoginApis[accountId] = new TelegramApiCredentials(apiId, apiHash, apiCredentials.ProfileName);
+            else
+                PendingLoginApis.TryRemove(accountId, out _);
             return loginResult;
         }
         catch (Exception ex)
@@ -123,6 +126,7 @@ public class AccountService : IAccountService
             try
             {
                 await _clientPool.RemoveClientStrictAsync(accountId);
+                PendingLoginApis.TryRemove(accountId, out _);
             }
             catch
             {
@@ -147,22 +151,25 @@ public class AccountService : IAccountService
 
     public Task<QrLoginResult> StartQrLoginAsync(
         int loginId,
-        AccountProxyResolution proxyResolution)
+        AccountProxyResolution proxyResolution,
+        TelegramApiCredentials apiCredentials)
     {
         ArgumentNullException.ThrowIfNull(proxyResolution);
-        return StartQrLoginCoreAsync(loginId, proxyResolution);
+        return StartQrLoginCoreAsync(loginId, proxyResolution, apiCredentials);
     }
 
     private async Task<QrLoginResult> StartQrLoginCoreAsync(
         int loginId,
-        AccountProxyResolution proxyOverride)
+        AccountProxyResolution proxyOverride,
+        TelegramApiCredentials apiCredentials)
     {
         if (loginId <= 0)
             loginId = Random.Shared.Next(1, int.MaxValue);
 
-        var api = ValidateTelegramApi();
-        if (!api.Valid)
-            return new QrLoginResult(false, loginId, "failed", api.Error);
+        if (!TelegramApiProfilePool.TryNormalizeCredentials(apiCredentials.ApiId, apiCredentials.ApiHash, out var apiHash, out var apiHashReason))
+            return new QrLoginResult(false, loginId, "failed", $"Telegram API 配置无效：{apiHashReason}");
+
+        var apiId = apiCredentials.ApiId;
 
         var sessionsPath = _configuration["Telegram:SessionsPath"] ?? "sessions";
         Directory.CreateDirectory(sessionsPath);
@@ -171,7 +178,7 @@ public class AccountService : IAccountService
         await CancelQrLoginStrictAsync(loginId);
 
         var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        var session = new QrLoginSession(loginId, tempPath, api.ApiId, api.ApiHash, cts);
+        var session = new QrLoginSession(loginId, tempPath, apiId, apiHash, cts);
         if (!QrLoginSessions.TryAdd(loginId, session))
         {
             cts.Dispose();
@@ -181,10 +188,10 @@ public class AccountService : IAccountService
         try
         {
             session.Client = CreateStandaloneClient(
-                api.ApiId,
-                api.ApiHash,
+                apiId,
+                apiHash,
                 tempPath,
-                api.ApiHash,
+                apiHash,
                 session.WaitForPassword,
                 proxyOverride);
             session.LoginTask = RunQrLoginAsync(session);
@@ -342,7 +349,7 @@ public class AccountService : IAccountService
         {
             "verification_code" => new LoginResult(false, "code", "已请求重新发送验证码"),
             "password" => new LoginResult(false, "password", "需要两步验证密码"),
-            _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client)),
+            _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client, GetPendingLoginApi(accountId))),
             _ => new LoginResult(false, null, $"重新发送失败：{result}")
         };
     }
@@ -428,7 +435,7 @@ public class AccountService : IAccountService
         return result switch
         {
             "password" => new LoginResult(false, "password", "请输入两步验证密码"),
-            _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client)),
+            _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client, GetPendingLoginApi(accountId))),
             _ => new LoginResult(false, null, $"验证码错误或已过期: {result}")
         };
     }
@@ -442,7 +449,7 @@ public class AccountService : IAccountService
 
         return result switch
         {
-            _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client)),
+            _ when client.User != null => new LoginResult(true, null, "登录成功", MapToAccountInfo(accountId, client, GetPendingLoginApi(accountId))),
             _ => new LoginResult(false, "password", "密码错误")
         };
     }
@@ -452,7 +459,7 @@ public class AccountService : IAccountService
         var client = _clientPool.GetClient(accountId);
         if (client?.User == null) return Task.FromResult<AccountInfo?>(null);
 
-        return Task.FromResult<AccountInfo?>(MapToAccountInfo(accountId, client));
+        return Task.FromResult<AccountInfo?>(MapToAccountInfo(accountId, client, GetPendingLoginApi(accountId)));
     }
 
     public async Task SyncAccountDataAsync(int accountId)
@@ -483,14 +490,16 @@ public class AccountService : IAccountService
         return Task.FromResult(AccountStatus.Active);
     }
 
-    public Task ReleaseClientAsync(int accountId)
+    public async Task ReleaseClientAsync(int accountId)
     {
-        return _clientPool.RemoveClientAsync(accountId);
+        PendingLoginApis.TryRemove(accountId, out _);
+        await _clientPool.RemoveClientAsync(accountId);
     }
 
-    public Task ReleaseClientStrictAsync(int accountId)
+    public async Task ReleaseClientStrictAsync(int accountId)
     {
-        return _clientPool.RemoveClientStrictAsync(accountId);
+        PendingLoginApis.TryRemove(accountId, out _);
+        await _clientPool.RemoveClientStrictAsync(accountId);
     }
 
     private async Task RunQrLoginAsync(QrLoginSession session)
@@ -517,7 +526,7 @@ public class AccountService : IAccountService
                 return;
             }
 
-            session.Account = MapToAccountInfo(session.LoginId, client);
+            session.Account = MapToAccountInfo(session.LoginId, client, session.ApiId, session.ApiHash);
             session.Status = "authorized";
             session.Message = "扫码登录成功";
         }
@@ -717,15 +726,12 @@ public class AccountService : IAccountService
         }
     }
 
-    private (bool Valid, int ApiId, string ApiHash, string? Error) ValidateTelegramApi()
+    private static TelegramApiCredentials GetPendingLoginApi(int accountId)
     {
-        if (!int.TryParse(_configuration["Telegram:ApiId"], out var apiId) || apiId <= 0)
-            return (false, 0, string.Empty, "请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）");
+        if (PendingLoginApis.TryGetValue(accountId, out var credentials))
+            return credentials;
 
-        if (!TelegramApiConfigValidator.TryNormalizeApiHash(_configuration["Telegram:ApiHash"], out var apiHash, out var apiHashReason))
-            return (false, 0, string.Empty, $"全局 Telegram API 配置无效：{apiHashReason}");
-
-        return (true, apiId, apiHash, null);
+        return new TelegramApiCredentials(0, string.Empty);
     }
 
     private static bool LooksLikePasswordRequired(Exception ex)
@@ -764,7 +770,10 @@ public class AccountService : IAccountService
         }
     }
 
-    private static AccountInfo MapToAccountInfo(int accountId, WTelegram.Client client)
+    private static AccountInfo MapToAccountInfo(int accountId, WTelegram.Client client, TelegramApiCredentials apiCredentials)
+        => MapToAccountInfo(accountId, client, apiCredentials.ApiId, apiCredentials.ApiHash);
+
+    private static AccountInfo MapToAccountInfo(int accountId, WTelegram.Client client, int apiId = 0, string? apiHash = null)
     {
         var user = client.User!;
         return new AccountInfo
@@ -775,6 +784,8 @@ public class AccountService : IAccountService
             Username = user.MainUsername,
             FirstName = user.first_name,
             LastName = user.last_name,
+            ApiId = apiId,
+            ApiHash = apiHash,
             Status = Models.AccountStatus.Active,
             LastActiveAt = DateTime.UtcNow
         };

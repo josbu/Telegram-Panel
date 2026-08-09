@@ -215,6 +215,7 @@ function fallbackTaskName(type: string) {
   if (type === 'account_auto_sync') return '账号数据同步'
   if (type === 'channel_group_private_create') return '批量创建私密频道/群组'
   if (type === 'channel_group_publicize') return '批量公开频道/群组'
+  if (type === 'auto_change_login_email') return '自动更改登录邮箱'
   return type
 }
 

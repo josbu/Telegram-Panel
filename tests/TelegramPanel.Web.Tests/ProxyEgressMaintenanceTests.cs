@@ -15,7 +15,7 @@ namespace TelegramPanel.Web.Tests;
 public sealed class ProxyEgressMaintenanceTests
 {
     [Fact]
-    public async Task 巡检只刷新启用的普通和Resin代理并更新出口元数据()
+    public async Task 巡检只刷新启用的普通和Resin代理并使用轻量健康探针()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -35,7 +35,7 @@ public sealed class ProxyEgressMaintenanceTests
         db.OutboundProxies.AddRange(manual, resin, disabled, warp, mtProxy);
         await db.SaveChangesAsync();
 
-        var probe = new RecordingProbeService();
+        var probe = new RecordingHealthProbeService();
         var configuration = new ConfigurationBuilder().Build();
         var service = new ProxyManagementService(
             db,
@@ -57,15 +57,37 @@ public sealed class ProxyEgressMaintenanceTests
         Assert.Equal(
             new[] { manual.Id, resin.Id },
             result.Items.Select(x => x.ProxyId).ToArray());
-        Assert.Equal(2, probe.ProxyIds.Count);
+        Assert.Equal(2, probe.HealthProxyIds.Count);
 
         db.ChangeTracker.Clear();
         var refreshed = await db.OutboundProxies.AsNoTracking().ToDictionaryAsync(x => x.Id);
-        Assert.Equal($"203.0.113.{manual.Id}", refreshed[manual.Id].EgressIp);
-        Assert.Equal($"203.0.113.{resin.Id}", refreshed[resin.Id].EgressIp);
+        Assert.Null(refreshed[manual.Id].EgressIp);
+        Assert.Null(refreshed[resin.Id].EgressIp);
+        Assert.NotNull(refreshed[manual.Id].LastTestedAtUtc);
+        Assert.NotNull(refreshed[resin.Id].LastTestedAtUtc);
         Assert.Null(refreshed[disabled.Id].LastTestedAtUtc);
         Assert.Null(refreshed[warp.Id].LastTestedAtUtc);
         Assert.Null(refreshed[mtProxy.Id].LastTestedAtUtc);
+    }
+
+    [Fact]
+    public void 代理出口探针默认轻量地址且元数据地址保持Trace()
+    {
+        var defaults = ProxyEgressProbeOptions.From(new ConfigurationBuilder().Build());
+        Assert.Equal(ProxyEgressProbeOptions.DefaultProbeUrl, defaults.ProbeUrl);
+        Assert.Equal(ProxyEgressProbeOptions.DefaultMetadataUrl, defaults.MetadataUrl);
+
+        var custom = ProxyEgressProbeOptions.From(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Proxy:Egress:ProbeUrl"] = "https://example.com/healthz",
+                    ["Proxy:Egress:MetadataUrl"] = "https://example.com/trace"
+                })
+                .Build());
+
+        Assert.Equal("https://example.com/healthz", custom.ProbeUrl);
+        Assert.Equal("https://example.com/trace", custom.MetadataUrl);
     }
 
     [Fact]
@@ -99,9 +121,9 @@ public sealed class ProxyEgressMaintenanceTests
         TestStatus = "unknown"
     };
 
-    private sealed class RecordingProbeService : IProxyEgressProbeService
+    private sealed class RecordingHealthProbeService : IProxyEgressProbeService
     {
-        public List<int> ProxyIds { get; } = [];
+        public List<int> HealthProxyIds { get; } = [];
 
         public Task<EgressProbeResult> ProbePanelAsync(
             CancellationToken cancellationToken = default) =>
@@ -110,27 +132,33 @@ public sealed class ProxyEgressMaintenanceTests
         public Task<EgressProbeResult> ProbeProxyAsync(
             OutboundProxy proxy,
             string stableAccountKey,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            ProxyIds.Add(proxy.Id);
-            return Task.FromResult(new EgressProbeResult(
-                true,
-                $"203.0.113.{proxy.Id}",
-                "CN",
-                "Shanghai",
-                "Example ISP",
-                null,
-                20,
-                DateTime.UtcNow,
-                null));
-        }
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
         public Task<EgressProbeResult> ProbeProxyAsync(
             ProxyConnectionOptions options,
             bool requireWarp = false,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<EgressProbeResult> ProbeProxyHealthAsync(
+            OutboundProxy proxy,
+            string stableAccountKey,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            HealthProxyIds.Add(proxy.Id);
+            return Task.FromResult(new EgressProbeResult(
+                true,
+                $"203.0.113.{proxy.Id}",
+                null,
+                null,
+                null,
+                null,
+                8,
+                DateTime.UtcNow,
+                null));
+        }
     }
 
     private sealed class EmptyClientPool : ITelegramClientPool

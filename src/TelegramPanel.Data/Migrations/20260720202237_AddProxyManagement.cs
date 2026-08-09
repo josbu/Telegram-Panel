@@ -50,7 +50,7 @@ namespace TelegramPanel.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_OutboundProxies", x => x.Id);
-                    table.CheckConstraint("CK_OutboundProxies_Kind", "\"Kind\" IN ('manual', 'resin', 'warp')");
+                    table.CheckConstraint("CK_OutboundProxies_Kind", "\"Kind\" IN ('manual', 'resin', 'warp', 'wireguard_warp')");
                     table.CheckConstraint("CK_OutboundProxies_LastLatencyMs", "\"LastLatencyMs\" IS NULL OR \"LastLatencyMs\" >= 0");
                     table.CheckConstraint("CK_OutboundProxies_Port", "\"Port\" BETWEEN 1 AND 65535");
                     table.CheckConstraint("CK_OutboundProxies_Protocol", "\"Protocol\" IN ('http', 'socks5', 'mtproto')");

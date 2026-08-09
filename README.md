@@ -20,8 +20,8 @@ backend, and a **Vue 3** management UI.
   location, city, and ISP checks.
 - **Safe first connection:** import and login select and freeze the route before the first
   Telegram request instead of connecting directly and changing IP afterward.
-- **Account maintenance:** status checks, invalid-account cleanup, device logout, 2FA, and
-  recovery-email management.
+- **Account maintenance:** status checks, transient-connection recovery, safe invalid-account
+  cleanup, device logout, 2FA, and recovery-email management.
 - **Channels, groups, and bots:** creation, sync, categories, invitations, admin changes,
   public conversion, leave/disband operations, and link export.
 - **Automation:** immediate and scheduled tasks, pause/edit/rerun controls, data dictionaries,

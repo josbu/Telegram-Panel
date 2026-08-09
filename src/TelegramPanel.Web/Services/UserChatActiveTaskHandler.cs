@@ -14,6 +14,71 @@ using TelegramPanel.Modules;
 
 namespace TelegramPanel.Web.Services;
 
+internal readonly record struct UserChatActivePlannedSend(int AccountIndex, int MessageIndex);
+
+internal static class UserChatActiveSendPlanner
+{
+    public static IReadOnlyList<UserChatActivePlannedSend> BuildFiniteRunPlan(
+        int eligibleAccountCount,
+        int requestedMessageCount,
+        int dictionaryCount,
+        string? accountMode,
+        string? messageMode)
+    {
+        if (eligibleAccountCount <= 0 || requestedMessageCount <= 0 || dictionaryCount <= 0)
+            return Array.Empty<UserChatActivePlannedSend>();
+
+        var effectiveMessageCount = Math.Min(requestedMessageCount, eligibleAccountCount);
+        var accountIndexes = BuildAccountIndexes(eligibleAccountCount, accountMode);
+        var plannedSends = new List<UserChatActivePlannedSend>(effectiveMessageCount);
+        var messageQueueIndex = 0;
+
+        for (var i = 0; i < effectiveMessageCount; i++)
+        {
+            var messageIndex = SelectIndex(messageMode, dictionaryCount, ref messageQueueIndex);
+            plannedSends.Add(new UserChatActivePlannedSend(accountIndexes[i], messageIndex));
+        }
+
+        return plannedSends;
+    }
+
+    public static int ResolveFiniteRunTotal(int completedMessageCount, int plannedSendCount)
+    {
+        return Math.Max(0, completedMessageCount) + Math.Max(0, plannedSendCount);
+    }
+
+
+    private static List<int> BuildAccountIndexes(int count, string? mode)
+    {
+        var indexes = Enumerable.Range(0, count).ToList();
+        if (string.Equals(mode, UserChatActiveTaskModes.Queue, StringComparison.OrdinalIgnoreCase))
+            return indexes;
+
+        for (var i = indexes.Count - 1; i > 0; i--)
+        {
+            var swapIndex = Random.Shared.Next(i + 1);
+            (indexes[i], indexes[swapIndex]) = (indexes[swapIndex], indexes[i]);
+        }
+
+        return indexes;
+    }
+
+    private static int SelectIndex(string? mode, int count, ref int queueIndex)
+    {
+        if (count <= 1)
+            return 0;
+
+        if (string.Equals(mode, UserChatActiveTaskModes.Queue, StringComparison.OrdinalIgnoreCase))
+        {
+            var idx = queueIndex % count;
+            queueIndex = (queueIndex + 1) % int.MaxValue;
+            return idx;
+        }
+
+        return Random.Shared.Next(0, count);
+    }
+}
+
 public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
 {
     private const int MaxFailureLines = 100;
@@ -99,6 +164,24 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         var messageQueueIndex = 0;
         var targetQueueIndexByAccountId = new Dictionary<int, int>();
         var lastProgressPersistAt = DateTime.UtcNow;
+        var finiteSendPlan = config.MaxMessages > 0
+            ? UserChatActiveSendPlanner.BuildFiniteRunPlan(
+                accountSlots.Count,
+                Math.Max(0, config.MaxMessages - progress.Completed),
+                config.Dictionary.Count,
+                config.AccountMode,
+                config.MessageMode)
+            : null;
+        if (finiteSendPlan is not null)
+        {
+            var finiteTotal = UserChatActiveSendPlanner.ResolveFiniteRunTotal(progress.Completed, finiteSendPlan.Count);
+            if (finiteTotal != config.MaxMessages)
+            {
+                config.MaxMessages = finiteTotal;
+                await taskManagement.UpdateTaskDraftAsync(host.TaskId, finiteTotal, SerializeIndented(config));
+            }
+        }
+        var finiteSendPlanIndex = 0;
 
         try
         {
@@ -151,10 +234,21 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                 if (config.MaxMessages > 0 && progress.Completed >= config.MaxMessages)
                     break;
 
+                UserChatActivePlannedSend plannedSend = default;
+                if (finiteSendPlan is not null)
+                {
+                    if (finiteSendPlanIndex >= finiteSendPlan.Count)
+                        break;
+
+                    plannedSend = finiteSendPlan[finiteSendPlanIndex++];
+                }
+
                 var intervalMs = NextDelayMilliseconds(config.DelayMinMs, config.DelayMaxMs);
                 var loopTimer = Stopwatch.StartNew();
 
-                var accountIdx = SelectIndex(config.AccountMode, accountSlots.Count, ref accountQueueIndex);
+                var accountIdx = finiteSendPlan is not null
+                    ? plannedSend.AccountIndex
+                    : SelectIndex(config.AccountMode, accountSlots.Count, ref accountQueueIndex);
                 var accountSlot = accountSlots[accountIdx];
 
                 if (!targetQueueIndexByAccountId.ContainsKey(accountSlot.Account.Id))
@@ -165,7 +259,9 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                 targetQueueIndexByAccountId[accountSlot.Account.Id] = targetQueueIndex;
                 var targetSlot = accountSlot.Targets[targetIdx];
 
-                var messageIdx = SelectIndex(config.MessageMode, config.Dictionary.Count, ref messageQueueIndex);
+                var messageIdx = finiteSendPlan is not null
+                    ? plannedSend.MessageIndex
+                    : SelectIndex(config.MessageMode, config.Dictionary.Count, ref messageQueueIndex);
                 var textTemplate = config.Dictionary[messageIdx];
 
                 if (!await host.IsStillRunningAsync(cancellationToken))

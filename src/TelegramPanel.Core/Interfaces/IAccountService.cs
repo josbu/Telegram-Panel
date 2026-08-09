@@ -1,4 +1,5 @@
 using TelegramPanel.Core.Models;
+using TelegramPanel.Core.Services.Telegram;
 
 namespace TelegramPanel.Core.Interfaces;
 
@@ -13,14 +14,16 @@ public interface IAccountService
     Task<LoginResult> StartLoginAsync(
         int accountId,
         string phone,
-        AccountProxyResolution proxyResolution);
+        AccountProxyResolution proxyResolution,
+        TelegramApiCredentials apiCredentials);
 
     /// <summary>
     /// 使用登录前已明确选择的路由发起二维码登录。
     /// </summary>
     Task<QrLoginResult> StartQrLoginAsync(
         int loginId,
-        AccountProxyResolution proxyResolution);
+        AccountProxyResolution proxyResolution,
+        TelegramApiCredentials apiCredentials);
 
     /// <summary>
     /// 查询二维码登录状态。
