@@ -10,26 +10,26 @@ backend, and a **Vue 3** management UI.
   <a href="https://t.me/vpsbbq"><img src="https://img.shields.io/badge/Telegram-NexHub_AI社区-blue?logo=telegram" alt="Telegram NexHub AI社区"></a>
 </p>
 
-## Current capabilities
+## ✨ Current capabilities
 
-- **Account onboarding:** Telethon, TData, and StringSession import; Telethon and TData
+- 📥 **Account onboarding:** Telethon, TData, and StringSession import; Telethon and TData
   export; phone-code, QR-code, and 2FA login.
-- **Account-bound proxies:** HTTP, SOCKS5, MTProxy,
+- 🌐 **Account-bound proxies:** HTTP, SOCKS5, MTProxy,
   [Resin](https://github.com/Resinat/Resin) sticky routes, and managed Cloudflare WARP,
   with per-account and batch binding, categories, used/unused filters, and egress IP,
   location, city, and ISP checks.
-- **Safe first connection:** import and login select and freeze the route before the first
+- 🔒 **Safe first connection:** import and login select and freeze the route before the first
   Telegram request instead of connecting directly and changing IP afterward.
-- **Account maintenance:** status checks, transient-connection recovery, safe invalid-account
+- 🛡️ **Account maintenance:** status checks, transient-connection recovery, safe invalid-account
   cleanup, device logout, 2FA, and recovery-email management.
-- **Channels, groups, and bots:** creation, sync, categories, invitations, admin changes,
+- 👥 **Channels, groups, and bots:** creation, sync, categories, invitations, admin changes,
   public conversion, leave/disband operations, and link export.
-- **Automation:** immediate and scheduled tasks, pause/edit/rerun controls, data dictionaries,
+- 🤖 **Automation:** immediate and scheduled tasks, pause/edit/rerun controls, data dictionaries,
   templates, and optional OpenAI-compatible verification assistance.
-- **Modules and APIs:** installable `.tpm` or `.zip` extensions for tasks, APIs, and management
+- 🧩 **Modules and APIs:** installable `.tpm` or `.zip` extensions for tasks, APIs, and management
   pages, with legacy Razor page compatibility.
 
-## Install with Docker
+## 🐳 Install with Docker
 
 Requirements: Docker Engine, or Docker Desktop with WSL2 on Windows.
 
