@@ -29,24 +29,6 @@ backend, and a **Vue 3** management UI.
 - **Modules and APIs:** installable `.tpm` or `.zip` extensions for tasks, APIs, and management
   pages, with legacy Razor page compatibility.
 
-## Account routes are managed by the host
-
-Existing-account Telegram operations use the route assigned to that account. Modules should
-call host account services with an `accountId`; they should not duplicate proxy credentials or
-construct a separate `WTelegram.Client`. The host client pool applies the account's current
-HTTP, SOCKS5, MTProxy, WARP, Resin, global-proxy, or explicit-direct route.
-
-Selecting an existing proxy during import or login persists that proxy ID on the account until
-an operator changes it. Selecting the global route instead keeps the account subscribed to later
-global-route changes; explicit direct mode bypasses both account and global proxies. The global
-route can reference any enabled manual, Resin, or WARP entry without copying its credentials.
-
-Module-owned `HttpClient` and third-party API traffic do not automatically inherit an account
-route. Configure those connections separately only when the module itself needs it.
-
-See [Proxy management and account egress](docs/guides/proxy-management.md) and the
-[module development guide](docs/developer/modules.md).
-
 ## Install with Docker
 
 Requirements: Docker Engine, or Docker Desktop with WSL2 on Windows.
@@ -67,34 +49,9 @@ Open <http://localhost:5000> and sign in with the initial credentials:
 Change the initial password after the first sign-in. Persistent data is stored in
 `./docker-data`; back up that directory before updates or migrations.
 
-### Enable managed WARP
-
-Managed WARP requires Linux containers and explicit Docker Socket access:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.warp.yml up -d
-```
-
-Set the automatic-creation default to `http` or `socks5` in `.env`:
-
-```dotenv
-TP_WARP_PROXY_PROTOCOL=http
-```
-
-Each managed WARP creates one Docker container and one persistent volume. Account imports use the
-existing-WARP pool and distribute accounts toward routes with fewer bindings; they never create a
-new container per account. Phone and QR login, plus account management, can still create a dedicated
-WARP when explicitly requested, so size host memory and CPU for those operations.
-
-Managed WARP health checks run every five minutes by default. Two consecutive failures trigger
-a container restart, egress recheck, and reconnection of bound account clients without any
-direct-connection fallback. Periodic restart of a healthy route is disabled by default to avoid
-unnecessary Telegram IP changes; set `TP_WARP_SCHEDULED_REFRESH_ENABLED=true` to enable the
-optional 720-minute refresh cycle. While an account import, phone login, or QR login is using a
-WARP route, health recovery and manual mutation wait rather than changing the first-connection
-egress.
-
-Docker Socket access is close to host `root`; enable this overlay only on a trusted host.
+Proxy, WARP, and Resin setup details live in
+[Proxy management and account egress](docs/guides/proxy-management.md) and
+[Account import](docs/guides/account-import.md), not in this README.
 
 ## Download and update
 
