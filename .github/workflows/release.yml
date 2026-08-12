@@ -230,10 +230,9 @@ jobs:
           {
             echo "## 本次版本主要更新"
             echo
-            mapfile -t COMMITS < <(git log --no-merges --format='%s%x09%h' "$RANGE" | sed '/^[[:space:]]*$/d' || true)
-            if [[ "${#COMMITS[@]}" -eq 0 ]]; then
-              echo "- 维护发布：同步构建产物与部署资产。"
-              echo
+            NOTES_BLOCK="$(git log --no-merges --format='%B%n---END-COMMIT---' "$RANGE" | python3 -c 'exec("""import sys\ntext=sys.stdin.read()\nblocks=[]\nfor commit in text.split(\"---END-COMMIT---\"):\n    lines=commit.splitlines()\n    for i,line in enumerate(lines):\n        if line.strip()==\"## 本次版本主要更新\":\n            picked=[]\n            for body_line in lines[i+1:]:\n                if body_line.startswith(\"## \"):\n                    break\n                picked.append(body_line)\n            block=\"\\n\".join(picked).strip()\n            if block:\n                blocks.append(block)\n            break\nprint(\"\\n\\n\".join(blocks))\n""")')"
+            if [[ -n "$NOTES_BLOCK" ]]; then
+              printf '%s\n\n' "$NOTES_BLOCK"
             else
               declare -A SECTIONS=( [feat]="✨ 新增功能" [fix]="🐛 修复问题" [perf]="⚡ 性能优化" [docs]="📚 文档更新" [refactor]="🧹 代码重构" [test]="✅ 测试改进" [build]="📦 构建发布" [ci]="🔧 CI/CD" [release]="🚀 版本发布" [chore]="🧩 其他变更" [other]="🧩 其他变更" )
               TYPES=(feat fix perf docs refactor test build ci release chore other)
