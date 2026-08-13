@@ -118,6 +118,7 @@ Release 正文由 `.github/workflows/release.yml` 的 `Generate Chinese release 
 - 云端部署验收通过。
 ```
 
+
 提交信息仍建议写中文摘要，例如 `fix: 修复导入分类选择不生效`。如果提交标题是英文，工作流只能去掉类型前缀，不能可靠翻译业务含义；发布前应在 PR squash 标题或提交标题中改成中文。
 
 ### 5. 清理分支
