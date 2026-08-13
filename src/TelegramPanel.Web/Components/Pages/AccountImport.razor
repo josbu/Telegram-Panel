@@ -36,6 +36,9 @@
             <MudRadio T="string" Value="@("warp_pool")" Color="Color.Primary" Disabled="@(Busy || WarpPoolCount == 0)">
                 自动分配已有 WARP
             </MudRadio>
+            <MudRadio T="string" Value="@("warp_per_account")" Color="Color.Primary" Disabled="@(Busy || !WarpCreateAvailable)">
+                创建一对一 WARP
+            </MudRadio>
             <MudRadio T="string" Value="@("global")" Color="Color.Warning" Disabled="@Busy">全局设置</MudRadio>
             <MudRadio T="string" Value="@("direct")" Color="Color.Error" Disabled="@Busy">直连（确认风险）</MudRadio>
         </MudRadioGroup>
@@ -88,6 +91,12 @@
         {
             <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
                 将按当前账号绑定数自动选择已有 WARP；不会创建新容器。当前已启用 @WarpPoolCount 个 WARP。
+            </MudAlert>
+        }
+        else if (proxyStrategy == "warp_per_account")
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                将为每个成功导入账号创建并绑定一个新的受管 WARP；单次最多 @AccountImportService.MaxWarpPerAccountImportCount 个账号，失败会在首次连接前停止。
             </MudAlert>
         }
     </MudCardContent>
@@ -352,6 +361,8 @@
         && x.Kind == OutboundProxyKinds.Warp
         && x.WarpProfile?.Status == "active");
 
+
+    private bool WarpCreateAvailable { get; set; }
     private bool GlobalProxyConfigured
     {
         get
@@ -373,6 +384,7 @@
             && (selectedProxyId is not > 0
                 || proxyOptions.All(x => x.Id != selectedProxyId.Value)))
         || (proxyStrategy == "warp_pool" && WarpPoolCount == 0)
+        || (proxyStrategy == "warp_per_account" && !WarpCreateAvailable)
         || (proxyStrategy == "global" && !GlobalProxyConfigured);
 
     private List<ImportResult> importResults = new();
@@ -390,6 +402,7 @@
     protected override async Task OnInitializedAsync()
     {
         var proxiesTask = ProxyManagement.ListAsync(_pageCts.Token);
+        var warpStatusTask = ProxyManagement.GetWarpStatusAsync(_pageCts.Token);
         try
         {
             proxyOptions = (await proxiesTask)
@@ -406,6 +419,19 @@
             Snackbar.Add($"加载代理列表失败：{ex.Message}", Severity.Warning);
         }
 
+        try
+        {
+            var warpStatus = await warpStatusTask;
+            WarpCreateAvailable = warpStatus.PlatformSupported && warpStatus.Enabled && warpStatus.DockerAvailable;
+        }
+        catch (OperationCanceledException) when (_pageCts.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"加载 WARP 运行环境失败：{ex.Message}", Severity.Warning);
+        }
     }
 
     public void Dispose()
@@ -479,6 +505,14 @@
                     return false;
                 }
                 binding = new AccountProxyBindingInput("warp_pool");
+                return true;
+            case "warp_per_account":
+                if (!WarpCreateAvailable)
+                {
+                    Snackbar.Add("当前环境无法创建 WARP，请先确认受管 WARP 运行环境", Severity.Error);
+                    return false;
+                }
+                binding = new AccountProxyBindingInput("warp_per_account");
                 return true;
             default:
                 Snackbar.Add("请先明确选择导入账号首次连接使用的代理方式", Severity.Warning);

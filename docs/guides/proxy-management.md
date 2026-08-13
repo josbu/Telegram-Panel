@@ -23,8 +23,8 @@ Telegram Panel 按账号管理 Telegram 连接出口。导入、登录，以及�
 - **已有代理**：绑定代理管理中的 HTTP、SOCKS5、MTProxy、Resin 或外部 WireGuard WARP。
 - **外部 WireGuard WARP**：运营方在面板外运行 WireGuard/gost 等轻量出口，面板只保存
   它暴露出的 HTTP/SOCKS5 监听并绑定账号。
-- **独立 WARP**：账号管理可按需创建并绑定受管 WARP 容器；账号导入和手动登录只会自动分配
-  已有 WARP，不会按账号或登录会话创建新容器。
+- **独立 WARP**：账号管理可按需创建并绑定受管 WARP 容器；账号导入也可选择“创建一对一 WARP”
+  在每个账号首次验证前新建并绑定，手动登录仍只会自动分配已有 WARP。
 
 导入账号、手机号登录和二维码登录都会在第一条 Telegram 请求前要求选择路由。
 选定后，验证码发送、二维码轮询、2FA 验证和 Session 建立会使用同一出口；失败时不会
@@ -158,9 +158,9 @@ TP_WARP_CONTAINER_CPU_LIMIT=0
 TP_WARP_CONTAINER_PIDS_LIMIT=0
 ```
 
-WARP 镜像中的 GOST 端口同时支持 HTTP 和 SOCKS5。默认协议决定登录和批量绑定自动创建
-WARP 时宿主使用哪种握手；代理管理中的一键创建弹窗可以覆盖单次创建协议。账号导入
-自动分配已有 WARP 时沿用代理记录自身的协议，不读取该创建默认值。
+WARP 镜像中的 GOST 端口同时支持 HTTP 和 SOCKS5。默认协议决定账号管理、批量绑定和账号导入
+“创建一对一 WARP”自动创建 WARP 时宿主使用哪种握手；代理管理中的一键创建弹窗可以覆盖单次
+创建协议。账号导入“自动分配已有 WARP”时沿用代理记录自身的协议，不读取该创建默认值。
 
 每个 WARP 都对应一个独立 Docker 容器和数据卷，并持续占用一定的服务器内存与 CPU。
 `TP_WARP_MAX_MANAGED_PROXY_COUNT` 可限制面板可创建的受管 WARP 数量，达到上限时会在创建
@@ -168,12 +168,14 @@ Docker 卷或容器前失败。`TP_WARP_CONTAINER_MEMORY_LIMIT_BYTES`、`TP_WARP
 （例如 `0.5`）和 `TP_WARP_CONTAINER_PIDS_LIMIT` 会映射到 Docker HostConfig 的 `Memory`、
 `NanoCpus` 和 `PidsLimit`，只影响后续新建容器；值为 `0` 或留空时不写对应限制。
 
-账号导入的“自动分配已有 WARP”只复用这些现有容器，并优先选择绑定账号较少的 WARP；
-批量导入不会再按账号数量创建容器。没有健康候选项时导入会停止，需先在本页准备 WARP
-或改选其他出口。成功标准是新建容器 inspect 能看到配置的资源限制，或达到数量上限时没有
-新增代理记录和 Docker 资源；失败时检查 `.env` 是否由 Compose 注入、数值是否为正数，以及
-宿主 Docker 版本是否支持对应 HostConfig 字段。回滚时把模板值改回 `0` 并重建面板容器；
-已创建容器如需移除限制，需删除后重新创建。
+账号导入提供两种受管 WARP 模式：“自动分配已有 WARP”只复用这些现有容器，并优先选择绑定
+账号较少的 WARP；“创建一对一 WARP”会在每个账号首次 Telegram 验证前创建新容器和代理记录，
+成功入库后把新 `ProxyId` 长期绑定到账号。创建模式单次最多 10 个账号，达到数量上限、Docker
+不可用或资源模板无效时会在连接 Telegram 前失败。成功标准是账号绑定到新建 WARP 且导入结果
+显示该出口 IP；失败时未绑定账号的新代理会被删除，运行档案保留 `deleted` 状态用于审计。
+排查 `.env` 是否由 Compose 注入、Docker Socket 是否可用、数值是否为正数，以及宿主 Docker
+版本是否支持对应 HostConfig 字段。回滚时改选自动分配已有 WARP、已有代理或全局代理；已创建
+并绑定的容器需先把账号切换到其它出口，再在代理管理中删除。
 
 默认 `container` 模式由 Docker 网络按容器名访问，不占用宿主机代理端口。若在其他
 拓扑中把 `Proxy:Warp:ProxyHostMode` 配为 `published`，面板会从
@@ -190,7 +192,7 @@ Docker 的 `unless-stopped` 只能处理容器进程退出，不能处理“容�
 - 恢复失败后进入 30 分钟冷却，避免检测源抖动造成重启风暴。
 - 重启前后释放绑定账号的 Telegram 客户端；客户端只能沿原 WARP 路由重建，代理不可用时
   会失败，不会回退为面板直连。
-- 正在用于账号导入、手机号登录或二维码登录的 WARP（包括已有 WARP 和一键新建 WARP）
+- 正在用于账号导入、手机号登录或二维码登录的 WARP（包括已有 WARP 和导入/账号管理新建 WARP）
   会保持首次出口冻结；后台巡检、手动刷新、修改和删除都不会打断首次连接。
 - 代理页每 30 秒更新维护状态，也可手动刷新单个或全部 WARP。
 
