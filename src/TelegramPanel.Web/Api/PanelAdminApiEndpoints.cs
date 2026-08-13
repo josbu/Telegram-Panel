@@ -1710,7 +1710,7 @@ public static class PanelAdminApiEndpoints
             {
                 return Results.BadRequest(new OperationResultDto(
                     false,
-                    "请先明确选择账号首次连接出口：已有代理、逐账号批量代理、自动分配已有 WARP、已配置的全局代理或明确直连"));
+                    "请先明确选择账号首次连接出口：已有代理、逐账号批量代理、自动分配已有 WARP、创建一对一 WARP、已配置的全局代理或明确直连"));
             }
             await importService.ValidateImportProxyBindingAsync(proxyBinding, cancellationToken);
         }
@@ -1758,9 +1758,16 @@ public static class PanelAdminApiEndpoints
         {
             return Results.BadRequest(new OperationResultDto(
                 false,
-                "请先明确选择账号首次连接出口：已有代理、自动分配已有 WARP、已配置的全局代理或明确直连；逐账号批量代理仅支持 Zip 导入"));
+                "请先明确选择账号首次连接出口：已有代理、自动分配已有 WARP、创建一对一 WARP、已配置的全局代理或明确直连；逐账号批量代理仅支持 Zip 导入"));
         }
         await importService.ValidateImportProxyBindingAsync(proxyBinding, cancellationToken);
+        if (string.Equals(proxyBinding.Strategy, "warp_per_account", StringComparison.OrdinalIgnoreCase)
+            && files.Count > AccountImportService.MaxWarpPerAccountImportCount)
+        {
+            return Results.BadRequest(new OperationResultDto(
+                false,
+                $"创建一对一 WARP 单次最多导入 {AccountImportService.MaxWarpPerAccountImportCount} 个账号，当前选择了 {files.Count} 个"));
+        }
         var importFiles = new List<AccountImportFile>();
         foreach (var file in files)
             importFiles.Add(new AccountImportFile(file.FileName, file.OpenReadStream()));
@@ -1798,7 +1805,7 @@ public static class PanelAdminApiEndpoints
         {
             return Results.BadRequest(new OperationResultDto(
                 false,
-                "请先明确选择账号首次连接出口：已有代理、自动分配已有 WARP、已配置的全局代理或明确直连；逐账号批量代理仅支持 Zip 导入"));
+                "请先明确选择账号首次连接出口：已有代理、自动分配已有 WARP、创建一对一 WARP、已配置的全局代理或明确直连；逐账号批量代理仅支持 Zip 导入"));
         }
         await importService.ValidateImportProxyBindingAsync(proxyBinding, cancellationToken);
 

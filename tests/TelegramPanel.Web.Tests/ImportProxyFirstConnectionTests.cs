@@ -389,7 +389,7 @@ public sealed class ImportProxyFirstConnectionTests
     }
 
     [Fact]
-    public async Task 导入旧独立WARP策略会在首次Telegram验证前拒绝且不创建容器记录()
+    public async Task 创建一对一WARP导入在不支持环境会在首次Telegram验证前拒绝且不创建容器记录()
     {
         await using var fixture = await ImportFixture.CreateAsync(OutboundProxyProtocols.Http);
 
@@ -400,7 +400,7 @@ public sealed class ImportProxyFirstConnectionTests
             proxyBinding: new AccountProxyBindingInput("warp_per_account"));
 
         Assert.False(result.Success);
-        Assert.Contains("已停用每账号独立 WARP", result.Error);
+        Assert.Contains("WARP 仅支持在 Linux Docker 环境中运行", result.Error);
         Assert.Equal(0, fixture.Importer.ImportCount);
         Assert.Empty(await fixture.Db.Accounts.AsNoTracking().ToListAsync());
         Assert.Empty(await fixture.Db.OutboundProxies.AsNoTracking()
@@ -566,6 +566,109 @@ public sealed class ImportProxyFirstConnectionTests
                 .Select(x => x.ProxyId)
                 .ToListAsync();
             Assert.Equal(new int?[] { firstWarp.Id, secondWarp.Id }, bindings);
+        }
+        finally
+        {
+            foreach (var file in files)
+                await file.Content.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task 创建一对一WARP导入会先创建新容器并把首连出口绑定到账号()
+    {
+        await using var fixture = await ImportFixture.CreateAsync(
+            OutboundProxyProtocols.Http,
+            warpDocker: new WarpLifecycleRegressionTests.FakeWarpDockerClient(),
+            warpProbe: new SuccessfulWarpProbeService());
+        fixture.Importer.ResultFactory = count => new ImportResult(
+            true,
+            $"86138000003{count}",
+            10300 + count,
+            $"warp-created-{count}",
+            $"sessions/86138000003{count}.session");
+
+        var result = await fixture.Service.ImportFromStringSessionAsync(
+            "session-data",
+            12345,
+            "0123456789abcdef0123456789abcdef",
+            proxyBinding: new AccountProxyBindingInput("warp_per_account"));
+
+        Assert.True(result.Success, result.Error);
+        Assert.NotNull(fixture.Importer.SeenProxy);
+        Assert.Equal(OutboundProxyKinds.Warp, fixture.Importer.SeenProxy!.Kind);
+        Assert.Equal(fixture.Importer.SeenProxy.ProxyId, result.ProxyId);
+        Assert.Equal("2606:4700:100::90", result.ProxyEgressIp);
+        var proxy = await fixture.Db.OutboundProxies
+            .Include(x => x.WarpProfile)
+            .AsNoTracking()
+            .SingleAsync(x => x.Kind == OutboundProxyKinds.Warp);
+        var account = await fixture.Db.Accounts.AsNoTracking().SingleAsync();
+        Assert.True(account.IsActive);
+        Assert.Equal(proxy.Id, account.ProxyId);
+        Assert.StartsWith(AccountImportService.ManagedWarpRequestPrefix, proxy.WarpProfile!.RequestId);
+    }
+
+    [Fact]
+    public async Task 创建一对一WARP导入失败会删除未绑定的新容器记录()
+    {
+        await using var fixture = await ImportFixture.CreateAsync(
+            OutboundProxyProtocols.Http,
+            warpDocker: new WarpLifecycleRegressionTests.FakeWarpDockerClient(),
+            warpProbe: new SuccessfulWarpProbeService());
+        fixture.Importer.ResultFactory = _ => new ImportResult(
+            false,
+            null,
+            null,
+            null,
+            null,
+            "模拟 Session 失效");
+
+        var result = await fixture.Service.ImportFromStringSessionAsync(
+            "session-data",
+            12345,
+            "0123456789abcdef0123456789abcdef",
+            proxyBinding: new AccountProxyBindingInput("warp_per_account"));
+
+        Assert.False(result.Success);
+        Assert.Contains("模拟 Session 失效", result.Error);
+        var proxyRows = await fixture.Db.OutboundProxies.AsNoTracking()
+            .Where(x => x.Kind == OutboundProxyKinds.Warp)
+            .ToListAsync();
+        Assert.Empty(proxyRows);
+        var profile = await fixture.Db.WarpProfiles.AsNoTracking().SingleAsync();
+        Assert.Equal("deleted", profile.Status);
+        Assert.Null(profile.OutboundProxyId);
+        Assert.Empty(await fixture.Db.Accounts.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 创建一对一WARP导入数量超过十个会在创建容器前拒绝()
+    {
+        var docker = new WarpLifecycleRegressionTests.FakeWarpDockerClient();
+        await using var fixture = await ImportFixture.CreateAsync(
+            OutboundProxyProtocols.Http,
+            warpDocker: docker,
+            warpProbe: new SuccessfulWarpProbeService());
+        var files = Enumerable.Range(1, AccountImportService.MaxWarpPerAccountImportCount + 1)
+            .Select(index => new AccountImportFile($"{index}.session", new MemoryStream(new byte[] { (byte)index })))
+            .ToArray();
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<ArgumentException>(() =>
+                fixture.Service.ImportFromSessionFileStreamsAsync(
+                    files,
+                    12345,
+                    "0123456789abcdef0123456789abcdef",
+                    proxyBinding: new AccountProxyBindingInput("warp_per_account")));
+
+            Assert.Contains("单次最多导入 10 个账号", error.Message);
+            Assert.Equal(0, docker.CreateVolumeCalls);
+            Assert.Equal(0, fixture.Importer.ImportCount);
+            Assert.Empty(await fixture.Db.OutboundProxies.AsNoTracking()
+                .Where(x => x.Kind == OutboundProxyKinds.Warp)
+                .ToListAsync());
         }
         finally
         {
@@ -844,7 +947,9 @@ public sealed class ImportProxyFirstConnectionTests
             string protocol,
             IEnumerable<KeyValuePair<string, string?>>? configurationValues = null,
             IWarpProxyUsageGuard? warpProxyUsageGuard = null,
-            TemporaryWarpClaimStore? temporaryWarpClaims = null)
+            TemporaryWarpClaimStore? temporaryWarpClaims = null,
+            WarpLifecycleRegressionTests.FakeWarpDockerClient? warpDocker = null,
+            IProxyEgressProbeService? warpProbe = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -868,17 +973,34 @@ public sealed class ImportProxyFirstConnectionTests
             await db.SaveChangesAsync();
 
             var configurationBuilder = new ConfigurationBuilder();
+            var values = new Dictionary<string, string?>
+            {
+                ["Proxy:Warp:Enabled"] = warpDocker == null ? null : "true",
+                ["Proxy:Warp:DockerSocketPath"] = Path.Combine(Path.GetTempPath(), "fake-docker.sock"),
+                ["Proxy:Warp:HostPortStart"] = "42180"
+            };
             if (configurationValues != null)
-                configurationBuilder.AddInMemoryCollection(configurationValues);
+            {
+                foreach (var pair in configurationValues)
+                    values[pair.Key] = pair.Value;
+            }
+            configurationBuilder.AddInMemoryCollection(values);
             var configuration = configurationBuilder.Build();
             var pool = new StubClientPool();
-            var probe = new ProxyEgressProbeService();
+            var probe = warpProbe ?? new ProxyEgressProbeService();
             temporaryWarpClaims ??= new TemporaryWarpClaimStore();
-            var warp = new WarpContainerManager(
-                db,
-                configuration,
-                probe,
-                NullLogger<WarpContainerManager>.Instance);
+            var warp = warpDocker == null
+                ? new WarpContainerManager(
+                    db,
+                    configuration,
+                    probe,
+                    NullLogger<WarpContainerManager>.Instance)
+                : new WarpContainerManager(
+                    db,
+                    configuration,
+                    probe,
+                    NullLogger<WarpContainerManager>.Instance,
+                    new FakeDockerClientFactory(warpDocker));
             var proxyManagement = new ProxyManagementService(
                 db,
                 pool,
@@ -915,6 +1037,20 @@ public sealed class ImportProxyFirstConnectionTests
         {
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
+        }
+
+        private sealed class FakeDockerClientFactory : WarpContainerManager.IWarpDockerClientFactory
+        {
+            private readonly WarpLifecycleRegressionTests.FakeWarpDockerClient _client;
+
+            public FakeDockerClientFactory(WarpLifecycleRegressionTests.FakeWarpDockerClient client)
+            {
+                _client = client;
+            }
+
+            public bool PlatformSupported => true;
+
+            public WarpContainerManager.IWarpDockerClient Create(string socketPath) => _client;
         }
     }
 
@@ -967,6 +1103,42 @@ public sealed class ImportProxyFirstConnectionTests
                 10001,
                 "imported",
                 "sessions/8613800000000.session"));
+        }
+    }
+
+    private sealed class SuccessfulWarpProbeService : IProxyEgressProbeService
+    {
+        public int CallCount { get; private set; }
+
+        public Task<EgressProbeResult> ProbePanelAsync(CancellationToken cancellationToken = default) =>
+            ProbeAsync(cancellationToken);
+
+        public Task<EgressProbeResult> ProbeProxyAsync(
+            OutboundProxy proxy,
+            string stableAccountKey,
+            CancellationToken cancellationToken = default) =>
+            ProbeAsync(cancellationToken);
+
+        public Task<EgressProbeResult> ProbeProxyAsync(
+            ProxyConnectionOptions options,
+            bool requireWarp = false,
+            CancellationToken cancellationToken = default) =>
+            ProbeAsync(cancellationToken);
+
+        private Task<EgressProbeResult> ProbeAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            return Task.FromResult(new EgressProbeResult(
+                true,
+                "2606:4700:100::90",
+                "US",
+                null,
+                null,
+                "on",
+                12,
+                DateTime.UtcNow,
+                null));
         }
     }
 

@@ -19,6 +19,7 @@ namespace TelegramPanel.Core.Services.Telegram;
 public class AccountImportService
 {
     public const string ManagedWarpRequestPrefix = "telegram-panel.internal.import.";
+    public const int MaxWarpPerAccountImportCount = 10;
     private const int MaxZipEntryCount = 5_000;
     private const long MaxZipEntryBytes = 100L * 1024 * 1024;
     private const long MaxZipExtractedBytes = 1024L * 1024 * 1024;
@@ -73,6 +74,12 @@ public class AccountImportService
         CancellationToken cancellationToken = default)
     {
         var results = new List<ImportResult>();
+        if (IsWarpPerAccountStrategy(proxyBinding) && files.Count > MaxWarpPerAccountImportCount)
+        {
+            throw new ArgumentException(
+                $"创建一对一 WARP 单次最多导入 {MaxWarpPerAccountImportCount} 个账号，当前选择了 {files.Count} 个");
+        }
+
         var importedPhones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var file in files)
@@ -117,6 +124,12 @@ public class AccountImportService
         CancellationToken cancellationToken = default)
     {
         var results = new List<ImportResult>();
+        if (IsWarpPerAccountStrategy(proxyBinding) && files.Count > MaxWarpPerAccountImportCount)
+        {
+            throw new ArgumentException(
+                $"创建一对一 WARP 单次最多导入 {MaxWarpPerAccountImportCount} 个账号，当前选择了 {files.Count} 个");
+        }
+
         var importedPhones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var file in files)
@@ -155,6 +168,12 @@ public class AccountImportService
         CancellationToken cancellationToken = default)
     {
         var results = new List<ImportResult>();
+        if (IsWarpPerAccountStrategy(proxyBinding) && files.Count > MaxWarpPerAccountImportCount)
+        {
+            throw new ArgumentException(
+                $"创建一对一 WARP 单次最多导入 {MaxWarpPerAccountImportCount} 个账号，当前选择了 {files.Count} 个");
+        }
+
         var importedPhones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var file in files)
@@ -359,6 +378,12 @@ public class AccountImportService
                     "Skipping {Count} json files inside tdata directories during zip import",
                     skippedTdataJsonCount);
             }
+            if (IsWarpPerAccountStrategy(proxyBinding) && candidateCount > MaxWarpPerAccountImportCount)
+            {
+                throw new AccountImportProxyBatchException(
+                    $"创建一对一 WARP 单次最多导入 {MaxWarpPerAccountImportCount} 个账号，压缩包识别到 {candidateCount} 个账号");
+            }
+
 
             if (jsonFiles.Count == 0 && tdataDirs.Count == 0)
             {
@@ -883,20 +908,25 @@ public class AccountImportService
                 "请先明确选择账号首次连接出口：已有代理、自动分配已有 WARP、已配置的全局代理或明确直连");
         }
 
+        var requestedStrategy = (binding.Strategy ?? string.Empty).Trim().ToLowerInvariant();
         var selectedBinding = binding;
         var operationNonce = Guid.NewGuid().ToString("N");
         PreparedImportProxy prepared = default;
         ImportResult? result = null;
         int? stagedAccountId = null;
-
+        var keepOwnedWarp = false;
         try
         {
-            if (string.Equals(
-                    selectedBinding.Strategy,
-                    "warp_pool",
-                    StringComparison.OrdinalIgnoreCase))
+            if (requestedStrategy == "warp_pool")
             {
                 (selectedBinding, prepared) = await PrepareWarpPoolImportProxyAsync(
+                    stableKeySeed,
+                    operationNonce,
+                    cancellationToken);
+            }
+            else if (requestedStrategy == "warp_per_account")
+            {
+                (selectedBinding, prepared) = await PrepareWarpPerAccountImportProxyAsync(
                     stableKeySeed,
                     operationNonce,
                     cancellationToken);
@@ -1020,6 +1050,9 @@ public class AccountImportService
                 };
             }
 
+            // 一旦新创建的 WARP 绑定到账号，就不能再做失败补偿删除；否则账号会指向已清理的代理。
+            keepOwnedWarp = prepared.OwnedWarpProxyId.HasValue;
+
             if (prepared.TemporaryResinLease != null
                 && prepared.Connection != null
                 && !string.IsNullOrWhiteSpace(prepared.TemporaryResinLeaseKey))
@@ -1046,21 +1079,17 @@ public class AccountImportService
 
             await _accountManagement.SetAccountActiveStatusAsync(account.Id, true);
             importedPhones?.Add(phone);
+            var preparedProxy = requestedStrategy is "warp_pool" or "warp_per_account"
+                ? prepared.Connection
+                : null;
             return result with
             {
                 Phone = phone,
-                ProxyId = string.Equals(
-                    selectedBinding.Strategy,
-                    "warp_pool",
-                    StringComparison.OrdinalIgnoreCase)
-                    ? prepared.Connection?.ProxyId
-                    : result.ProxyId,
-                ProxyName = string.Equals(
-                    selectedBinding.Strategy,
-                    "warp_pool",
-                    StringComparison.OrdinalIgnoreCase)
-                    ? prepared.Connection?.Name
-                    : result.ProxyName
+                ProxyId = preparedProxy?.ProxyId ?? result.ProxyId,
+                ProxyName = preparedProxy?.Name ?? result.ProxyName,
+                ProxyEgressIp = preparedProxy == null
+                    ? result.ProxyEgressIp
+                    : prepared.EgressIp ?? result.ProxyEgressIp
             };
         }
         catch (OperationCanceledException)
@@ -1123,7 +1152,11 @@ public class AccountImportService
                     prepared.TemporaryResinLeaseKey,
                     CancellationToken.None);
             }
+
             prepared.WarpUsageClaim?.Dispose();
+            if (!keepOwnedWarp && prepared.OwnedWarpProxyId is > 0)
+                await DeleteOwnedWarpBestEffortAsync(prepared.OwnedWarpProxyId.Value);
+            prepared.TemporaryWarpRequestClaim?.Dispose();
         }
     }
 
@@ -1249,14 +1282,8 @@ public class AccountImportService
                 warpUsageClaim);
         }
 
-        if (strategy == "warp_per_account")
-        {
-            throw new ArgumentException(
-                "账号导入已停用每账号独立 WARP；请选择自动分配已有 WARP 或其他现有代理");
-        }
-
         throw new ArgumentException(
-            "导入代理策略仅支持 direct、global、existing 或 warp_pool");
+            "导入代理策略仅支持 direct、global、existing、warp_pool 或 warp_per_account");
     }
 
     /// <summary>
@@ -1270,8 +1297,10 @@ public class AccountImportService
         var strategy = (binding.Strategy ?? string.Empty).Trim().ToLowerInvariant();
         if (strategy == "warp_per_account")
         {
-            throw new ArgumentException(
-                "账号导入已停用每账号独立 WARP；请选择自动分配已有 WARP 或其他现有代理");
+            await _proxyManagement.ValidateBindingInputAsync(
+                new AccountProxyBindingInput("warp_per_account"),
+                cancellationToken);
+            return;
         }
 
         if (strategy == "warp_pool")
@@ -1281,7 +1310,7 @@ public class AccountImportService
         }
 
         if (strategy is not ("direct" or "global" or "existing"))
-            throw new ArgumentException("导入代理策略仅支持 direct、global、existing 或 warp_pool");
+            throw new ArgumentException("导入代理策略仅支持 direct、global、existing、warp_pool 或 warp_per_account");
 
         await _proxyManagement.ValidateBindingInputAsync(binding, cancellationToken);
     }
@@ -1318,6 +1347,60 @@ public class AccountImportService
         throw new InvalidOperationException(
             "现有 WARP 当前都在维护或被其他首次连接流程占用，请稍后重试；未创建新容器",
             busyError);
+    }
+
+    private async Task<(AccountProxyBindingInput Binding, PreparedImportProxy Prepared)>
+        PrepareWarpPerAccountImportProxyAsync(
+            string stableKeySeed,
+            string operationNonce,
+            CancellationToken cancellationToken)
+    {
+        var stableImportKey = BuildImportStableKey(stableKeySeed, operationNonce);
+        var requestId = $"{ManagedWarpRequestPrefix}{stableImportKey}";
+        IDisposable? requestClaim = null;
+        IDisposable? warpUsageClaim = null;
+        OutboundProxy? newProxy = null;
+
+        try
+        {
+            requestClaim = _temporaryWarpClaims.ClaimRequest(requestId);
+            newProxy = await _proxyManagement.CreateWarpAsync(
+                BuildImportWarpDisplayName(stableKeySeed),
+                requestId,
+                cancellationToken);
+            if (_warpProxyUsageGuard != null)
+            {
+                warpUsageClaim = _warpProxyUsageGuard.TryAcquireUsage(newProxy.Id)
+                    ?? throw new InvalidOperationException(
+                        "新创建的 WARP 正在维护或被其他首次连接流程占用，账号尚未发起首次连接");
+            }
+
+            var connection = AccountProxyResolver.BuildConnectionOptions(
+                newProxy,
+                stableImportKey);
+            return (
+                new AccountProxyBindingInput(
+                    "existing",
+                    newProxy.Id,
+                    ExpectedConnection: connection),
+                new PreparedImportProxy(
+                    connection,
+                    TemporaryResinLease: null,
+                    TemporaryResinLeaseKey: null,
+                    stableImportKey,
+                    warpUsageClaim,
+                    requestClaim,
+                    newProxy.Id,
+                    newProxy.EgressIp));
+        }
+        catch
+        {
+            warpUsageClaim?.Dispose();
+            if (newProxy != null)
+                await DeleteOwnedWarpBestEffortAsync(newProxy.Id);
+            requestClaim?.Dispose();
+            throw;
+        }
     }
 
     private async Task<IReadOnlyList<OutboundProxy>> ListAvailableWarpPoolAsync(
@@ -1464,12 +1547,58 @@ public class AccountImportService
         return $"tg_import_{Convert.ToHexString(hash.AsSpan(0, 12)).ToLowerInvariant()}";
     }
 
+    private static bool IsWarpPerAccountStrategy(AccountProxyBindingInput? binding) =>
+        string.Equals(
+            (binding?.Strategy ?? string.Empty).Trim(),
+            "warp_per_account",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static string BuildImportWarpDisplayName(string stableKeySeed)
+    {
+        var label = Path.GetFileNameWithoutExtension(stableKeySeed);
+        if (string.IsNullOrWhiteSpace(label))
+            label = "账号";
+        label = label.Trim();
+        if (label.Length > 48)
+            label = label[..48];
+        return $"WARP · 导入 {label}";
+    }
+
     private readonly record struct PreparedImportProxy(
         ProxyConnectionOptions? Connection,
         ResinLeaseControlSnapshot? TemporaryResinLease,
         string? TemporaryResinLeaseKey,
         string? StableIdentityKey,
-        IDisposable? WarpUsageClaim);
+        IDisposable? WarpUsageClaim,
+        IDisposable? TemporaryWarpRequestClaim = null,
+        int? OwnedWarpProxyId = null,
+        string? EgressIp = null);
+
+    private async Task DeleteOwnedWarpBestEffortAsync(int proxyId)
+    {
+        try
+        {
+            await _proxyManagement.DeleteAsync(proxyId, CancellationToken.None);
+        }
+        catch (KeyNotFoundException)
+        {
+            // 已被其他清理流程删除。
+        }
+        catch (ProxyInUseException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Import-created WARP proxy {ProxyId} is already bound and will be retained",
+                proxyId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to clean import-created WARP proxy {ProxyId}",
+                proxyId);
+        }
+    }
 
     private async Task KeepImportedAccountInactiveBestEffortAsync(int? accountId)
     {

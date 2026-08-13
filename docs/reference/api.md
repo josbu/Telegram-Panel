@@ -85,13 +85,17 @@ Telegram 的限流、权限和 Session 等业务错误不会重试，避免扩�
 ### Zip 逐账号批量代理
 
 `POST /api/panel/accounts/import/zip` 使用 `multipart/form-data`。普通导入支持
-`proxyStrategy=direct|global|existing|warp_pool`；`existing` 还必须提供
+`proxyStrategy=direct|global|existing|warp_pool|warp_per_account`；`existing` 还必须提供
 `proxyId`。
 
 `warp_pool` 只自动分配代理管理中已存在、已启用且状态为 `active` 的 WARP，按绑定账号数升序、
 代理 ID 升序选择。它不会创建容器或数据卷，也无需提供 `proxyId`。没有候选项或候选项都在
-维护/被其他首次连接流程占用时，请求会在连接 Telegram 前失败。历史参数
-`warp_per_account` 已从账号导入和手动登录页面停用；账号管理接口仍可用于显式创建独立 WARP。
+维护/被其他首次连接流程占用时，请求会在连接 Telegram 前失败。
+
+`warp_per_account` 会在每个账号首次 Telegram 验证前创建一个受管 WARP，并在账号成功入库后把
+新 `ProxyId` 绑定到账号。Zip 和 Session 文件导入单次最多 10 个账号，StringSession 固定 1 个；
+超过上限、Docker/WARP 未启用或容器创建失败时，请求会在首次 Telegram 连接前失败。导入未成功
+绑定账号的新代理会自动删除，运行档案保留 `deleted` 状态用于审计。
 
 Zip 专属的一对一代理模式使用以下字段：
 

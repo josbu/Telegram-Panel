@@ -31,6 +31,7 @@
         <el-radio-button value="existing">已有代理</el-radio-button>
         <el-radio-button value="proxy_per_account">批量代理一对一</el-radio-button>
         <el-radio-button value="warp_pool" :disabled="availableWarpPoolCount === 0">自动分配已有 WARP</el-radio-button>
+        <el-radio-button value="warp_per_account" :disabled="!warpCreateAvailable">创建一对一 WARP</el-radio-button>
         <el-radio-button value="global">全局设置</el-radio-button>
         <el-radio-button value="direct">直连（确认风险）</el-radio-button>
       </el-radio-group>
@@ -61,6 +62,9 @@
       </div>
       <div v-else-if="proxyStrategy === 'warp_pool'" class="proxy-route-notice warning">
         将按当前账号绑定数自动选择已有 WARP；不会创建新容器。当前已启用 {{ availableWarpPoolCount }} 个 WARP。
+      </div>
+      <div v-else-if="proxyStrategy === 'warp_per_account'" class="proxy-route-notice warning">
+        将为每个成功导入账号创建并绑定一个新的受管 WARP；单次最多 {{ WARP_PER_ACCOUNT_IMPORT_LIMIT }} 个账号，失败会在账号首次连接前停止。
       </div>
       <div v-else-if="proxyStrategy === 'proxy_per_account'" class="proxy-route-notice warning">
         批量代理一对一仅适用于 Zip 导入；Session 文件和 StringSession 导入在此模式下不可用。
@@ -373,6 +377,7 @@ import type {
   ImportAccountsResponse,
   ImportResult,
   OutboundProxy,
+  WarpRuntimeStatus,
   ZipImportProxyStrategy,
 } from '@/api/types'
 import { formatTime } from '@/utils/format'
@@ -382,6 +387,7 @@ import { isInconclusiveTelegramStatus, isTransientTelegramStatus } from '@/utils
 
 type Row = AccountListItem
 const PER_ACCOUNT_PROXY_LIMIT = 100
+const WARP_PER_ACCOUNT_IMPORT_LIMIT = 10
 
 const router = useRouter()
 const zipFile = ref<File | null>(null)
@@ -403,6 +409,7 @@ const proxyId = ref<number | null>(null)
 const telegramApiChecked = ref(false)
 const telegramApiConfigured = ref(true)
 const effectiveApiId = ref('')
+const warpStatus = ref<WarpRuntimeStatus | null>(null)
 const importCategoryId = ref<number | null>(null)
 let importOperationToken = 0
 
@@ -413,6 +420,11 @@ const availableWarpPoolCount = computed(() => proxies.value.filter(
     && proxy.isEnabled
     && proxy.warpRuntimeStatus === 'active',
 ).length)
+const warpCreateAvailable = computed(() => Boolean(
+  warpStatus.value?.platformSupported
+    && warpStatus.value.enabled
+    && warpStatus.value.dockerAvailable,
+))
 const isPerAccountProxyBatch = computed(() => proxyStrategy.value === 'proxy_per_account')
 const perAccountProxyCount = computed(() => countEffectiveProxyLines(perAccountProxyText.value))
 const perAccountProxyLimitExceeded = computed(() => perAccountProxyCount.value > PER_ACCOUNT_PROXY_LIMIT)
@@ -420,6 +432,7 @@ const proxySelectionInvalid = computed(() =>
   !proxyStrategy.value
   || (proxyStrategy.value === 'existing' && !proxyId.value)
   || (proxyStrategy.value === 'warp_pool' && availableWarpPoolCount.value === 0)
+  || (proxyStrategy.value === 'warp_per_account' && !warpCreateAvailable.value)
   || (isPerAccountProxyBatch.value
     && (perAccountProxyCount.value === 0 || perAccountProxyLimitExceeded.value)),
 )
@@ -504,7 +517,9 @@ function ensureProxySelected(allowPerAccountBatch = false) {
   } else {
     ElMessage.warning(proxyStrategy.value === 'warp_pool'
       ? '没有可自动分配的已有 WARP，请先在代理管理中准备并启用 WARP'
-      : '请选择已有代理')
+      : proxyStrategy.value === 'warp_per_account'
+        ? warpStatus.value?.error || '当前环境无法创建 WARP，请先确认受管 WARP 运行环境'
+        : '请选择已有代理')
   }
   return false
 }
@@ -688,6 +703,14 @@ async function loadProxies() {
   proxies.value = await panelApi.proxies()
 }
 
+async function loadWarpStatus() {
+  try {
+    warpStatus.value = await panelApi.warpStatus()
+  } catch {
+    warpStatus.value = null
+  }
+}
+
 async function loadTelegramApiStatus() {
   try {
     const settings = await panelApi.settings()
@@ -714,6 +737,7 @@ onMounted(() => {
     loadCategories(),
     loadProxies(),
     loadTelegramApiStatus(),
+    loadWarpStatus(),
   ])
 })
 
