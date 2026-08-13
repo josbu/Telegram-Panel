@@ -4,7 +4,7 @@
 
     <template v-if="taskType === 'user_chat_active'">
       <el-alert
-        title="MaxMessages=0 表示持续运行，直到在任务中心手动取消；MaxMessages>0 时每次运行最多按可用账号数发送，每个账号最多 1 条。词典消息支持 {time} 和文本字典变量。"
+        title="MaxMessages=0 表示持续运行，直到在任务中心手动取消；MaxMessages>0 时每次运行最多按可用账号数发送，每个账号最多 1 条。目标支持群组、频道和 Bot 用户名/链接；词典消息支持 {time} 和文本字典变量。"
         type="info"
         :closable="false"
         class="mb-3"
@@ -15,7 +15,7 @@
         </el-select>
       </el-form-item>
       <el-form-item label="目标">
-        <el-input v-model="forms.userChatActive.targetsText" type="textarea" :rows="5" placeholder="每行一个群组/频道链接、用户名或 ID" />
+        <el-input v-model="forms.userChatActive.targetsText" type="textarea" :rows="5" placeholder="每行一个群组/频道/Bot 链接、用户名或 ID" />
       </el-form-item>
       <el-form-item label="词典">
         <el-input v-model="forms.userChatActive.dictionaryText" type="textarea" :rows="6" placeholder="每行一条文字消息，支持 {time} 和文本字典变量" />
@@ -597,7 +597,7 @@ function buildUserChatActiveDraft(): TaskConfigDraft {
   const targets = uniqueLines(form.targetsText)
   const dictionary = parseLines(form.dictionaryText)
   if (categoryIds.length === 0 || selectedCategories.length === 0) throw new Error('请至少选择一个执行账号分类')
-  if (targets.length === 0) throw new Error('请至少填写一个目标群组/频道')
+  if (targets.length === 0) throw new Error('请至少填写一个目标群组/频道/Bot')
   if (form.imageDictionaryName && !imageDictionaryNames.value.includes(form.imageDictionaryName)) throw new Error('请选择有效的图片字典')
   if (dictionary.length === 0 && !form.imageDictionaryName) throw new Error('请至少填写一条文字词典或选择图片字典')
   if (form.delayMaxSeconds < form.delayMinSeconds) throw new Error('最大间隔不能小于最小间隔')

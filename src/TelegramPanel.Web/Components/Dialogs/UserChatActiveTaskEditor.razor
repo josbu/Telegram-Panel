@@ -12,7 +12,7 @@
 <MudStack Spacing="2">
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
         持续活跃任务会在后台循环执行并按间隔发送内容。MaxMessages=0 表示持续运行，直到你在任务中心手动取消。
-        目标支持固定链接和文本字典变量；词典消息支持 <code>{time}</code> 和文本字典变量。
+        目标支持群组、频道、Bot 用户名/链接和文本字典变量；词典消息支持 <code>{time}</code> 和文本字典变量。
     </MudAlert>
 
     @if (loading)
@@ -37,11 +37,11 @@
         </MudSelect>
 
         <MudTextField @bind-Value="targetsText" @bind-Value:after="OnInputsChanged"
-                      Label="目标群组/频道（每行一个）"
+                      Label="目标群组/频道/Bot（每行一个）"
                       Variant="Variant.Outlined"
                       Lines="5"
                       Immediate="true"
-                      HelperText="支持固定目标或文本字典变量，例如 {groups}。字典内容可放 t.me 链接、at 用户名、频道ID；每行、空格或逗号分隔均可。" />
+                      HelperText="支持固定目标或文本字典变量，例如 {groups}。字典内容可放 t.me 链接、at 用户名、频道ID、Bot 用户名/链接；每行、空格或逗号分隔均可。" />
 
         <MudTextField @bind-Value="dictionaryText" @bind-Value:after="OnInputsChanged"
                       Label="文字词典（每行一个）"
@@ -424,7 +424,7 @@
 
         if (targets.Count == 0)
         {
-            await DraftChanged.InvokeAsync(new ModuleTaskDraft(0, null, false, "请至少填写一个目标群组/频道"));
+            await DraftChanged.InvokeAsync(new ModuleTaskDraft(0, null, false, "请至少填写一个目标群组/频道/Bot"));
             return;
         }
 

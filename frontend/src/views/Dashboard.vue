@@ -211,7 +211,7 @@ function fallbackTaskName(type: string) {
   if (type === 'user_join_subscribe') return '批量加群/订阅/启用Bot'
   if (type === 'bot_channel_set_admins_by_account') return 'Bot频道批量设置管理员（账号执行）'
   if (type === 'bot_set_admins') return 'Bot频道批量设置管理员（机器人执行）'
-  if (type === 'user_chat_active') return '账号持续活跃（群组/频道）'
+  if (type === 'user_chat_active') return '账号持续活跃（群组/频道/Bot）'
   if (type === 'account_auto_sync') return '账号数据同步'
   if (type === 'channel_group_private_create') return '批量创建私密频道/群组'
   if (type === 'channel_group_publicize') return '批量公开频道/群组'

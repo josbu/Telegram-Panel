@@ -632,7 +632,7 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
             config.ImageDictionaryToken = null;
 
         if (config.Targets.Count == 0)
-            throw new InvalidOperationException("任务缺少目标群组/频道");
+            throw new InvalidOperationException("任务缺少目标群组/频道/Bot");
 
         if (config.Dictionary.Count == 0 && string.IsNullOrWhiteSpace(config.ImageDictionaryToken))
             throw new InvalidOperationException("任务缺少词典消息或图片字典");
@@ -777,11 +777,11 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
 
         var expandedTargetsResult = await ExpandTargetsAsync(config.Targets, templateRendering, cancellationToken);
         if (!expandedTargetsResult.Success)
-            return PrepareAccountSlotsResult.Failed(expandedTargetsResult.Error ?? "目标群组/频道配置无效");
+            return PrepareAccountSlotsResult.Failed(expandedTargetsResult.Error ?? "目标群组/频道/Bot 配置无效");
 
         var targets = expandedTargetsResult.Targets;
         if (targets.Count == 0)
-            return PrepareAccountSlotsResult.Failed("任务缺少目标群组/频道");
+            return PrepareAccountSlotsResult.Failed("任务缺少目标群组/频道/Bot");
 
         var selectedCategoryIds = NormalizeSelectedCategoryIds(config).ToHashSet();
         var allAccounts = (await accountManagement.GetAllAccountsAsync())
@@ -822,7 +822,7 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         }
 
         return accountSlots.Count == 0
-            ? PrepareAccountSlotsResult.Failed("没有可用的账号-目标组合（请确认账号已加入目标群组/频道）")
+            ? PrepareAccountSlotsResult.Failed("没有可用的账号-目标组合（请确认账号已加入目标群组/频道，或 Bot 用户名/链接正确）")
             : PrepareAccountSlotsResult.Ok(accountSlots);
     }
 

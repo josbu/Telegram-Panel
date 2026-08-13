@@ -570,7 +570,7 @@ function categoryName(category: string) {
 
 function fallbackTaskName(type: string) {
   if (type === 'user_join_subscribe') return '批量加群/订阅/启用Bot'
-  if (type === 'user_chat_active') return '账号持续活跃（群组/频道）'
+  if (type === 'user_chat_active') return '账号持续活跃（群组/频道/Bot）'
   if (type === 'bot_channel_set_admins_by_account') return 'Bot频道批量设置管理员（账号执行）'
   if (type === 'bot_set_admins') return 'Bot频道批量设置管理员（机器人执行）'
   if (type === 'account_auto_sync') return '账号数据同步'

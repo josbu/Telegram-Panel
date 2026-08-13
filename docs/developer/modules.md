@@ -937,12 +937,12 @@ public IEnumerable<ModuleTaskDefinition> GetTasks(ModuleHostContext context)
 - “新建任务”里点击后打开配置窗口（或跳转配置页）
 - “任务中心”顶部可直接编辑该持续任务配置（方便增删频道/目标等）
 
-### 示例：批量订阅/加群/退群（用户任务）
+### 示例：批量订阅/加群/启用 Bot（用户任务）
 
 该类任务的典型形态是“多账号 × 多链接”的组合执行，并允许在 UI 中切换操作模式：
 
-- `join`：订阅频道 / 加入群组
-- `leave`：取消订阅 / 退群
+- `join`：订阅频道 / 加入群组 / 启用外部 Bot（发送 `/start`）
+- `leave`：取消订阅 / 退群 / 停用外部 Bot（拉黑 Bot）
 
 建议的 `host.Config`（JSON）结构：
 
@@ -954,9 +954,12 @@ public IEnumerable<ModuleTaskDefinition> GetTasks(ModuleHostContext context)
     "https://t.me/xxx",
     "t.me/+hash",
     "@username",
-    "tg://join?invite=hash"
+    "tg://join?invite=hash",
+    "@examplebot",
+    "https://t.me/examplebot?start=abc"
   ],
-  "DelayMs": 2000
+  "DelayMs": 2000,
+  "TreatNoBotSuffixAsBot": false
 }
 ```
 
@@ -964,6 +967,12 @@ public IEnumerable<ModuleTaskDefinition> GetTasks(ModuleHostContext context)
 
 - `TelegramPanel.Core.Services.Telegram.AccountTelegramToolsService.JoinChatOrChannelAsync(...)`
 - `TelegramPanel.Core.Services.Telegram.AccountTelegramToolsService.LeaveChatOrChannelAsync(...)`
+- `TelegramPanel.Core.Services.Telegram.AccountTelegramToolsService.StartExternalBotAsync(...)`
+- `TelegramPanel.Core.Services.Telegram.AccountTelegramToolsService.StopExternalBotAsync(...)`
+
+这些宿主方法会对 `A task was canceled`、连接关闭、代理断开等瞬时连接错误执行一次客户端重建重试；调用方取消任务时仍会传播取消，不会被当作普通失败。
+
+`user_chat_active` 账号持续活跃任务的目标字段也使用同一套目标解析边界：群组/频道链接按聊天目标解析，`@xxxbot`、`t.me/xxxbot?start=abc` 和 `tg://resolve?domain=xxxbot` 会解析为 Bot 私聊目标并发送词典内容，可用于 Bot 月活保活。图片字典只适用于群组/频道等支持媒体发送的目标；Bot 私聊保活建议使用文字词典。
 
 ### 3) 使用 `CreateRoute` 提供自定义创建页
 

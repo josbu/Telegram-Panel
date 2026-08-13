@@ -14,13 +14,30 @@ public sealed class TelegramRecoveryWiringTests
         "AccountTelegramToolsService.cs"));
 
     [Fact]
-    public void 状态刷新与目标解析均接入瞬时连接重试()
+    public void 状态刷新目标解析和任务入口均接入瞬时连接重试()
     {
         Assert.Matches(
             "RefreshAccountStatusAsync\\([\\s\\S]*?TelegramTransientConnectionRetry\\.ExecuteAsync[\\s\\S]*?private async Task TryPersistStatusAsync",
             ServiceSource);
         Assert.Matches(
             "ResolveChatTargetAsync\\([\\s\\S]*?TelegramTransientConnectionRetry\\.ExecuteAsync[\\s\\S]*?SendMessageToResolvedChatAsync",
+            ServiceSource);
+        Assert.Matches(
+            "JoinChatOrChannelAsync\\([\\s\\S]*?TelegramTransientConnectionRetry\\.ExecuteAsync[\\s\\S]*?LeaveChatOrChannelAsync",
+            ServiceSource);
+        Assert.Matches(
+            "StartExternalBotAsync\\([\\s\\S]*?TelegramTransientConnectionRetry\\.ExecuteAsync[\\s\\S]*?StopExternalBotAsync",
+            ServiceSource);
+        Assert.Matches(
+            "StopExternalBotAsync\\([\\s\\S]*?TelegramTransientConnectionRetry\\.ExecuteAsync[\\s\\S]*?public sealed record ResolvedChatTarget",
+            ServiceSource);
+    }
+
+    [Fact]
+    public void 账号活跃目标解析先识别Bot私聊再回退群组频道()
+    {
+        Assert.Matches(
+            "TryNormalizeTelegramBotUsername\\(raw[\\s\\S]*?TryResolveBotChatTargetAsync[\\s\\S]*?client\\.AnalyzeInviteLink",
             ServiceSource);
     }
 

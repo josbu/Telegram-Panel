@@ -64,7 +64,7 @@ public sealed class UserChatActiveTaskRerunBuilder : IModuleTaskRerunBuilder
             cfg.ImageDictionaryToken = null;
 
         if (cfg.Targets.Count == 0)
-            throw new InvalidOperationException("任务缺少目标群组/频道，无法重新运行");
+            throw new InvalidOperationException("任务缺少目标群组/频道/Bot，无法重新运行");
 
         if (cfg.Dictionary.Count == 0 && string.IsNullOrWhiteSpace(cfg.ImageDictionaryToken))
             throw new InvalidOperationException("任务缺少词典消息或图片字典，无法重新运行");

@@ -985,30 +985,52 @@ public class AccountTelegramToolsService
     {
         try
         {
-            var raw = (linkOrUsername ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(raw))
-                return (false, "链接/用户名为空", null);
+            return await TelegramTransientConnectionRetry.ExecuteAsync<(
+                bool Success,
+                string? Error,
+                string? JoinedTitle)>(
+                async () =>
+                {
+                    var raw = (linkOrUsername ?? string.Empty).Trim();
+                    if (string.IsNullOrWhiteSpace(raw))
+                        return (false, "链接/用户名为空", null);
 
-            var url = NormalizeTelegramJoinUrl(raw);
+                    var url = NormalizeTelegramJoinUrl(raw);
 
-            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+                    var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            var chat = await client.AnalyzeInviteLink(url, join: true);
-            cancellationToken.ThrowIfCancellationRequested();
+                    var chat = await ExecuteTelegramRequestAsync(
+                        accountId,
+                        "加入/订阅群组或频道",
+                        () => client.AnalyzeInviteLink(url, join: true),
+                        cancellationToken,
+                        resetClientOnTimeout: false);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            var title = chat switch
-            {
-                TL.Channel c => c.title,
-                TL.Chat c => c.title,
-                _ => null
-            };
+                    var title = chat switch
+                    {
+                        TL.Channel c => c.title,
+                        TL.Chat c => c.title,
+                        _ => null
+                    };
 
-            return (true, null, title);
+                    return (true, null, title);
+                },
+                () => _clientPool.RemoveClientAsync(accountId),
+                cancellationToken,
+                ex => _logger.LogWarning(
+                    "Transient Telegram connection failure while joining chat/channel for account {AccountId}; rebuilding client once ({ErrorType})",
+                    accountId,
+                    ex.GetBaseException().GetType().Name));
         }
         catch (RpcException ex) when (ex.Code == 400 && string.Equals(ex.Message, "USER_ALREADY_PARTICIPANT", StringComparison.OrdinalIgnoreCase))
         {
             return (true, null, "已在群组/频道中");
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1028,42 +1050,69 @@ public class AccountTelegramToolsService
     {
         try
         {
-            var raw = (linkOrUsername ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(raw))
-                return (false, "链接/用户名为空", null);
+            return await TelegramTransientConnectionRetry.ExecuteAsync<(
+                bool Success,
+                string? Error,
+                string? LeftTitle)>(
+                async () =>
+                {
+                    var raw = (linkOrUsername ?? string.Empty).Trim();
+                    if (string.IsNullOrWhiteSpace(raw))
+                        return (false, "链接/用户名为空", null);
 
-            var url = NormalizeTelegramJoinUrl(raw);
+                    var url = NormalizeTelegramJoinUrl(raw);
 
-            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+                    var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            // 解析目标（不加入）
-            var chat = await client.AnalyzeInviteLink(url, join: false);
-            cancellationToken.ThrowIfCancellationRequested();
+                    // 解析目标（不加入）
+                    var chat = await ExecuteTelegramRequestAsync(
+                        accountId,
+                        "解析退出/退订目标",
+                        () => client.AnalyzeInviteLink(url, join: false),
+                        cancellationToken,
+                        resetClientOnTimeout: false);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            var title = chat switch
-            {
-                TL.Channel c => c.title,
-                TL.Chat c => c.title,
-                _ => null
-            };
+                    var title = chat switch
+                    {
+                        TL.Channel c => c.title,
+                        TL.Chat c => c.title,
+                        _ => null
+                    };
 
-            var peer = chat switch
-            {
-                TL.Channel c => c.ToInputPeer(),
-                TL.Chat c => c.ToInputPeer(),
-                _ => null
-            };
+                    var peer = chat switch
+                    {
+                        TL.Channel c => c.ToInputPeer(),
+                        TL.Chat c => c.ToInputPeer(),
+                        _ => null
+                    };
 
-            if (peer == null)
-                return (false, "无法解析目标群组/频道", null);
+                    if (peer == null)
+                        return (false, "无法解析目标群组/频道", null);
 
-            await client.LeaveChat(peer);
-            return (true, null, title);
+                    await ExecuteTelegramRequestAsync(
+                        accountId,
+                        "退出/退订群组或频道",
+                        () => client.LeaveChat(peer),
+                        cancellationToken,
+                        resetClientOnTimeout: false);
+                    return (true, null, title);
+                },
+                () => _clientPool.RemoveClientAsync(accountId),
+                cancellationToken,
+                ex => _logger.LogWarning(
+                    "Transient Telegram connection failure while leaving chat/channel for account {AccountId}; rebuilding client once ({ErrorType})",
+                    accountId,
+                    ex.GetBaseException().GetType().Name));
         }
         catch (RpcException ex) when (ex.Code == 400 && string.Equals(ex.Message, "USER_NOT_PARTICIPANT", StringComparison.OrdinalIgnoreCase))
         {
             return (true, null, "未在群组/频道中");
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1086,30 +1135,53 @@ public class AccountTelegramToolsService
     {
         try
         {
-            var (username, startFromLink) = NormalizeTelegramBotUsername(botLinkOrUsername, assumeBotUsername);
-            var normalizedManualStart = NormalizeBotStartParameter(startParameter);
-            var finalStart = string.IsNullOrWhiteSpace(normalizedManualStart) ? startFromLink : normalizedManualStart;
+            return await TelegramTransientConnectionRetry.ExecuteAsync<(
+                bool Success,
+                string? Error,
+                string? BotUsername)>(
+                async () =>
+                {
+                    var (username, startFromLink) = NormalizeTelegramBotUsername(botLinkOrUsername, assumeBotUsername);
+                    var normalizedManualStart = NormalizeBotStartParameter(startParameter);
+                    var finalStart = string.IsNullOrWhiteSpace(normalizedManualStart) ? startFromLink : normalizedManualStart;
 
-            if (finalStart.Length > 64)
-                return (false, "启动参数过长（最多 64 字符）", null);
+                    if (finalStart.Length > 64)
+                        return (false, "启动参数过长（最多 64 字符）", null);
 
-            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+                    var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            var resolved = await client.Contacts_ResolveUsername(username);
-            var user = resolved.User;
-            if (user.access_hash == 0)
-                return (false, "无法获取 Bot access_hash", null);
+                    var resolved = await ExecuteTelegramRequestAsync(
+                        accountId,
+                        "解析 Bot 用户名",
+                        () => client.Contacts_ResolveUsername(username),
+                        cancellationToken,
+                        resetClientOnTimeout: false);
+                    var user = resolved.User;
+                    if (user.access_hash == 0)
+                        return (false, "无法获取 Bot access_hash", null);
 
-            var inputUser = new InputUser(user.id, user.access_hash);
-            var randomId = Random.Shared.NextInt64();
-            await client.Messages_StartBot(
-                bot: inputUser,
-                peer: new InputPeerSelf(),
-                random_id: randomId,
-                start_param: finalStart);
+                    var inputUser = new InputUser(user.id, user.access_hash);
+                    var randomId = Random.Shared.NextInt64();
+                    await ExecuteTelegramRequestAsync(
+                        accountId,
+                        "启用 Bot",
+                        () => client.Messages_StartBot(
+                            bot: inputUser,
+                            peer: new InputPeerSelf(),
+                            random_id: randomId,
+                            start_param: finalStart),
+                        cancellationToken,
+                        resetClientOnTimeout: false);
 
-            return (true, null, "@" + username);
+                    return (true, null, "@" + username);
+                },
+                () => _clientPool.RemoveClientAsync(accountId),
+                cancellationToken,
+                ex => _logger.LogWarning(
+                    "Transient Telegram connection failure while starting bot for account {AccountId}; rebuilding client once ({ErrorType})",
+                    accountId,
+                    ex.GetBaseException().GetType().Name));
         }
         catch (RpcException ex) when (ex.Code == 400 && string.Equals(ex.Message, "BOT_APP_INVALID", StringComparison.OrdinalIgnoreCase))
         {
@@ -1118,6 +1190,10 @@ public class AccountTelegramToolsService
         catch (RpcException ex) when (ex.Code == 400 && string.Equals(ex.Message, "PEER_FLOOD", StringComparison.OrdinalIgnoreCase))
         {
             return (false, "触发风控（PEER_FLOOD），请降低频率后重试", null);
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1139,23 +1215,50 @@ public class AccountTelegramToolsService
     {
         try
         {
-            var (username, _) = NormalizeTelegramBotUsername(botLinkOrUsername, assumeBotUsername);
+            return await TelegramTransientConnectionRetry.ExecuteAsync<(
+                bool Success,
+                string? Error,
+                string? BotUsername)>(
+                async () =>
+                {
+                    var (username, _) = NormalizeTelegramBotUsername(botLinkOrUsername, assumeBotUsername);
 
-            var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+                    var client = await GetOrCreateConnectedClientAsync(accountId, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            var resolved = await client.Contacts_ResolveUsername(username);
-            var user = resolved.User;
-            if (user.access_hash == 0)
-                return (false, "无法获取 Bot access_hash", null);
+                    var resolved = await ExecuteTelegramRequestAsync(
+                        accountId,
+                        "解析 Bot 用户名",
+                        () => client.Contacts_ResolveUsername(username),
+                        cancellationToken,
+                        resetClientOnTimeout: false);
+                    var user = resolved.User;
+                    if (user.access_hash == 0)
+                        return (false, "无法获取 Bot access_hash", null);
 
-            await client.Contacts_Block(new InputPeerUser(user.id, user.access_hash));
-            return (true, null, "@" + username);
+                    await ExecuteTelegramRequestAsync(
+                        accountId,
+                        "停用 Bot",
+                        () => client.Contacts_Block(new InputPeerUser(user.id, user.access_hash)),
+                        cancellationToken,
+                        resetClientOnTimeout: false);
+                    return (true, null, "@" + username);
+                },
+                () => _clientPool.RemoveClientAsync(accountId),
+                cancellationToken,
+                ex => _logger.LogWarning(
+                    "Transient Telegram connection failure while stopping bot for account {AccountId}; rebuilding client once ({ErrorType})",
+                    accountId,
+                    ex.GetBaseException().GetType().Name));
         }
         catch (RpcException ex) when (ex.Code == 400 && string.Equals(ex.Message, "USER_NOT_MUTUAL_CONTACT", StringComparison.OrdinalIgnoreCase))
         {
             // 某些账号状态下会返回该错误，按“已停用”处理可避免批量任务中断。
             return (true, null, null);
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1168,9 +1271,10 @@ public class AccountTelegramToolsService
     public sealed record ResolvedChatTarget(InputPeer Peer, string Title, string CanonicalId);
 
     /// <summary>
-    /// 解析群组/频道目标，支持：
-    /// - 用户名/链接：@username、username、https://t.me/xxx、t.me/xxx、tg://join?invite=hash
+    /// 解析群组/频道/Bot 目标，支持：
+    /// - 用户名/链接：@username、username、https://t.me/xxx、t.me/xxx、tg://join?invite=hash、tg://resolve?domain=xxxbot
     /// - 频道/群组 ID：123456、-123456、-1001234567890
+    /// - Bot 用户名/链接：@xxxbot、xxxbot、https://t.me/xxxbot?start=abc
     /// </summary>
     public async Task<(bool Success, string? Error, ResolvedChatTarget? Target)> ResolveChatTargetAsync(
         int accountId,
@@ -1205,10 +1309,21 @@ public class AccountTelegramToolsService
                         return (false, $"未找到 chatId={raw} 对应的群组/频道（请确认该账号已加入目标）", null);
                     }
 
+                    if (TryNormalizeTelegramBotUsername(raw, out var botUsername))
+                    {
+                        var botTarget = await TryResolveBotChatTargetAsync(
+                            client,
+                            accountId,
+                            botUsername,
+                            cancellationToken);
+                        if (botTarget != null)
+                            return (true, null, botTarget);
+                    }
+
                     var url = NormalizeTelegramJoinUrl(raw);
                     var chat = await ExecuteTelegramRequestAsync(
                         accountId,
-                        "解析群组/频道目标",
+                        "解析群组/频道/Bot 目标",
                         () => client.AnalyzeInviteLink(url, join: false),
                         cancellationToken,
                         resetClientOnTimeout: false);
@@ -1222,7 +1337,7 @@ public class AccountTelegramToolsService
                     };
 
                     if (peer == null)
-                        return (false, "无法解析目标群组/频道", null);
+                        return (false, "无法解析目标群组/频道/Bot", null);
 
                     return chat switch
                     {
@@ -1234,7 +1349,7 @@ public class AccountTelegramToolsService
                 () => _clientPool.RemoveClientAsync(accountId),
                 cancellationToken,
                 ex => _logger.LogWarning(
-                    "Transient Telegram connection failure while resolving chat target for account {AccountId}; rebuilding client once ({ErrorType})",
+                    "Transient Telegram connection failure while resolving chat/channel/bot target for account {AccountId}; rebuilding client once ({ErrorType})",
                     accountId,
                     ex.GetBaseException().GetType().Name));
         }
@@ -1251,7 +1366,7 @@ public class AccountTelegramToolsService
     }
 
     /// <summary>
-    /// 向已解析的群组/频道目标发送文本消息。
+    /// 向已解析的群组/频道/Bot 目标发送文本消息。
     /// </summary>
     public async Task<(bool Success, string? Error, int? MessageId)> SendMessageToResolvedChatAsync(
         int accountId,
@@ -1281,7 +1396,7 @@ public class AccountTelegramToolsService
     }
 
     /// <summary>
-    /// 向已解析的群组/频道目标发送图片，可附带纯文本 caption。
+    /// 向已解析的群组/频道/Bot 目标发送图片，可附带纯文本 caption。
     /// </summary>
     public async Task<(bool Success, string? Error, int? MessageId)> SendPhotoToResolvedChatAsync(
         int accountId,
@@ -1432,6 +1547,31 @@ public class AccountTelegramToolsService
             var msg = string.IsNullOrWhiteSpace(details) ? summary : $"{summary}：{details}";
             return (false, msg);
         }
+    }
+
+    private async Task<ResolvedChatTarget?> TryResolveBotChatTargetAsync(
+        Client client,
+        int accountId,
+        string username,
+        CancellationToken cancellationToken)
+    {
+        var resolved = await ExecuteTelegramRequestAsync(
+            accountId,
+            "解析 Bot 私聊目标",
+            () => client.Contacts_ResolveUsername(username),
+            cancellationToken,
+            resetClientOnTimeout: false);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var user = resolved.User;
+        if (user == null || !user.IsBot || user.access_hash == 0)
+            return null;
+
+        var title = string.IsNullOrWhiteSpace(user.username) ? $"Bot {user.id}" : $"@{user.username}";
+        return new ResolvedChatTarget(
+            new InputPeerUser(user.id, user.access_hash),
+            title,
+            $"user:{user.id.ToString(CultureInfo.InvariantCulture)}");
     }
 
     private async Task<ResolvedChatTarget?> TryResolveChatByIdFromDialogsAsync(
@@ -2005,6 +2145,21 @@ public class AccountTelegramToolsService
             throw new ArgumentException("目标看起来不是 Bot 用户名（需以 bot 结尾）", nameof(input));
 
         return (s, startFromLink);
+    }
+
+    internal static bool TryNormalizeTelegramBotUsername(string? input, out string username)
+    {
+        username = string.Empty;
+        try
+        {
+            var normalized = NormalizeTelegramBotUsername(input ?? string.Empty);
+            username = normalized.Username;
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static string NormalizeBotStartParameter(string? input)

@@ -89,8 +89,8 @@ public sealed class TaskCatalogModule : ITelegramPanelModule, IModuleTaskProvide
         {
             Category = "user",
             TaskType = BatchTaskTypes.UserChatActive,
-            DisplayName = "账号持续活跃（群组/频道）",
-            Description = "按账号分类持续向指定目标发送词典内容，支持间隔抖动、随机/队列循环。",
+            DisplayName = "账号持续活跃（群组/频道/Bot）",
+            Description = "按账号分类持续向指定群组、频道或 Bot 私聊发送词典内容，支持间隔抖动、随机/队列循环。",
             Icon = Icons.Material.Filled.Chat,
             EditorComponentType = typeof(TelegramPanel.Web.Components.Dialogs.UserChatActiveTaskEditor).AssemblyQualifiedName ?? "",
             TaskCenter = new ModuleTaskCenterCapabilities
