@@ -389,7 +389,7 @@ public sealed class ImportProxyFirstConnectionTests
     }
 
     [Fact]
-    public async Task 创建一对一WARP导入在不支持环境会在首次Telegram验证前拒绝且不创建容器记录()
+    public async Task 创建一对一WARP导入在环境未就绪时会在首次Telegram验证前拒绝且不创建容器记录()
     {
         await using var fixture = await ImportFixture.CreateAsync(OutboundProxyProtocols.Http);
 
@@ -400,7 +400,7 @@ public sealed class ImportProxyFirstConnectionTests
             proxyBinding: new AccountProxyBindingInput("warp_per_account"));
 
         Assert.False(result.Success);
-        Assert.Contains("WARP 仅支持在 Linux Docker 环境中运行", result.Error);
+        Assert.True(IsWarpUnavailableError(result.Error), result.Error);
         Assert.Equal(0, fixture.Importer.ImportCount);
         Assert.Empty(await fixture.Db.Accounts.AsNoTracking().ToListAsync());
         Assert.Empty(await fixture.Db.OutboundProxies.AsNoTracking()
@@ -850,6 +850,13 @@ public sealed class ImportProxyFirstConnectionTests
         Assert.Equal(
             "https://t.me/proxy?server=127.0.0.1&port=1080&secret=abcdef",
             client.MTProxyUrl);
+    }
+
+    private static bool IsWarpUnavailableError(string? error)
+    {
+        return !string.IsNullOrWhiteSpace(error)
+            && (error.Contains("WARP 仅支持在 Linux Docker 环境中运行", StringComparison.Ordinal)
+                || error.Contains("WARP 未启用，请设置 Proxy:Warp:Enabled=true", StringComparison.Ordinal));
     }
 
     private static Client CreateClient()

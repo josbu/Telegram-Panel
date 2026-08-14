@@ -192,7 +192,7 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 返回最近 20 条失败明细。字段包括 `time_utc`、`account_id`、`target_type`、
 `target` 和 `reason`。自 v1.31.48 起，`user_chat_active` 会在
 `config.recent_failures` 返回最多 100 条账号活跃失败明细，字段包括 `time_utc`、
-`account_id`、`account`、`target` 和 `reason`；自 v1.31.53 起，`user_chat_active`
+`account_id`、`account`、`target` 和 `reason`；自 v1.31.54 起，`user_chat_active`
 目标支持群组、频道和 Bot 私聊（`@xxxbot`、`t.me/xxxbot?start=...`、
 `tg://resolve?domain=xxxbot`），可用于给外部 Bot 发送文字词典内容。`user_join_subscribe`
 会在 `config.failures` 返回最多 200 条失败明细，字段包括 `accountId`、`target` 和
@@ -201,7 +201,7 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 该字段为空表示没有失败或运行的是尚未支持失败明细的旧版本。
 
 失败原因来自当次执行，最长 500 字符。接口调用方不得把其中内容当作稳定错误码；需要自动化
-判断时应优先匹配 Telegram/RPC 的明确错误标识。回滚到 v1.31.52 或更早版本不会解析 Bot 私聊活跃目标，
+判断时应优先匹配 Telegram/RPC 的明确错误标识。回滚到 v1.31.53 或更早版本不会解析 Bot 私聊活跃目标，
 也不会继续写入新增重试后的失败描述。
 
 `auto_change_login_email` 任务使用 `config.items` 返回最近账号级结果，字段包括 `time_utc`、
