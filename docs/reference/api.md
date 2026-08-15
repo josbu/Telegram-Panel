@@ -68,6 +68,8 @@ Telegram 的限流、权限和 Session 等业务错误不会重试，避免扩�
 响应包含可直接展示的中文 `message` 和 `code=TELEGRAM_DEVICE_QUERY_FAILED`。此时先在代理管理中
 检测账号当前出口，再检查 Session 是否仍有效；不需要通过“切换代理再应用”手工清理客户端。
 成功判据是代理出口短暂变化后再次打开“在线设备”仍返回 `200`，日志至多记录一次客户端重建。
+
+在线设备响应会同时返回 `apiFamily`、`apiDisplayName`、`apiDescription` 和 `deviceDisplayName`，前端不得只根据 `ApiId` 自行猜测未知状态。`ApiId=2040` 是官方 Telegram Desktop API，属于正常官方桌面端会话；异常排查应结合 `appName/platform/deviceModel/ip` 和最近活跃时间判断。
 如需回滚，恢复到 v1.31.42；本改动不包含数据库迁移，也不会改变账号代理绑定。
 
 ### 账号状态恢复与安全清理（v1.31.46 及以上）
@@ -175,6 +177,8 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 
 批量邀请、管理员变更、退出和解散等端点可在对应 Vue API 调用或 Endpoint 文件中查看。
 
+`POST /api/panel/accounts/batch/profile` 的 `mode=bio` 支持与昵称/用户名相同的文本模板：`{time}` 和已启用文本字典变量会在每个账号执行前解析。模板和字典文本中的字面 `\\n` 或 `/n` 会转为真实换行；留空仍表示清空 Bio。成功判据是 Bio 在 Telegram 资料中按换行展示，模板变量解析失败时单项返回失败原因；回滚到旧版前应把 Bio 改回固定文本或提前写入真实换行。
+
 ## 任务和模块
 
 - `GET /api/panel/tasks`：任务列表
@@ -188,15 +192,32 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 - `POST /api/panel/modules/install`：安装模块包
 - `/api/panel/extensions/{module-slug}`：模块自定义后台管理接口约定
 
+`GET /api/panel/tasks` 和 `GET /api/panel/tasks/{id}` 的 `BatchTaskDto` 包含可空 `name`。普通一次性任务可为空，前端使用“任务类型 #ID”兜底；计划任务触发或手动“立即执行”创建的批量任务会复制计划任务名称，历史任务应优先展示 `name`，并保留任务类型作为辅助说明。该字段通过 `BatchTasks.Name` 持久化；回滚到旧版需先忽略或删除该列。
+
 自 v1.31.44 起，`channel_group_private_create` 任务会在 `config.recent_failures`
 返回最近 20 条失败明细。字段包括 `time_utc`、`account_id`、`target_type`、
 `target` 和 `reason`。自 v1.31.48 起，`user_chat_active` 会在
 `config.recent_failures` 返回最多 100 条账号活跃失败明细，字段包括 `time_utc`、
 `account_id`、`account`、`target` 和 `reason`；自 v1.31.54 起，`user_chat_active`
 目标支持群组、频道和 Bot 私聊（`@xxxbot`、`t.me/xxxbot?start=...`、
-`tg://resolve?domain=xxxbot`），可用于给外部 Bot 发送文字词典内容。`user_join_subscribe`
-会在 `config.failures` 返回最多 200 条失败明细，字段包括 `accountId`、`target` 和
-`reason`，并会对 Telegram 瞬时连接错误执行一次客户端重建重试。
+`tg://resolve?domain=xxxbot`）。
+
+自 v1.31.55 起，`user_chat_active.config.message_rules` 是消息选择的主合同。它是对象数组，
+每项包含可选的 `text` 和 `image_dictionary_token`：`text` 保留内部换行，可用于多段消息；
+`image_dictionary_token` 必须是单个已启用图片字典变量，例如 `{active_images}`。一条规则可以
+只含文字、只含图片，或同时包含图片和说明文字；`message_mode=random|queue` 针对整条规则选择，
+不会再把段落中的每一行拆成独立消息。前置条件是引用的文本/图片字典已启用且至少有一个可用项。
+
+兼容字段 `dictionary` 和 `image_dictionary_token` 仍会读写：旧配置会在加载时转换为等价规则；
+`dictionary` 保存所有非空规则文字，只有全部规则共享同一个非空图片字典时才回写全局
+`image_dictionary_token`。成功判据是保存后任务详情包含 `message_rules`，重新编辑仍保留段落换行和
+每条图片字典，实际执行按规则随机或循环。图片字典无效时创建页或任务启动会返回模板校验错误。
+回滚到 v1.31.54 或更早版本时，旧字段仍可继续发送文字；每条规则使用不同图片字典的配置无法被旧版
+完整表达，回滚前应改为全部规则共用一个图片字典或纯文字规则。
+
+`user_join_subscribe` 会在 `config.failures` 返回最多 200 条失败明细，字段包括 `accountId`、
+`target` 和 `reason`，并会对 Telegram 瞬时连接错误执行一次客户端重建重试。
+`user_join_subscribe.config.DelayMs` 和即时 `/accounts/chat-membership` 的 `delayMs` 允许 `0-60000` 毫秒，服务端会按该范围夹取；系统设置里的默认批量操作间隔为 `1000-60000` 毫秒。Plain Bot 链接（例如 `https://t.me/SpamBot`、`@examplebot`）没有 `start` 参数时会向 Bot 私聊发送普通 `/start`，不会再调用必须携带 `start_param` 的 deep-link 接口；带 `?start=abc` 时仍走 Telegram deep-link 启动接口。
 成功判据是任务的 `failed` 大于零时，详情接口和任务中心均能看到对应失败账号、目标和原因；
 该字段为空表示没有失败或运行的是尚未支持失败明细的旧版本。
 
