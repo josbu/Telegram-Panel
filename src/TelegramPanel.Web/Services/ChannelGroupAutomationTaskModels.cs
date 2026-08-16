@@ -23,6 +23,10 @@ public sealed class ChannelGroupPrivateCreateTaskConfig
     [JsonPropertyName("category_names")]
     public List<string> CategoryNames { get; set; } = new();
 
+    [JsonPropertyName("account_numbers")]
+    public List<int> AccountNumbers { get; set; } = new();
+
+
     [JsonPropertyName("create_type")]
     public string CreateType { get; set; } = ChannelGroupAutomationTaskObjectTypes.Channel;
 
@@ -97,6 +101,10 @@ public sealed class ChannelGroupPublicizeTaskConfig
 
     [JsonPropertyName("category_names")]
     public List<string> CategoryNames { get; set; } = new();
+
+    [JsonPropertyName("account_numbers")]
+    public List<int> AccountNumbers { get; set; } = new();
+
 
     [JsonPropertyName("target_type")]
     public string TargetType { get; set; } = ChannelGroupAutomationTaskObjectTypes.Channel;

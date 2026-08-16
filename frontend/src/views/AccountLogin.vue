@@ -79,6 +79,8 @@
           <el-result v-if="qrStatus === 'authorized'" icon="success" title="登录成功并保存到数据库">
             <template #sub-title>
               <div v-if="savedAccount" class="success-lines">
+                <div>编号：#{{ savedAccount.displayNumber }}</div>
+
                 <div>手机号：{{ savedAccount.displayPhone }}</div>
                 <div>用户名：{{ savedAccount.username ? `@${savedAccount.username}` : '无' }}</div>
                 <div>用户ID：{{ savedAccount.userId }}</div>
@@ -263,6 +265,8 @@
           <el-result icon="success" title="登录成功并保存到数据库">
             <template #sub-title>
               <div v-if="savedAccount" class="success-lines">
+                <div>编号：#{{ savedAccount.displayNumber }}</div>
+
                 <div>手机号：{{ savedAccount.displayPhone }}</div>
                 <div>用户名：{{ savedAccount.username ? `@${savedAccount.username}` : '无' }}</div>
                 <div>用户ID：{{ savedAccount.userId }}</div>
@@ -618,7 +622,7 @@ function normalizePhoneDigits(value?: string | null) {
 function accountLabel(account: AccountListItem | AccountDetail) {
   const nickname = account.nickname ? ` / ${account.nickname}` : ''
   const username = account.username ? ` / @${account.username}` : ''
-  return `${account.displayPhone}${nickname}${username}`
+  return `#${account.displayNumber} ${account.displayPhone}${nickname}${username}`
 }
 
 async function ensureStoredAccountsLoaded() {

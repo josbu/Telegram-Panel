@@ -92,6 +92,10 @@
         @selection-change="onSelectionChange"
       >
         <el-table-column type="selection" width="48" reserve-selection />
+        <el-table-column v-if="isColumnVisible('displayNumber')" prop="displayNumber" label="编号" width="96">
+          <template #default="{ row }">#{{ row.displayNumber }}</template>
+        </el-table-column>
+
         <el-table-column v-if="isColumnVisible('phone')" prop="displayPhone" label="手机号" :min-width="isCompactList ? 214 : 150">
           <template #default="{ row }">
             <div>{{ row.displayPhone }}</div>
@@ -265,7 +269,7 @@
     <el-dialog v-model="profile.visible" title="编辑用户资料" width="620px">
       <el-form label-position="top">
         <el-alert title="可修改：昵称、Bio、用户名、头像。批量修改请使用账号列表上方的批量操作。" type="info" :closable="false" show-icon />
-        <div class="dialog-account">账号：{{ profile.row?.displayPhone }}</div>
+        <div class="dialog-account">账号：{{ profile.row ? accountLabel(profile.row) : '-' }}</div>
         <el-form-item>
           <el-checkbox v-model="profile.form.editNickname">修改昵称</el-checkbox>
           <el-input v-model="profile.form.nickname" :disabled="!profile.form.editNickname" placeholder="昵称将写入 Telegram 的 first_name（last_name 置空）" />
@@ -428,7 +432,7 @@
 
     <el-dialog v-model="emailDialog.visible" :title="emailDialog.title" width="520px">
       <el-form label-position="top">
-        <div v-if="emailDialog.row" class="dialog-account">账号：{{ emailDialog.row.displayPhone }}</div>
+        <div v-if="emailDialog.row" class="dialog-account">账号：{{ accountLabel(emailDialog.row) }}</div>
         <el-alert v-if="emailDialog.statusText" :title="emailDialog.statusText" type="info" :closable="false" show-icon />
         <el-alert
           v-if="emailDialog.kind === 'recovery' && emailDialog.canOpenTwoFactor"
@@ -778,6 +782,7 @@ const filters = reactive({
 })
 
 const accountColumns: ColumnVisibilityOption[] = [
+  { key: 'displayNumber', label: '编号' },
   { key: 'phone', label: '手机号' },
   { key: 'proxy', label: '代理' },
   { key: 'nickname', label: '昵称' },
@@ -823,6 +828,10 @@ const selectionIcon = computed<Component>(() => {
   if (selectionMode.value === 'clear') return Delete
   return Select
 })
+
+function accountLabel(account: { displayNumber: number; displayPhone: string }) {
+  return `#${account.displayNumber} ${account.displayPhone}`
+}
 
 const details = reactive({
   visible: false,
@@ -1316,7 +1325,7 @@ async function refreshStatus(row: Row) {
     const result = await refreshStatusRows([row.id], probe)
     const item = result.items[0]
     if (!item) return
-    const message = `账号 ${row.displayPhone} 状态：${item.summary}`
+    const message = `账号 ${accountLabel(row)} 状态：${item.summary}`
     if (item.success) ElMessage.success(message)
     else ElMessage.warning(`${message}${item.error ? `（${item.error}）` : ''}`)
   } catch (error) {
@@ -1324,6 +1333,7 @@ async function refreshStatus(row: Row) {
     ElMessage.error(`刷新失败：${getStatusRefreshError(error)}`)
   }
 }
+
 
 async function batchRefreshStatus() {
   if (!ensureSelected()) return
@@ -1367,9 +1377,11 @@ async function toggleActive(row: Row) {
   ElMessage.success(next ? '账号已启用' : '账号已停用')
 }
 
+
 async function deleteOne(row: Row) {
   if (!ensureAccountsIdle([row.id], '删除账号')) return
-  await ElMessageBox.confirm(`确定要删除账号 ${row.displayPhone} 吗？此操作不可撤销！`, '确认删除', {
+  await ElMessageBox.confirm(`确定要删除账号 ${accountLabel(row)} 吗？此操作不可撤销！`, '确认删除', {
+
     type: 'warning',
     confirmButtonText: '删除',
     cancelButtonText: '取消',
@@ -1492,7 +1504,7 @@ function openAccountProxy(accountIds: number[], row?: Row) {
   if (proxyDialog.running) return
   accountProxyOperationToken += 1
   proxyDialog.accountIds = [...accountIds]
-  proxyDialog.title = accountIds.length > 1 ? `批量切换代理（${accountIds.length} 个账号）` : `切换代理 - ${row?.displayPhone || ''}`
+  proxyDialog.title = accountIds.length > 1 ? `批量切换代理（${accountIds.length} 个账号）` : `切换代理 - ${row ? accountLabel(row) : ''}`
   proxyDialog.expectedProxyId = row?.proxy?.id ?? 0
   proxyDialog.strategy = row
     ? row.proxy ? 'existing' : row.useGlobalProxy ? 'global' : 'direct'
@@ -1500,6 +1512,7 @@ function openAccountProxy(accountIds: number[], row?: Row) {
   proxyDialog.proxyId = row?.proxy?.id ?? null
   proxyDialog.visible = true
 }
+
 
 function beforeAccountProxyDialogClose(done: () => void) {
   if (!proxyDialog.running) done()
@@ -1881,11 +1894,10 @@ async function openMemberships(row: Row, type: 'channels' | 'groups') {
 }
 
 async function openInbox(row: Row) {
-  listDialog.visible = true
+  listDialog.title = `系统通知（验证码） - ${accountLabel(row)}`
   listDialog.loading = true
   listDialog.type = 'messages'
   listDialog.accountId = row.id
-  listDialog.title = `系统通知（验证码） - ${row.displayPhone}`
   listDialog.messages = []
   try {
     listDialog.messages = await panelApi.systemMessages(row.id, 30)
@@ -1894,12 +1906,12 @@ async function openInbox(row: Row) {
   }
 }
 
+
 async function openDevices(row: Row) {
-  listDialog.visible = true
+  listDialog.title = `在线设备 - ${accountLabel(row)}`
   listDialog.loading = true
   listDialog.type = 'devices'
   listDialog.accountId = row.id
-  listDialog.title = `在线设备 - ${row.displayPhone}`
   listDialog.devices = []
   try {
     listDialog.devices = await panelApi.devices(row.id)

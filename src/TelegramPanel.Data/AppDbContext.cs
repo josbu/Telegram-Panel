@@ -33,6 +33,99 @@ public class AppDbContext : DbContext
     public DbSet<ProxyCategory> ProxyCategories => Set<ProxyCategory>();
     public DbSet<WarpProfile> WarpProfiles => Set<WarpProfile>();
 
+    private static readonly SemaphoreSlim AccountDisplayNumberGate = new(1, 1);
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        if (!HasAccountsRequiringDisplayNumber())
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+
+        AccountDisplayNumberGate.Wait();
+        try
+        {
+            AssignAccountDisplayNumbers();
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+        finally
+        {
+            AccountDisplayNumberGate.Release();
+        }
+    }
+
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        if (!HasAccountsRequiringDisplayNumber())
+            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+
+        await AccountDisplayNumberGate.WaitAsync(cancellationToken);
+        try
+        {
+            await AssignAccountDisplayNumbersAsync(cancellationToken);
+            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+        finally
+        {
+            AccountDisplayNumberGate.Release();
+        }
+    }
+
+    private bool HasAccountsRequiringDisplayNumber() =>
+        ChangeTracker.Entries<Account>()
+            .Any(entry =>
+                (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+                && entry.Entity.DisplayNumber <= 0);
+
+    private void AssignAccountDisplayNumbers()
+    {
+        var pending = GetAccountsRequiringDisplayNumber();
+        if (pending.Count == 0)
+            return;
+
+        var used = Accounts
+            .AsNoTracking()
+            .Where(account => account.DisplayNumber > 0)
+            .Select(account => account.DisplayNumber)
+            .ToList()
+            .ToHashSet();
+
+        AssignAccountDisplayNumbers(pending, used);
+    }
+
+    private async Task AssignAccountDisplayNumbersAsync(CancellationToken cancellationToken)
+    {
+        var pending = GetAccountsRequiringDisplayNumber();
+        if (pending.Count == 0)
+            return;
+
+        var used = (await Accounts
+                .AsNoTracking()
+                .Where(account => account.DisplayNumber > 0)
+                .Select(account => account.DisplayNumber)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        AssignAccountDisplayNumbers(pending, used);
+    }
+
+    private List<Account> GetAccountsRequiringDisplayNumber() =>
+        ChangeTracker.Entries<Account>()
+            .Where(entry => entry.State == EntityState.Added || entry.State == EntityState.Modified)
+            .Select(entry => entry.Entity)
+            .Where(account => account.DisplayNumber <= 0)
+            .ToList();
+
+    private static void AssignAccountDisplayNumbers(IReadOnlyList<Account> pending, HashSet<int> used)
+    {
+        foreach (var account in pending)
+        {
+            var next = 1;
+            while (used.Contains(next))
+                next++;
+
+            account.DisplayNumber = next;
+            used.Add(next);
+        }
+    }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -41,6 +134,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Account>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.DisplayNumber).IsRequired();
             entity.Property(e => e.Phone).IsRequired().HasMaxLength(20);
             entity.Property(e => e.SessionPath).IsRequired().HasMaxLength(500);
             entity.Property(e => e.ApiHash).IsRequired().HasMaxLength(100);
@@ -53,6 +147,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.UseGlobalProxy).HasDefaultValue(true);
 
             entity.HasIndex(e => e.Phone).IsUnique();
+            entity.HasIndex(e => e.DisplayNumber).IsUnique();
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.ProxyId);
 

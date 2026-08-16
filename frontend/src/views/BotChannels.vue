@@ -769,7 +769,7 @@ function statusTitle(row: BotChannelListItem) {
 
 function accountLabel(account: OperationAccount) {
   const name = account.nickname || account.displayPhone
-  return account.username ? `${name} (@${account.username})` : name
+  return account.username ? `#${account.displayNumber} ${name} (@${account.username})` : `#${account.displayNumber} ${name}`
 }
 
 async function sync() {

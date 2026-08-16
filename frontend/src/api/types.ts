@@ -237,6 +237,7 @@ export interface AccountCategory {
 
 export interface AccountListItem {
   id: number
+  displayNumber: number
   displayPhone: string
   phone?: string
   nickname?: string | null
@@ -259,6 +260,7 @@ export interface AccountListItem {
 
 export interface AccountDetail {
   id: number
+  displayNumber: number
   displayPhone: string
   phone: string
   nickname?: string | null
@@ -336,6 +338,7 @@ export interface AccountBatchOperationResult {
 
 export interface RiskAccount {
   id: number
+  displayNumber: number
   displayPhone: string
   riskReferenceHours?: number | null
   isEstimated: boolean
@@ -890,6 +893,7 @@ export interface BotChatOption {
 
 export interface OperationAccount {
   id: number
+  displayNumber: number
   displayPhone: string
   nickname?: string | null
   username?: string | null

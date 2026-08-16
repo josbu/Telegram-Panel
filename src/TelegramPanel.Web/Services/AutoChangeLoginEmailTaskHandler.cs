@@ -32,14 +32,18 @@ public sealed class AutoChangeLoginEmailTaskHandler : IModuleTaskHandler
         var logger = host.Services.GetRequiredService<ILogger<AutoChangeLoginEmailTaskHandler>>();
 
         var selectedCategoryIds = config.CategoryIds.Where(x => x > 0).ToHashSet();
+        var selectedAccountNumbers = config.AccountNumbers.Where(x => x > 0).ToHashSet();
         var accounts = (await accountManagement.GetActiveAccountsAsync())
             .Where(x => x.UserId > 0)
-            .Where(x => x.CategoryId.HasValue && selectedCategoryIds.Contains(x.CategoryId.Value))
+            .Where(x =>
+                (x.CategoryId.HasValue && selectedCategoryIds.Contains(x.CategoryId.Value))
+                || selectedAccountNumbers.Contains(x.DisplayNumber))
             .Where(x => x.Category?.ExcludeFromOperations != true)
-            .OrderBy(x => x.Id)
+            .OrderBy(x => x.DisplayNumber)
+            .ThenBy(x => x.Id)
             .ToList();
         if (accounts.Count == 0)
-            throw new InvalidOperationException("所选账号分类下没有可用账号");
+            throw new InvalidOperationException("所选账号分类或账号编号下没有可用账号");
 
         var domain = ResolveDomain(config, configuration);
         var cloudMailConfigured = IsCloudMailConfigured(configuration) && !string.IsNullOrWhiteSpace(domain);
@@ -282,7 +286,10 @@ public sealed class AutoChangeLoginEmailTaskHandler : IModuleTaskHandler
 
     private static void Normalize(AutoChangeLoginEmailTaskConfig config)
     {
-        config.CategoryIds = config.CategoryIds.Where(x => x > 0).Distinct().ToList();
+        config.CategoryIds = (config.CategoryIds ?? new List<int>()).Where(x => x > 0).Distinct().ToList();
+        config.AccountNumbers = (config.AccountNumbers ?? new List<int>()).Where(x => x > 0).Distinct().ToList();
+        if (config.CategoryIds.Count == 0 && config.AccountNumbers.Count == 0)
+            throw new InvalidOperationException("请至少选择账号分类或填写账号编号");
         config.CategoryNames = config.CategoryNames.Select(x => (x ?? string.Empty).Trim()).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         config.Domain = (config.Domain ?? string.Empty).Trim().TrimStart('@');
         config.TriggerDaysAgo = Math.Clamp(config.TriggerDaysAgo, 0, 30);

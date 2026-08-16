@@ -456,6 +456,7 @@ const cronPresets = [
 const createDialog = ref({
   visible: false,
   saving: false,
+  sourceTaskId: 0,
   form: {
     category: '',
     taskType: '',

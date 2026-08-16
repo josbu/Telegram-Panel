@@ -90,6 +90,10 @@
         @selection-change="onAccountSelectionChange"
       >
         <el-table-column type="selection" width="48" reserve-selection />
+        <el-table-column prop="displayNumber" label="编号" width="96">
+          <template #default="{ row }">#{{ row.displayNumber }}</template>
+        </el-table-column>
+
         <el-table-column prop="displayPhone" label="手机号" min-width="150" />
         <el-table-column prop="nickname" label="昵称" min-width="130">
           <template #default="{ row }">{{ row.nickname || '-' }}</template>

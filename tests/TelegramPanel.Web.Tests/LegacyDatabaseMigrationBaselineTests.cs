@@ -86,9 +86,21 @@ public sealed class LegacyDatabaseMigrationBaselineTests
         Assert.False(await TableExistsAsync(connection, "__EFMigrationsHistory"));
     }
 
-    private static Task<int> InsertAccountAsync(AppDbContext db, string phone)
+    private static async Task<int> InsertAccountAsync(AppDbContext db, string phone)
     {
-        return db.Database.ExecuteSqlInterpolatedAsync($$"""
+        var hasDisplayNumber = await ColumnExistsAsync((SqliteConnection)db.Database.GetDbConnection(), "Accounts", "DisplayNumber");
+        if (hasDisplayNumber)
+        {
+            return await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO "Accounts"
+                    ("DisplayNumber", "Phone", "UserId", "SessionPath", "ApiId", "ApiHash", "IsActive", "CreatedAt", "LastSyncAt")
+                VALUES
+                    (1, {{phone}}, 10001, 'sessions/baseline.session', 1, 'hash', 1,
+                     '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+                """);
+        }
+
+        return await db.Database.ExecuteSqlInterpolatedAsync($$"""
             INSERT INTO "Accounts"
                 ("Phone", "UserId", "SessionPath", "ApiId", "ApiHash", "IsActive", "CreatedAt", "LastSyncAt")
             VALUES

@@ -90,11 +90,10 @@ function finish(action: 'cancel' | 'continue' | 'exclude') {
 function onClosed() {
   if (!finished) emit('cancel')
 }
-
 function accountLabel(account: RiskAccount) {
-  const hours = account.riskReferenceHours == null ? null : `${account.riskReferenceHours.toFixed(1)} 小时`
   const source = account.isEstimated ? '导入' : '登录'
-  return hours ? `${account.displayPhone}（${source} ${hours}）` : account.displayPhone
+  const hours = account.riskReferenceHours === null || account.riskReferenceHours === undefined ? null : account.riskReferenceHours.toFixed(1)
+  return hours ? `#${account.displayNumber} ${account.displayPhone}（${source} ${hours} 小时）` : `#${account.displayNumber} ${account.displayPhone}`
 }
 </script>
 
