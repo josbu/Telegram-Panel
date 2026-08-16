@@ -667,10 +667,11 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
     private static void ValidateAndNormalizeConfig(UserChatActiveTaskConfig config)
     {
         config.CategoryIds = NormalizeSelectedCategoryIds(config);
-        if (config.CategoryIds.Count == 0)
-            throw new InvalidOperationException("任务缺少账号分类");
+        config.AccountNumbers = NormalizeAccountNumbers(config.AccountNumbers);
+        if (config.CategoryIds.Count == 0 && config.AccountNumbers.Count == 0)
+            throw new InvalidOperationException("任务缺少账号分类或账号编号");
 
-        config.CategoryId = config.CategoryIds[0];
+        config.CategoryId = config.CategoryIds.FirstOrDefault();
         config.CategoryNames = NormalizeSelectedCategoryNames(config);
         config.CategoryName = config.CategoryNames.FirstOrDefault() ?? config.CategoryName;
 
@@ -803,6 +804,12 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         return ids;
     }
 
+    private static List<int> NormalizeAccountNumbers(IEnumerable<int>? accountNumbers) =>
+        (accountNumbers ?? Array.Empty<int>())
+        .Where(x => x > 0)
+        .Distinct()
+        .ToList();
+
     private static List<string> NormalizeSelectedCategoryNames(UserChatActiveTaskConfig config)
     {
         var names = (config.CategoryNames ?? new List<string>())
@@ -921,14 +928,18 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
             return PrepareAccountSlotsResult.Failed("任务缺少目标群组/频道/Bot");
 
         var selectedCategoryIds = NormalizeSelectedCategoryIds(config).ToHashSet();
+        var selectedAccountNumbers = NormalizeAccountNumbers(config.AccountNumbers).ToHashSet();
         var allAccounts = (await accountManagement.GetAllAccountsAsync())
             .Where(x => x.IsActive && x.UserId > 0 && x.Category?.ExcludeFromOperations != true)
-            .Where(x => x.CategoryId.HasValue && selectedCategoryIds.Contains(x.CategoryId.Value))
-            .OrderBy(x => x.Id)
+            .Where(x =>
+                (x.CategoryId.HasValue && selectedCategoryIds.Contains(x.CategoryId.Value))
+                || selectedAccountNumbers.Contains(x.DisplayNumber))
+            .OrderBy(x => x.DisplayNumber)
+            .ThenBy(x => x.Id)
             .ToList();
 
         if (allAccounts.Count == 0)
-            return PrepareAccountSlotsResult.Failed("所选分类下没有可用执行账号");
+            return PrepareAccountSlotsResult.Failed("所选账号分类或账号编号下没有可用执行账号");
 
         var accountSlots = new List<AccountSlot>();
         foreach (var account in allAccounts)

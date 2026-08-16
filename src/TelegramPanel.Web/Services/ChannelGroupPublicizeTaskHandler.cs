@@ -32,14 +32,18 @@ public sealed class ChannelGroupPublicizeTaskHandler : IModuleTaskHandler
         var assetStorage = host.Services.GetRequiredService<ImageAssetStorageService>();
 
         var selectedCategoryIds = config.CategoryIds.Where(x => x > 0).ToHashSet();
+        var selectedAccountNumbers = config.AccountNumbers.Where(x => x > 0).ToHashSet();
         var accounts = (await accountManagement.GetActiveAccountsAsync())
             .Where(x => x.UserId > 0)
-            .Where(x => x.CategoryId.HasValue && selectedCategoryIds.Contains(x.CategoryId.Value))
+            .Where(x =>
+                (x.CategoryId.HasValue && selectedCategoryIds.Contains(x.CategoryId.Value))
+                || selectedAccountNumbers.Contains(x.DisplayNumber))
             .Where(x => x.Category?.ExcludeFromOperations != true)
-            .OrderBy(x => x.Id)
+            .OrderBy(x => x.DisplayNumber)
+            .ThenBy(x => x.Id)
             .ToList();
         if (accounts.Count == 0)
-            throw new InvalidOperationException("所选账号分类下没有可用账号");
+            throw new InvalidOperationException("所选账号分类或账号编号下没有可用账号");
 
         var now = DateTime.UtcNow;
         var processed = 0;
@@ -246,8 +250,12 @@ public sealed class ChannelGroupPublicizeTaskHandler : IModuleTaskHandler
             .Where(x => x > 0)
             .Distinct()
             .ToList();
-        if (config.CategoryIds.Count == 0)
-            throw new InvalidOperationException("请至少选择一个账号分类");
+        config.AccountNumbers = (config.AccountNumbers ?? new List<int>())
+            .Where(x => x > 0)
+            .Distinct()
+            .ToList();
+        if (config.CategoryIds.Count == 0 && config.AccountNumbers.Count == 0)
+            throw new InvalidOperationException("请至少选择账号分类或填写账号编号");
 
         config.TargetType = string.Equals(config.TargetType, ChannelGroupAutomationTaskObjectTypes.Group, StringComparison.OrdinalIgnoreCase)
             ? ChannelGroupAutomationTaskObjectTypes.Group

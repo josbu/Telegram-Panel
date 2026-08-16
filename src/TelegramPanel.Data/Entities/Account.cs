@@ -8,6 +8,11 @@ namespace TelegramPanel.Data.Entities;
 public class Account
 {
     public int Id { get; set; }
+    /// <summary>
+    /// 用户可见的账号编号。删除账号后编号可被后续新账号复用；内部执行仍使用 Id。
+    /// </summary>
+    public int DisplayNumber { get; set; }
+
     public string Phone { get; set; } = null!;
 
     private string? _displayPhone;

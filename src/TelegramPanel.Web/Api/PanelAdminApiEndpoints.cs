@@ -2252,6 +2252,7 @@ public static class PanelAdminApiEndpoints
         var items = (await accounts.GetAllAccountsAsync())
             .Where(x => x.Category?.ExcludeFromOperations != true)
             .OrderByDescending(x => x.IsActive)
+            .ThenBy(x => x.DisplayNumber)
             .ThenBy(x => x.DisplayPhone, StringComparer.OrdinalIgnoreCase)
             .Select(ToOperationAccountDto)
             .ToList();
@@ -5767,6 +5768,7 @@ public static class PanelAdminApiEndpoints
     private static AccountDetailDto ToDetailDto(Account account) =>
         new(
             account.Id,
+            account.DisplayNumber,
             account.DisplayPhone,
             account.Phone,
             account.Nickname,
@@ -5785,6 +5787,7 @@ public static class PanelAdminApiEndpoints
     private static AccountListItemDto ToDto(Account account) =>
         new(
             account.Id,
+            account.DisplayNumber,
             account.DisplayPhone,
             account.Nickname,
             account.Username,
@@ -5820,6 +5823,7 @@ public static class PanelAdminApiEndpoints
         var hours = account.GetRiskReferenceHours();
         return new RiskAccountDto(
             account.Id,
+            account.DisplayNumber,
             account.DisplayPhone,
             hours,
             account.IsRiskReferenceEstimated());
@@ -6039,7 +6043,7 @@ public static class PanelAdminApiEndpoints
             channel.MemberCount);
 
     private static OperationAccountDto ToOperationAccountDto(Account account) =>
-        new(account.Id, account.DisplayPhone, account.Nickname, account.Username, account.IsActive, account.CategoryId, account.Category?.Name);
+        new(account.Id, account.DisplayNumber, account.DisplayPhone, account.Nickname, account.Username, account.IsActive, account.CategoryId, account.Category?.Name);
 
     private static ChatAdminDto ToDto(ChannelAdminInfo admin) =>
         new(
@@ -7592,6 +7596,7 @@ public sealed record DashboardSummaryDto(
 public sealed record AccountCategoryDto(int Id, string Name, string? Color, string? Description, bool ExcludeFromOperations, int AccountCount);
 public sealed record AccountListItemDto(
     int Id,
+    int DisplayNumber,
     string DisplayPhone,
     string? Nickname,
     string? Username,
@@ -7624,6 +7629,7 @@ public sealed record AccountProxySummaryDto(
 
 public sealed record AccountDetailDto(
     int Id,
+    int DisplayNumber,
     string DisplayPhone,
     string Phone,
     string? Nickname,
@@ -7701,6 +7707,7 @@ public sealed record InviteExecuteAccountScope(
 
 public sealed record RiskAccountDto(
     int Id,
+    int DisplayNumber,
     string DisplayPhone,
     double? RiskReferenceHours,
     bool IsEstimated);
@@ -8114,6 +8121,7 @@ public sealed record BotChatOptionDto(
 
 public sealed record OperationAccountDto(
     int Id,
+    int DisplayNumber,
     string DisplayPhone,
     string? Nickname,
     string? Username,

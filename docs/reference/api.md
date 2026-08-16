@@ -24,6 +24,15 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 - `POST /api/panel/accounts/cleanup-waste`：复查并清理明确失效的账号
 - `GET /api/panel/accounts/{id}/devices`：读取账号在线设备
 
+自 v1.31.57 起，账号列表、账号详情、任务账号候选和风控确认中的账号 DTO 都返回
+`displayNumber`。这是面向用户展示和手工填写任务账号范围的账号编号；`id` 仍是内部数据库
+主键，只用于接口路径、权限校验和持久化关联。删除账号后，新账号可以复用空出的
+`displayNumber`，因此外部系统不得把它当作长期不可变主键。成功判据是
+`GET /api/panel/accounts` 与 `GET /api/panel/accounts/{id}` 同时返回正整数
+`displayNumber`，前端任务表单可用 `#编号` 选择账号。回滚到旧版前无需清理数据，但旧前端不会
+展示该字段。
+
+
 前端会为登录和导入请求明确携带 `proxyStrategy`；自定义调用也必须显式传入。省略策略、
 策略无效或所选代理不可用时，服务端会在连接 Telegram 前拒绝请求，不会回退直连。不要
 绕过这些入口自行先直连创建 Session。

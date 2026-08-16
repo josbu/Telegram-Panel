@@ -777,6 +777,8 @@ public IEnumerable<ModulePageDefinition> GetPages(ModuleHostContext context)
 ```
 
 如果模块已经有对应的 Vue 原生页面，就必须在模块里补齐管理端 API。否则 Vue 页面会请求不到接口，通常表现为 `404`，并回退到旧页面。
+在旧 Razor/Blazor 兼容页里，指向任务中心这类主后台路由时要打开顶层窗口，常用写法是 `/ui/tasks` 配合 `target="_top"`；不要在 iframe 里只调用 `Navigation.NavigateTo("/tasks")`，否则往往只会改掉嵌套页，看起来像“没反应”。
+
 
 ### 给 Vue 页面提供管理端 API
 
@@ -846,6 +848,8 @@ public IEnumerable<ModuleNavItem> GetNavItems(ModuleHostContext context)
 任务定义本身可以继续用于历史任务展示、状态能力和重跑能力，但“新建任务”只展示宿主明确允许创建的定义。当前宿主会把 `canCreate` 下发给 Vue 管理端；没有 `CreateRoute` 且存在宿主验证通过的 `EditorComponentType` 的定义才会进入任务创建列表，内置模块和外部模块都适用。
 
 仅有 `CreateRoute` 的常驻监听或配置模块不会出现在“新建任务”弹窗中。已有任务仍可在任务中心编辑；当没有宿主编辑器但定义声明了 `CreateRoute` 时，宿主会把 `taskId` 附加到该路由后打开模块页面。模块页面必须接受该参数，并按任务 ID 读取和保存对应配置。
+如果任务页是持续监控类路由入口，且希望任务中心允许编辑已有任务，就同时在 `TaskCenter` 中设置 `CanEdit=true` 和 `AutoPauseBeforeEdit=true`；模块页面需要读取 `taskId` 并把编辑结果写回对应任务。
+
 
 模块开发必须验证：无效编辑器类型不会进入创建列表，路由-only 任务仍能在任务中心打开，创建列表不包含系统任务，且 `canCreate` 与实际页面能力一致。
 
