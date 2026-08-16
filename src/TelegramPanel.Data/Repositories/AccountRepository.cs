@@ -32,23 +32,16 @@ public class AccountRepository : Repository<Account>, IAccountRepository
             // 允许用户直接粘贴 “+86 138 0013 8000” 等格式，统一提取纯数字后匹配 Phone 字段
             var phoneDigits = NormalizeDigits(search);
             var phoneLike = phoneDigits.Length > 0 ? $"%{phoneDigits}%" : like;
-            if (long.TryParse(search, out var uid) && uid > 0)
-            {
-                query = query.Where(a =>
-                    a.UserId == uid
-                    || EF.Functions.Like(a.Phone, phoneLike)
-                    || (a.Nickname != null && EF.Functions.Like(a.Nickname, like))
-                    || (a.Username != null && EF.Functions.Like(a.Username, like))
-                    || (a.Remark != null && EF.Functions.Like(a.Remark, like)));
-            }
-            else
-            {
-                query = query.Where(a =>
-                    EF.Functions.Like(a.Phone, phoneLike)
-                    || (a.Nickname != null && EF.Functions.Like(a.Nickname, like))
-                    || (a.Username != null && EF.Functions.Like(a.Username, like))
-                    || (a.Remark != null && EF.Functions.Like(a.Remark, like)));
-            }
+            var normalizedNumberSearch = search.TrimStart('#');
+            var hasDisplayNumber = int.TryParse(normalizedNumberSearch, out var displayNumber) && displayNumber > 0;
+            var hasTelegramUserId = long.TryParse(search, out var uid) && uid > 0;
+            query = query.Where(a =>
+                (hasDisplayNumber && a.DisplayNumber == displayNumber)
+                || (hasTelegramUserId && a.UserId == uid)
+                || EF.Functions.Like(a.Phone, phoneLike)
+                || (a.Nickname != null && EF.Functions.Like(a.Nickname, like))
+                || (a.Username != null && EF.Functions.Like(a.Username, like))
+                || (a.Remark != null && EF.Functions.Like(a.Remark, like)));
         }
 
         if (onlyWaste)

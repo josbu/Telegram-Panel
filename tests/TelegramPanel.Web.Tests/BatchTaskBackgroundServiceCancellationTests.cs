@@ -48,6 +48,33 @@ public sealed class BatchTaskBackgroundServiceCancellationTests
         Assert.False(harness.Control.HasActiveExecution(1));
     }
 
+    [Fact]
+    public async Task 并发设置热更新后会启动额外等待任务()
+    {
+        using var harness = CreateHarness(
+            handlerWaitsForRelease: true,
+            initialMaxConcurrent: 1,
+            taskCount: 2);
+
+        await harness.Service.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAsync(() => harness.Handler.CallCount == 1, TimeSpan.FromSeconds(6));
+            Assert.Equal("running", harness.Repository.GetStatus(1));
+            Assert.Equal("pending", harness.Repository.GetStatus(2));
+
+            harness.Configuration["BatchTasks:MaxConcurrent"] = "2";
+
+            await WaitUntilAsync(() => harness.Handler.CallCount == 2, TimeSpan.FromSeconds(4));
+            Assert.Equal("running", harness.Repository.GetStatus(2));
+        }
+        finally
+        {
+            harness.Handler.AllowReturn.TrySetResult();
+            await harness.Service.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static async Task AssertStoppedBeforeHandlerAsync(bool cancel)
     {
         using var harness = CreateHarness();
@@ -72,7 +99,7 @@ public sealed class BatchTaskBackgroundServiceCancellationTests
         Assert.False(harness.Control.HasActiveExecution(1));
     }
 
-    private static TestHarness CreateHarness(bool handlerWaitsForRelease = false)
+    private static TestHarness CreateHarness(bool handlerWaitsForRelease = false, int initialMaxConcurrent = 1, int taskCount = 1)
     {
         var baseOutputPath = Path.Combine(
             Path.GetTempPath(),
@@ -83,19 +110,24 @@ public sealed class BatchTaskBackgroundServiceCancellationTests
             {
                 ["Storage:RootPath"] = baseOutputPath,
                 ["BatchTasks:ExecutionStopTimeoutSeconds"] = "2",
-                ["BatchTasks:HistoryRetentionLimit"] = "0"
+                ["BatchTasks:HistoryRetentionLimit"] = "0",
+                ["BatchTasks:MaxConcurrent"] = initialMaxConcurrent.ToString(),
+                ["BatchTasks:PollIntervalSeconds"] = "1"
             })
             .Build();
 
         var repository = new TestBatchTaskRepository();
-        repository.Seed(new BatchTask
+        for (var id = 1; id <= taskCount; id++)
         {
-            Id = 1,
-            TaskType = "test",
-            Status = "pending",
-            Total = 1,
-            CreatedAt = DateTime.UtcNow
-        });
+            repository.Seed(new BatchTask
+            {
+                Id = id,
+                TaskType = "test",
+                Status = "pending",
+                Total = 1,
+                CreatedAt = DateTime.UtcNow.AddMilliseconds(id)
+            });
+        }
 
         var handler = new RecordingTaskHandler(handlerWaitsForRelease);
         var services = new ServiceCollection();
@@ -117,7 +149,8 @@ public sealed class BatchTaskBackgroundServiceCancellationTests
             repository,
             handler,
             provider.GetRequiredService<BatchTaskExecutionControlService>(),
-            provider.GetRequiredService<BatchTaskBackgroundService>());
+            provider.GetRequiredService<BatchTaskBackgroundService>(),
+            configuration);
     }
 
     private static Task InvokeRunTaskAsync(
@@ -137,9 +170,9 @@ public sealed class BatchTaskBackgroundServiceCancellationTests
         return Assert.IsAssignableFrom<Task>(result);
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition)
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan? timeout = null)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(2);
+        var deadline = DateTime.UtcNow.Add(timeout ?? TimeSpan.FromSeconds(2));
         while (!condition())
         {
             if (DateTime.UtcNow >= deadline)
@@ -157,19 +190,22 @@ public sealed class BatchTaskBackgroundServiceCancellationTests
             TestBatchTaskRepository repository,
             RecordingTaskHandler handler,
             BatchTaskExecutionControlService control,
-            BatchTaskBackgroundService service)
+            BatchTaskBackgroundService service,
+            IConfigurationRoot configuration)
         {
             _provider = provider;
             Repository = repository;
             Handler = handler;
             Control = control;
             Service = service;
+            Configuration = configuration;
         }
 
         public TestBatchTaskRepository Repository { get; }
         public RecordingTaskHandler Handler { get; }
         public BatchTaskExecutionControlService Control { get; }
         public BatchTaskBackgroundService Service { get; }
+        public IConfigurationRoot Configuration { get; }
 
         public void Dispose() => _provider.Dispose();
     }
@@ -402,6 +438,24 @@ public sealed class BatchTaskBackgroundServiceCancellationTests
                 task => task.Status is "paused" or "completed" or "failed" or "canceled",
                 task =>
                 {
+                    task.Total = total;
+                    task.Config = config;
+                }));
+        }
+
+        public Task<bool> TryUpdateEditableDraftAsync(
+            int id,
+            int total,
+            string? config,
+            string? name,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Transition(id,
+                task => task.Status is "paused" or "completed" or "failed" or "canceled",
+                task =>
+                {
+                    task.Name = name;
                     task.Total = total;
                     task.Config = config;
                 }));

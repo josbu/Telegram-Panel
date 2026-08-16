@@ -243,6 +243,8 @@ await taskManagement.UpdateTaskConfigAsync(
 
 如果模块页面没有走任务中心的“Cron 计划”创建入口，而是自己直接 `CreateTaskAsync(...)`，那它创建出来的就只是普通批量任务，不会自动变成计划任务。
 
+任务中心创建普通批量任务时可传 `name` 作为用户可读任务名称，宿主会写入 `BatchTasks.Name` 并在执行中/历史任务列表优先展示；名称可空，留空时前端按“任务类型 #ID”兜底。模块或自动化调用编辑已有批量任务时，如果不想改变名称应省略 `name` 字段；传空字符串表示清空名称。名称最长 100 个字符，超过时宿主应返回可展示的校验错误。
+
 ### 6）持续任务的停止条件要写清楚
 
 模块作者最好明确区分以下几种结束原因：
@@ -775,6 +777,8 @@ public IEnumerable<ModulePageDefinition> GetPages(ModuleHostContext context)
 ```
 
 如果模块已经有对应的 Vue 原生页面，就必须在模块里补齐管理端 API。否则 Vue 页面会请求不到接口，通常表现为 `404`，并回退到旧页面。
+在旧 Razor/Blazor 兼容页里，指向任务中心这类主后台路由时要打开顶层窗口，常用写法是 `/ui/tasks` 配合 `target="_top"`；不要在 iframe 里只调用 `Navigation.NavigateTo("/tasks")`，否则往往只会改掉嵌套页，看起来像“没反应”。
+
 
 ### 给 Vue 页面提供管理端 API
 
@@ -844,6 +848,8 @@ public IEnumerable<ModuleNavItem> GetNavItems(ModuleHostContext context)
 任务定义本身可以继续用于历史任务展示、状态能力和重跑能力，但“新建任务”只展示宿主明确允许创建的定义。当前宿主会把 `canCreate` 下发给 Vue 管理端；没有 `CreateRoute` 且存在宿主验证通过的 `EditorComponentType` 的定义才会进入任务创建列表，内置模块和外部模块都适用。
 
 仅有 `CreateRoute` 的常驻监听或配置模块不会出现在“新建任务”弹窗中。已有任务仍可在任务中心编辑；当没有宿主编辑器但定义声明了 `CreateRoute` 时，宿主会把 `taskId` 附加到该路由后打开模块页面。模块页面必须接受该参数，并按任务 ID 读取和保存对应配置。
+如果任务页是持续监控类路由入口，且希望任务中心允许编辑已有任务，就同时在 `TaskCenter` 中设置 `CanEdit=true` 和 `AutoPauseBeforeEdit=true`；模块页面需要读取 `taskId` 并把编辑结果写回对应任务。
+
 
 模块开发必须验证：无效编辑器类型不会进入创建列表，路由-only 任务仍能在任务中心打开，创建列表不包含系统任务，且 `canCreate` 与实际页面能力一致。
 
@@ -973,6 +979,8 @@ public IEnumerable<ModuleTaskDefinition> GetTasks(ModuleHostContext context)
 这些宿主方法会对 `A task was canceled`、连接关闭、代理断开等瞬时连接错误执行一次客户端重建重试；调用方取消任务时仍会传播取消，不会被当作普通失败。
 
 `user_chat_active` 账号持续活跃任务的目标字段也使用同一套目标解析边界：群组/频道链接按聊天目标解析，`@xxxbot`、`t.me/xxxbot?start=abc` 和 `tg://resolve?domain=xxxbot` 会解析为 Bot 私聊目标。自 v1.31.55 起，消息配置使用 `message_rules` 数组；每条规则由多行 `text` 和可选的单个 `image_dictionary_token` 组成，执行器按 `message_mode` 对整条规则随机或队列循环。规则可为纯文字、纯图片或图片加说明文字，内部换行必须原样保留。模块编辑器保存时同时维护旧版 `dictionary`，且仅在所有规则共享同一个非空图片字典时维护全局 `image_dictionary_token`；读取时若 `message_rules` 为空，则从这两个旧字段迁移。前置条件是目标和引用字典均可由宿主模板服务解析；成功判据是创建、重跑和实际执行使用同一套规则归一化结果。无效图片字典应在创建或启动阶段失败，不得静默降级。回滚到 v1.31.54 或更早版本前，应把配置收敛为纯文字或所有规则共享同一图片字典，否则旧版无法完整表达每条独立图片字典。图片字典只适用于群组/频道等支持媒体发送的目标；Bot 私聊保活建议使用文字规则。
+
+自 v1.31.56 起，`user_chat_active` 增加发送动作合同：`message_action_mode=send_generated_text|forward_url`。默认 `send_generated_text` 保持原规则发送，并可通过 `reply_to_message_url` 让文字/图片消息回复目标内的指定消息；前端只填写 Telegram 消息链接并从链接提取消息 ID，原始 API 仍兼容 `reply_to_message_id`，但不再作为界面字段展示。`forward_url` 会忽略 `message_rules`、`dictionary`、图片字典和 AI 验证，改用 `forward_source_urls` 作为来源消息链接列表后调用 Telegram 原生转发；前端不展示内容模式，来源选择按默认随机策略保存，API 自动化如需队列选择仍可显式传 `message_mode=queue`。`forward_mode=with_attribution|hide_attribution` 控制是否保留原作者引用。`skip_if_last_message_from_self=true` 时，执行器会在每次发送或转发前读取目标最新普通消息，若该消息仍由当前执行账号发出，则把本轮记为已处理但不发送，用于避免同账号连续刷屏。前置条件是执行账号能访问来源消息和目标会话；成功判据是任务详情显示发送动作、来源数或回复链接，开启去重时同账号连续发言会跳过本轮，实际发送返回 Telegram 消息 ID。失败排查先看 `recent_failures.reason`，常见原因为回复/来源链接无消息 ID、账号无权访问来源、目标无权发言、回复消息在目标中不存在，或开启去重后无法读取目标最新消息。回滚到 v1.31.55 或更早版本前，应把任务改回 `send_generated_text` 并关闭去重，否则旧版只会按空消息规则处理转发配置且不识别去重字段。
 
 ### 3) 使用 `CreateRoute` 提供自定义创建页
 

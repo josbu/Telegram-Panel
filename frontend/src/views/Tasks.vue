@@ -197,23 +197,23 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="createDialog.visible" title="新建任务" width="760px" destroy-on-close>
+    <el-dialog v-model="createDialog.visible" title="新建任务" width="min(760px, calc(100vw - 24px))" destroy-on-close>
       <el-alert
         title="立即执行会创建一条后台执行记录；Cron 计划会在任务中心的计划任务区域持续调度。"
         type="info"
         :closable="false"
         class="mb-3"
       />
-      <el-form label-width="96px">
+      <el-form :label-position="isTaskDialogCompact ? 'top' : 'right'" :label-width="isTaskDialogCompact ? 'auto' : '96px'">
         <el-row :gutter="12">
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item label="任务分类">
               <el-select v-model="createDialog.form.category" class="full" @change="ensureTaskType">
                 <el-option v-for="category in creatableCategories" :key="category" :label="categoryName(category)" :value="category" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item label="任务类型">
               <el-select v-model="createDialog.form.taskType" class="full" @change="onTaskTypeChanged">
                 <el-option v-for="item in creatableDefinitions" :key="item.taskType" :label="item.displayName" :value="item.taskType" />
@@ -222,12 +222,21 @@
           </el-col>
         </el-row>
         <el-form-item label="提交方式">
-          <el-radio-group v-model="createDialog.form.mode">
+          <el-radio-group v-model="createDialog.form.mode" @change="onCreateModeChanged">
             <el-radio-button label="once">立即执行</el-radio-button>
             <el-radio-button label="scheduled">Cron 计划</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-alert v-if="currentCreateDefinition?.description" :title="currentCreateDefinition.description" type="info" :closable="false" class="mb-3" />
+        <el-form-item v-if="!currentCreateTarget" label="任务名称">
+          <el-input
+            v-model="createDialog.form.name"
+            maxlength="100"
+            show-word-limit
+            placeholder="可选，留空则显示任务类型和 ID"
+          />
+        </el-form-item>
+
 
         <template v-if="currentCreateTarget">
           <el-alert
@@ -251,14 +260,6 @@
         />
 
         <template v-if="!currentCreateTarget && createDialog.form.mode === 'scheduled'">
-          <el-form-item label="任务名称">
-            <el-input
-              v-model="createDialog.form.name"
-              maxlength="100"
-              show-word-limit
-              placeholder="例如：工作日上午同步账号"
-            />
-          </el-form-item>
           <el-form-item label="Cron">
             <el-input v-model="createDialog.form.cronExpression" placeholder="0 9 * * *" />
           </el-form-item>
@@ -311,23 +312,31 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailDialog.visible" :title="detailDialog.title" width="720px">
+    <el-dialog v-model="detailDialog.visible" :title="detailDialog.title" width="min(720px, calc(100vw - 24px))">
       <pre class="detail-pre">{{ detailDialog.content }}</pre>
       <template #footer>
         <el-button type="primary" @click="detailDialog.visible = false">关闭</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="editTaskDialog.visible" :title="`编辑任务 #${editTaskDialog.id}`" width="760px" destroy-on-close>
+    <el-dialog v-model="editTaskDialog.visible" :title="`编辑任务 #${editTaskDialog.id}`" width="min(760px, calc(100vw - 24px))" destroy-on-close>
       <el-alert
         title="编辑会更新当前任务配置；若任务已完成或失败，可保存后使用重跑创建新任务。"
         type="info"
         :closable="false"
         class="mb-3"
       />
-      <el-form label-width="96px">
+      <el-form :label-position="isTaskDialogCompact ? 'top' : 'right'" :label-width="isTaskDialogCompact ? 'auto' : '96px'">
         <el-form-item label="任务类型">
           <el-input :model-value="taskName(editTaskDialog.form.taskType)" disabled />
+        </el-form-item>
+        <el-form-item label="任务名称">
+          <el-input
+            v-model="editTaskDialog.form.name"
+            maxlength="100"
+            show-word-limit
+            placeholder="可选，留空则显示任务类型和 ID"
+          />
         </el-form-item>
         <TaskConfigForm
           v-if="hasTaskConfigForm(editTaskDialog.form.taskType)"
@@ -413,6 +422,7 @@ import type { BatchTask, ScheduledTask, TaskDefinition } from '@/api/types'
 import StatusTag from '@/components/StatusTag.vue'
 import TaskConfigForm, { type TaskConfigDraft } from '@/components/TaskConfigForm.vue'
 import { formatTime, taskProgress } from '@/utils/format'
+import { useMediaQuery } from '@/utils/useMediaQuery'
 
 const loading = ref(false)
 const router = useRouter()
@@ -428,6 +438,7 @@ const historyPageSize = ref(50)
 const hasLoaded = ref(false)
 let timer: number | undefined
 let loadPromise: Promise<void> | null = null
+const isTaskDialogCompact = useMediaQuery('(max-width: 640px)')
 
 const needsAutoRefresh = computed(() =>
   tasks.value.some((task) => isActiveStatus(displayStatus(task)))
@@ -445,6 +456,7 @@ const cronPresets = [
 const createDialog = ref({
   visible: false,
   saving: false,
+  sourceTaskId: 0,
   form: {
     category: '',
     taskType: '',
@@ -476,6 +488,7 @@ const editTaskDialog = ref({
   id: 0,
   form: {
     taskType: '',
+    name: '',
     total: 0,
     config: '',
   },
@@ -675,17 +688,28 @@ function openCreateDialog() {
 function ensureTaskType() {
   const first = creatableDefinitions.value[0]
   createDialog.value.form.taskType = first?.taskType || ''
-  createDialog.value.form.name = taskName(createDialog.value.form.taskType)
+  createDialog.value.form.name = ''
   createDialog.value.form.config = ''
   createDialog.value.form.total = defaultTotalForTask(createDialog.value.form.taskType)
   createDraft.value = emptyDraft()
 }
 
 function onTaskTypeChanged() {
-  createDialog.value.form.name = taskName(createDialog.value.form.taskType)
+  createDialog.value.form.name = ''
   createDialog.value.form.config = ''
   createDialog.value.form.total = defaultTotalForTask(createDialog.value.form.taskType)
   createDraft.value = emptyDraft()
+}
+
+function onCreateModeChanged(mode: string | number | boolean | undefined) {
+  const defaultName = taskName(createDialog.value.form.taskType)
+  if (mode === 'scheduled' && !createDialog.value.form.name.trim()) {
+    createDialog.value.form.name = defaultName
+    return
+  }
+  if (mode === 'once' && createDialog.value.form.name.trim() === defaultName) {
+    createDialog.value.form.name = ''
+  }
 }
 
 async function submitCreate() {
@@ -722,13 +746,13 @@ async function submitCreate() {
     ElMessage.warning('请填写计划任务名称')
     return
   }
-  form.name = form.name.trim()
-
+  const taskDisplayName = form.name.trim()
+  form.name = taskDisplayName
   createDialog.value.saving = true
   try {
     if (form.mode === 'scheduled') {
       await panelApi.createScheduledTask({
-        name: form.name,
+        name: taskDisplayName,
         taskType: form.taskType,
         total,
         configJson: config,
@@ -739,6 +763,7 @@ async function submitCreate() {
     } else {
       await panelApi.createTask({
         taskType: form.taskType,
+        name: taskDisplayName || null,
         total,
         config,
       })
@@ -884,6 +909,7 @@ async function openEditTask(task: BatchTask) {
     id: fullTask.id,
     form: {
       taskType: fullTask.taskType,
+      name: fullTask.name?.trim() || '',
       total: Math.max(0, fullTask.total),
       config: fullTask.config || '',
     },
@@ -912,6 +938,7 @@ async function submitEditTask() {
   try {
     await panelApi.updateTask(dialog.id, {
       taskType: dialog.form.taskType,
+      name: dialog.form.name.trim(),
       total: Math.max(0, total),
       config: config || null,
     })
@@ -938,6 +965,7 @@ async function rerunTask(task: BatchTask) {
   const fullTask = await loadTaskDetail(task.id)
   await panelApi.createTask({
     taskType: fullTask.taskType,
+    name: fullTask.name?.trim() || null,
     total: Math.max(0, fullTask.total),
     config: fullTask.config ? stripRuntimeFields(fullTask.config) : null,
   })
@@ -1332,6 +1360,11 @@ function configKeyName(key: string) {
     image_dictionary_token: '图片字典',
     asset_scope_id: '资源作用域',
     targets: '目标',
+    message_action_mode: '发送动作',
+    reply_to_message_url: '回复消息链接',
+    forward_source_urls: '转发来源消息',
+    forward_mode: '转发方式',
+    skip_if_last_message_from_self: '去重发送',
     dictionary: '文字词典',
     message_rules: '消息规则',
     account_mode: '账号模式',
@@ -1472,6 +1505,11 @@ function buildUserChatActiveDetails(config: string) {
   const categoryText = buildSelectedCategorySummary(obj)
   const targetCount = Array.isArray(obj.targets) ? obj.targets.length : 0
   const dictionaryCount = Array.isArray(obj.dictionary) ? obj.dictionary.length : 0
+  const messageRuleCount = Array.isArray(obj.message_rules) && obj.message_rules.length > 0 ? obj.message_rules.length : dictionaryCount
+  const actionMode = String(obj.message_action_mode || 'send_generated_text')
+  const isForwardMode = actionMode === 'forward_url'
+  const forwardSourceCount = Array.isArray(obj.forward_source_urls) ? obj.forward_source_urls.length : 0
+  const skipIfLastMessageFromSelf = obj.skip_if_last_message_from_self === true
   const delayMin = Number(obj.delay_min_ms || 0)
   const delayMax = Number(obj.delay_max_ms || 0)
   const maxMessages = Number(obj.max_messages || 0)
@@ -1481,10 +1519,13 @@ function buildUserChatActiveDetails(config: string) {
     '配置摘要:',
     `分类: ${categoryText}`,
     `目标数: ${targetCount}`,
-    `词典数: ${dictionaryCount}`,
+    `发送动作: ${isForwardMode ? '转发消息链接' : '发送消息规则'}`,
+    isForwardMode ? `转发来源数: ${forwardSourceCount}` : `消息规则数: ${messageRuleCount}`,
+    isForwardMode ? `转发方式: ${obj.forward_mode === 'hide_attribution' ? '不带引用转发' : '带引用转发'}` : `回复消息: ${String(obj.reply_to_message_url || '').trim() || '未设置'}`,
+    `去重发送: ${skipIfLastMessageFromSelf ? '启用（上一条仍是当前账号则跳过）' : '关闭'}`,
     `账号模式: ${normalizeTaskModeDisplay(obj.account_mode)}`,
     `目标模式: ${normalizeTaskModeDisplay(obj.target_mode)}`,
-    `消息规则模式: ${normalizeTaskModeDisplay(obj.message_mode)}`,
+    ...(isForwardMode ? [] : [`内容模式: ${normalizeTaskModeDisplay(obj.message_mode)}`]),
     `间隔: ${formatDelaySeconds(delayMin)} ~ ${formatDelaySeconds(delayMax)} 秒`,
     `最多发送: ${maxMessages <= 0 ? '持续运行（直到取消）' : maxMessages}`,
   ]

@@ -2252,6 +2252,7 @@ public static class PanelAdminApiEndpoints
         var items = (await accounts.GetAllAccountsAsync())
             .Where(x => x.Category?.ExcludeFromOperations != true)
             .OrderByDescending(x => x.IsActive)
+            .ThenBy(x => x.DisplayNumber)
             .ThenBy(x => x.DisplayPhone, StringComparer.OrdinalIgnoreCase)
             .Select(ToOperationAccountDto)
             .ToList();
@@ -5148,8 +5149,13 @@ public static class PanelAdminApiEndpoints
         BatchTaskManagementService tasks)
     {
         ValidateTaskSubmission(request.TaskType, request.Config);
+        var nameResult = TryNormalizeBatchTaskName(request.Name, out var taskName);
+        if (nameResult != null)
+            return nameResult;
+
         var task = await tasks.CreateTaskAsync(new BatchTask
         {
+            Name = taskName,
             TaskType = request.TaskType.Trim(),
             Total = Math.Max(0, request.Total),
             Completed = 0,
@@ -5178,10 +5184,23 @@ public static class PanelAdminApiEndpoints
         if (!string.Equals(existing.TaskType, request.TaskType?.Trim(), StringComparison.OrdinalIgnoreCase))
             return Results.BadRequest(new OperationResultDto(false, "不允许修改任务类型"));
 
+        string? taskName;
+        if (request.Name == null)
+        {
+            taskName = existing.Name;
+        }
+        else
+        {
+            var nameResult = TryNormalizeBatchTaskName(request.Name, out taskName);
+            if (nameResult != null)
+                return nameResult;
+        }
+
         var updatedDraft = await tasks.TryUpdateEditableTaskDraftAsync(
             id,
             Math.Max(0, request.Total),
             NormalizeNullable(request.Config),
+            taskName,
             cancellationToken);
         if (!updatedDraft)
             return Results.Conflict(new OperationResultDto(false, "任务状态已变化，请暂停任务后重新编辑"));
@@ -5749,6 +5768,7 @@ public static class PanelAdminApiEndpoints
     private static AccountDetailDto ToDetailDto(Account account) =>
         new(
             account.Id,
+            account.DisplayNumber,
             account.DisplayPhone,
             account.Phone,
             account.Nickname,
@@ -5767,6 +5787,7 @@ public static class PanelAdminApiEndpoints
     private static AccountListItemDto ToDto(Account account) =>
         new(
             account.Id,
+            account.DisplayNumber,
             account.DisplayPhone,
             account.Nickname,
             account.Username,
@@ -5802,6 +5823,7 @@ public static class PanelAdminApiEndpoints
         var hours = account.GetRiskReferenceHours();
         return new RiskAccountDto(
             account.Id,
+            account.DisplayNumber,
             account.DisplayPhone,
             hours,
             account.IsRiskReferenceEstimated());
@@ -6021,7 +6043,7 @@ public static class PanelAdminApiEndpoints
             channel.MemberCount);
 
     private static OperationAccountDto ToOperationAccountDto(Account account) =>
-        new(account.Id, account.DisplayPhone, account.Nickname, account.Username, account.IsActive, account.CategoryId, account.Category?.Name);
+        new(account.Id, account.DisplayNumber, account.DisplayPhone, account.Nickname, account.Username, account.IsActive, account.CategoryId, account.Category?.Name);
 
     private static ChatAdminDto ToDto(ChannelAdminInfo admin) =>
         new(
@@ -6875,6 +6897,14 @@ public static class PanelAdminApiEndpoints
             System.Text.Json.JsonDocument.Parse(config);
     }
 
+    private static IResult? TryNormalizeBatchTaskName(string? value, out string? name)
+    {
+        name = NormalizeNullable(value);
+        return name is { Length: > 100 }
+            ? Results.BadRequest(new OperationResultDto(false, "任务名称不能超过 100 个字符"))
+            : null;
+    }
+
     private static string? NormalizeNullable(string? value)
     {
         var text = (value ?? string.Empty).Trim();
@@ -7566,6 +7596,7 @@ public sealed record DashboardSummaryDto(
 public sealed record AccountCategoryDto(int Id, string Name, string? Color, string? Description, bool ExcludeFromOperations, int AccountCount);
 public sealed record AccountListItemDto(
     int Id,
+    int DisplayNumber,
     string DisplayPhone,
     string? Nickname,
     string? Username,
@@ -7598,6 +7629,7 @@ public sealed record AccountProxySummaryDto(
 
 public sealed record AccountDetailDto(
     int Id,
+    int DisplayNumber,
     string DisplayPhone,
     string Phone,
     string? Nickname,
@@ -7675,6 +7707,7 @@ public sealed record InviteExecuteAccountScope(
 
 public sealed record RiskAccountDto(
     int Id,
+    int DisplayNumber,
     string DisplayPhone,
     double? RiskReferenceHours,
     bool IsEstimated);
@@ -7812,8 +7845,8 @@ public sealed record StartAccountQrLoginRequestDto(
 public sealed record AccountLoginSessionRequestDto(int LoginId);
 public sealed record AccountLoginCodeRequestDto(int LoginId, string? Code);
 public sealed record AccountLoginPasswordRequestDto(int LoginId, string? Password, bool? SaveTwoFactorPassword = null);
-public sealed record CreateTaskRequestDto(string TaskType, int Total, string? Config);
-public sealed record UpdateTaskRequestDto(string TaskType, int Total, string? Config);
+public sealed record CreateTaskRequestDto(string TaskType, int Total, string? Config, string? Name = null);
+public sealed record UpdateTaskRequestDto(string TaskType, int Total, string? Config, string? Name = null);
 public sealed record CreateScheduledTaskRequestDto(
     string TaskType,
     int Total,
@@ -8088,6 +8121,7 @@ public sealed record BotChatOptionDto(
 
 public sealed record OperationAccountDto(
     int Id,
+    int DisplayNumber,
     string DisplayPhone,
     string? Nickname,
     string? Username,

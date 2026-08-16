@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="task-config-form">
     <el-alert v-if="loading" title="正在加载配置项..." type="info" :closable="false" class="mb-3" />
 
     <template v-if="taskType === 'user_chat_active'">
@@ -9,15 +9,59 @@
         :closable="false"
         class="mb-3"
       />
-      <el-form-item label="账号分类">
-        <el-select v-model="forms.userChatActive.categoryIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择执行账号分类">
-          <el-option v-for="item in accountCategories" :key="item.id" :label="categoryLabel(item)" :value="item.id" />
-        </el-select>
-      </el-form-item>
+      <el-row :gutter="12" class="account-source-row">
+        <el-col :xs="24" :sm="8">
+          <el-form-item label="账号来源">
+            <el-select v-model="forms.userChatActive.accountSourceMode" class="full">
+              <el-option v-for="item in accountSourceOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-if="forms.userChatActive.accountSourceMode === 'category'" :xs="24" :sm="16">
+          <el-form-item label="账号分类">
+            <el-select v-model="forms.userChatActive.categoryIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择执行账号分类">
+              <el-option v-for="item in accountCategories" :key="item.id" :label="categoryLabel(item)" :value="item.id" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-else :xs="24" :sm="16">
+          <el-form-item label="账号编号">
+            <el-input v-model="forms.userChatActive.accountNumbersText" type="textarea" :rows="2" placeholder="支持 1、2、#3；一行或用逗号分隔" />
+            <div class="form-hint no-offset">账号编号是账号列表里的「编号」，删除账号后可复用。</div>
+          </el-form-item>
+        </el-col>
+      </el-row>
+
       <el-form-item label="目标">
         <el-input v-model="forms.userChatActive.targetsText" type="textarea" :rows="5" placeholder="每行一个群组/频道/Bot 链接、用户名或 ID" />
       </el-form-item>
-      <div class="message-rule-section">
+      <el-form-item label="发送动作">
+        <el-radio-group v-model="forms.userChatActive.messageActionMode">
+          <el-radio-button label="send_generated_text">发送消息规则</el-radio-button>
+          <el-radio-button label="forward_url">转发消息链接</el-radio-button>
+        </el-radio-group>
+        <div class="form-hint no-offset">发送消息规则可选回复指定消息；转发模式会把来源消息转发到目标，支持保留或隐藏引用来源。</div>
+      </el-form-item>
+      <el-form-item label="去重发送">
+        <el-switch v-model="forms.userChatActive.skipIfLastMessageFromSelf" active-text="启用" inactive-text="关闭" />
+        <div class="form-hint no-offset">启用后，发送前读取目标最新消息；如果上一条普通消息仍是当前执行账号发出的，本轮跳过不发送。</div>
+      </el-form-item>
+      <el-form-item v-if="forms.userChatActive.messageActionMode === 'send_generated_text'" label="回复消息链接">
+        <el-input v-model="forms.userChatActive.replyToMessageUrl" placeholder="可选，例如 https://t.me/channel/123；新消息会回复这条链接对应的消息" />
+      </el-form-item>
+      <template v-else>
+        <el-form-item label="转发来源消息链接">
+          <el-input v-model="forms.userChatActive.forwardSourceUrlsText" type="textarea" :rows="4" placeholder="每行一个 Telegram 消息链接，例如 https://t.me/channel/123 或 https://t.me/c/1234567890/123" />
+        </el-form-item>
+        <el-form-item label="转发方式">
+          <el-radio-group v-model="forms.userChatActive.forwardMode">
+            <el-radio-button label="with_attribution">带引用转发</el-radio-button>
+            <el-radio-button label="hide_attribution">不带引用转发</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+      </template>
+
+      <div v-if="forms.userChatActive.messageActionMode === 'send_generated_text'" class="message-rule-section">
         <div class="message-rule-toolbar">
           <div>
             <strong>消息规则</strong>
@@ -70,7 +114,7 @@
       </el-row>
 
       <el-row :gutter="12">
-        <el-col :span="8">
+        <el-col :span="forms.userChatActive.messageActionMode === 'send_generated_text' ? 8 : 12">
           <el-form-item label="账号模式">
             <el-select v-model="forms.userChatActive.accountMode" class="full">
               <el-option label="随机" value="random" />
@@ -78,7 +122,7 @@
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="8">
+        <el-col :span="forms.userChatActive.messageActionMode === 'send_generated_text' ? 8 : 12">
           <el-form-item label="目标模式">
             <el-select v-model="forms.userChatActive.targetMode" class="full">
               <el-option label="随机" value="random" />
@@ -86,8 +130,8 @@
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="8">
-          <el-form-item label="消息规则模式">
+        <el-col v-if="forms.userChatActive.messageActionMode === 'send_generated_text'" :span="8">
+          <el-form-item label="内容模式">
             <el-select v-model="forms.userChatActive.messageMode" class="full">
               <el-option label="随机" value="random" />
               <el-option label="队列循环" value="queue" />
@@ -96,10 +140,10 @@
         </el-col>
       </el-row>
 
-      <el-form-item label="AI 验证">
+      <el-form-item v-if="forms.userChatActive.messageActionMode === 'send_generated_text'" label="AI 验证">
         <el-switch v-model="forms.userChatActive.enableAiVerification" active-text="启用" inactive-text="关闭" />
       </el-form-item>
-      <template v-if="forms.userChatActive.enableAiVerification">
+      <template v-if="forms.userChatActive.messageActionMode === 'send_generated_text' && forms.userChatActive.enableAiVerification">
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="任务模型">
@@ -145,11 +189,29 @@
     </template>
 
     <template v-else-if="taskType === 'channel_group_private_create'">
-      <el-form-item label="账号分类">
-        <el-select v-model="forms.privateCreate.categoryIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择执行账号分类">
-          <el-option v-for="item in accountCategories" :key="item.id" :label="categoryLabel(item)" :value="item.id" />
-        </el-select>
-      </el-form-item>
+      <el-row :gutter="12" class="account-source-row">
+        <el-col :xs="24" :sm="8">
+          <el-form-item label="账号来源">
+            <el-select v-model="forms.privateCreate.accountSourceMode" class="full">
+              <el-option v-for="item in accountSourceOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-if="forms.privateCreate.accountSourceMode === 'category'" :xs="24" :sm="16">
+          <el-form-item label="账号分类">
+            <el-select v-model="forms.privateCreate.categoryIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择执行账号分类">
+              <el-option v-for="item in accountCategories" :key="item.id" :label="categoryLabel(item)" :value="item.id" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-else :xs="24" :sm="16">
+          <el-form-item label="账号编号">
+            <el-input v-model="forms.privateCreate.accountNumbersText" type="textarea" :rows="2" placeholder="支持 1、2、#3；一行或用逗号分隔" />
+            <div class="form-hint no-offset">账号编号是账号列表里的「编号」，删除账号后可复用。</div>
+          </el-form-item>
+        </el-col>
+      </el-row>
+
       <el-form-item label="创建对象">
         <el-radio-group v-model="forms.privateCreate.createType">
           <el-radio-button label="channel">频道</el-radio-button>
@@ -211,11 +273,29 @@
     </template>
 
     <template v-else-if="taskType === 'channel_group_publicize'">
-      <el-form-item label="账号分类">
-        <el-select v-model="forms.publicize.categoryIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择执行账号分类">
-          <el-option v-for="item in accountCategories" :key="item.id" :label="categoryLabel(item)" :value="item.id" />
-        </el-select>
-      </el-form-item>
+      <el-row :gutter="12" class="account-source-row">
+        <el-col :xs="24" :sm="8">
+          <el-form-item label="账号来源">
+            <el-select v-model="forms.publicize.accountSourceMode" class="full">
+              <el-option v-for="item in accountSourceOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-if="forms.publicize.accountSourceMode === 'category'" :xs="24" :sm="16">
+          <el-form-item label="账号分类">
+            <el-select v-model="forms.publicize.categoryIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择执行账号分类">
+              <el-option v-for="item in accountCategories" :key="item.id" :label="categoryLabel(item)" :value="item.id" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-else :xs="24" :sm="16">
+          <el-form-item label="账号编号">
+            <el-input v-model="forms.publicize.accountNumbersText" type="textarea" :rows="2" placeholder="支持 1、2、#3；一行或用逗号分隔" />
+            <div class="form-hint no-offset">账号编号是账号列表里的「编号」，删除账号后可复用。</div>
+          </el-form-item>
+        </el-col>
+      </el-row>
+
       <el-form-item label="处理对象">
         <el-radio-group v-model="forms.publicize.targetType">
           <el-radio-button label="channel">频道</el-radio-button>
@@ -308,11 +388,29 @@
         :closable="false"
         class="mb-3"
       />
-      <el-form-item label="账号分类">
-        <el-select v-model="forms.autoLoginEmail.categoryIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择执行账号分类">
-          <el-option v-for="item in accountCategories" :key="item.id" :label="categoryLabel(item)" :value="item.id" />
-        </el-select>
-      </el-form-item>
+      <el-row :gutter="12" class="account-source-row">
+        <el-col :xs="24" :sm="8">
+          <el-form-item label="账号来源">
+            <el-select v-model="forms.autoLoginEmail.accountSourceMode" class="full">
+              <el-option v-for="item in accountSourceOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-if="forms.autoLoginEmail.accountSourceMode === 'category'" :xs="24" :sm="16">
+          <el-form-item label="账号分类">
+            <el-select v-model="forms.autoLoginEmail.categoryIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择执行账号分类">
+              <el-option v-for="item in accountCategories" :key="item.id" :label="categoryLabel(item)" :value="item.id" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col v-else :xs="24" :sm="16">
+          <el-form-item label="账号编号">
+            <el-input v-model="forms.autoLoginEmail.accountNumbersText" type="textarea" :rows="2" placeholder="支持 1、2、#3；一行或用逗号分隔" />
+            <div class="form-hint no-offset">账号编号是账号列表里的「编号」，删除账号后可复用。</div>
+          </el-form-item>
+        </el-col>
+      </el-row>
+
       <el-form-item label="邮箱域名">
         <el-input v-model="forms.autoLoginEmail.domain" placeholder="example.com" />
         <div class="form-hint no-offset">将生成 手机号数字@域名；留空时使用系统 CloudMail:Domain。</div>
@@ -375,7 +473,11 @@ import { panelApi } from '@/api/panel'
 import type { AccountCategory, DataDictionary, OperationAccount, SimpleCategory } from '@/api/types'
 
 type AvatarSource = 'none' | 'fixed' | 'dictionary'
+type AccountSourceMode = 'category' | 'number'
+
 type AutomationKind = 'privateCreate' | 'publicize'
+type UserChatActiveMessageActionMode = 'send_generated_text' | 'forward_url'
+type UserChatActiveForwardMode = 'with_attribution' | 'hide_attribution'
 
 export interface TaskConfigDraft {
   total: number
@@ -407,6 +509,12 @@ const groupCategories = ref<SimpleCategory[]>([])
 const dictionaries = ref<DataDictionary[]>([])
 const selectableAiModels = ref<string[]>([])
 const globalDefaultAiModel = ref('')
+
+const accountSourceOptions: Array<{ label: string; value: AccountSourceMode }> = [
+  { label: '账号分类选择', value: 'category' },
+  { label: '账号编号填写', value: 'number' },
+]
+
 
 const draft = reactive<TaskConfigDraft>({
   total: 0,
@@ -511,8 +619,18 @@ function applyInitialConfig() {
 
   if (props.taskType === 'user_chat_active') {
     const form = forms.userChatActive
-    form.categoryIds = normalizeIds(cfg.category_ids, readNumber(cfg.category_id))
+    const categoryIds = normalizeIds(cfg.category_ids, readNumber(cfg.category_id))
+    const accountNumbers = readNumberArray(cfg.account_numbers)
+    form.categoryIds = categoryIds
+    form.accountNumbersText = formatAccountNumbers(accountNumbers)
+    form.accountSourceMode = resolveInitialAccountSourceMode(cfg.account_source_mode, categoryIds, accountNumbers)
+
     form.targetsText = readStringArray(cfg.targets).join('\n')
+    form.messageActionMode = normalizeMessageActionMode(readString(cfg.message_action_mode, 'send_generated_text'))
+    form.replyToMessageUrl = readString(cfg.reply_to_message_url)
+    form.forwardSourceUrlsText = readStringArray(cfg.forward_source_urls).join('\n')
+    form.forwardMode = normalizeForwardMode(readString(cfg.forward_mode, 'with_attribution'))
+    form.skipIfLastMessageFromSelf = readBoolean(cfg.skip_if_last_message_from_self)
     const legacyDictionary = readStringArray(cfg.dictionary)
     const legacyImageDictionaryName = extractDictionaryName(readString(cfg.image_dictionary_token))
     form.messageRules = readUserChatActiveMessageRules(cfg.message_rules, legacyDictionary, legacyImageDictionaryName)
@@ -538,7 +656,12 @@ function applyInitialConfig() {
 
   if (props.taskType === 'channel_group_private_create') {
     const form = forms.privateCreate
-    form.categoryIds = normalizeIds(cfg.category_ids)
+    const categoryIds = normalizeIds(cfg.category_ids)
+    const accountNumbers = readNumberArray(cfg.account_numbers)
+    form.categoryIds = categoryIds
+    form.accountNumbersText = formatAccountNumbers(accountNumbers)
+    form.accountSourceMode = resolveInitialAccountSourceMode(cfg.account_source_mode, categoryIds, accountNumbers)
+
     form.createType = normalizeObjectType(readString(cfg.create_type, 'channel'))
     form.channelGroupId = readNumber(cfg.channel_group_id, 0)
     form.groupCategoryId = readNumber(cfg.group_category_id, 0)
@@ -557,7 +680,12 @@ function applyInitialConfig() {
 
   if (props.taskType === 'channel_group_publicize') {
     const form = forms.publicize
-    form.categoryIds = normalizeIds(cfg.category_ids)
+    const categoryIds = normalizeIds(cfg.category_ids)
+    const accountNumbers = readNumberArray(cfg.account_numbers)
+    form.categoryIds = categoryIds
+    form.accountNumbersText = formatAccountNumbers(accountNumbers)
+    form.accountSourceMode = resolveInitialAccountSourceMode(cfg.account_source_mode, categoryIds, accountNumbers)
+
     form.targetType = normalizeObjectType(readString(cfg.target_type, 'channel'))
     form.channelGroupId = readNumber(cfg.channel_group_id, 0)
     form.groupCategoryId = readNumber(cfg.group_category_id, 0)
@@ -580,7 +708,12 @@ function applyInitialConfig() {
   }
   if (props.taskType === 'auto_change_login_email') {
     const form = forms.autoLoginEmail
-    form.categoryIds = normalizeIds(cfg.category_ids)
+    const categoryIds = normalizeIds(cfg.category_ids)
+    const accountNumbers = readNumberArray(cfg.account_numbers)
+    form.categoryIds = categoryIds
+    form.accountNumbersText = formatAccountNumbers(accountNumbers)
+    form.accountSourceMode = resolveInitialAccountSourceMode(cfg.account_source_mode, categoryIds, accountNumbers)
+
     form.domain = readString(cfg.domain)
     form.triggerDaysAgo = clamp(readNumber(cfg.trigger_days_ago, 6), 0, 30)
     form.triggerWindowHours = clamp(readNumber(cfg.trigger_window_hours, 24), 1, 336)
@@ -592,8 +725,6 @@ function applyInitialConfig() {
     form.triggerPhrasesText = readStringArray(cfg.trigger_phrases).join('\n')
     return
   }
-
-
 }
 
 function pushDraft() {
@@ -622,25 +753,37 @@ function pushDraft() {
 
 function buildUserChatActiveDraft(): TaskConfigDraft {
   const form = forms.userChatActive
-  const categoryIds = normalizedSelectedIds(form.categoryIds)
-  const selectedCategories = selectedAccountCategories(categoryIds)
+
+  const { categoryIds, selectedCategories, accountNumbers } = activeAccountSource(form)
+  validateAccountSource(form.accountSourceMode, categoryIds, selectedCategories, accountNumbers)
+
+
   const targets = uniqueLines(form.targetsText)
-  const messageRules = normalizeUserChatActiveMessageRules(form.messageRules)
+  const messageRules = form.messageActionMode === 'send_generated_text'
+    ? normalizeUserChatActiveMessageRules(form.messageRules)
+    : []
   const dictionary = messageRules.map((x) => x.text).filter(Boolean)
   const sharedImageDictionaryName = sharedRuleImageDictionaryName(messageRules)
-  if (categoryIds.length === 0 || selectedCategories.length === 0) throw new Error('请至少选择一个执行账号分类')
+  const forwardSourceUrls = form.messageActionMode === 'forward_url' ? uniqueLines(form.forwardSourceUrlsText) : []
+  const effectiveMessageMode = form.messageActionMode === 'send_generated_text' ? form.messageMode : 'random'
+
   if (targets.length === 0) throw new Error('请至少填写一个目标群组/频道/Bot')
-  if (messageRules.length === 0) throw new Error('请至少添加一条消息规则')
-  for (const rule of messageRules) {
-    if (rule.imageDictionaryName && !imageDictionaryNames.value.includes(rule.imageDictionaryName)) throw new Error('请选择有效的图片字典')
+  if (form.messageActionMode === 'forward_url') {
+    if (forwardSourceUrls.length === 0) throw new Error('请至少填写一个转发来源消息链接')
+  } else {
+    if (messageRules.length === 0) throw new Error('请至少添加一条消息规则')
+    for (const rule of messageRules) {
+      if (rule.imageDictionaryName && !imageDictionaryNames.value.includes(rule.imageDictionaryName)) throw new Error('请选择有效的图片字典')
+    }
   }
   if (form.delayMaxSeconds < form.delayMinSeconds) throw new Error('最大间隔不能小于最小间隔')
-  if (!isValidMode(form.accountMode) || !isValidMode(form.targetMode) || !isValidMode(form.messageMode)) throw new Error('模式参数无效')
+  if (!isValidMode(form.accountMode) || !isValidMode(form.targetMode) || !isValidMode(effectiveMessageMode)) throw new Error('模式参数无效')
+  if (!isValidMessageActionMode(form.messageActionMode) || !isValidForwardMode(form.forwardMode)) throw new Error('发送动作参数无效')
 
   const verificationKeywords = form.enableAiVerification ? uniqueLines(form.verificationKeywordsText) : []
   const verificationRegexes = form.enableAiVerification ? uniqueLines(form.verificationRegexText) : []
   const verificationBotUsernames = form.enableAiVerification ? uniqueLines(form.verificationBotUsernamesText).map((x) => x.replace(/^@+/, '')) : []
-  if (form.enableAiVerification) {
+  if (form.messageActionMode === 'send_generated_text' && form.enableAiVerification) {
     if (form.selectedAiModelOption === '__custom__' && !form.customAiModel.trim()) throw new Error('请填写自定义模型名')
     if (form.verificationMatchMode === 'keyword' && verificationKeywords.length === 0) throw new Error('请至少填写一个验证关键词')
     if (form.verificationMatchMode === 'regex') {
@@ -659,11 +802,19 @@ function buildUserChatActiveDraft(): TaskConfigDraft {
   }
 
   const config = {
-    category_id: selectedCategories[0].id,
-    category_name: selectedCategories[0].name,
+    account_source_mode: form.accountSourceMode,
+    category_id: selectedCategories[0]?.id ?? 0,
+
+    category_name: selectedCategories[0]?.name ?? null,
     category_ids: categoryIds,
     category_names: selectedCategories.map((x) => x.name),
+    account_numbers: accountNumbers,
     targets,
+    message_action_mode: form.messageActionMode,
+    reply_to_message_url: form.messageActionMode === 'send_generated_text' ? form.replyToMessageUrl.trim() || null : null,
+    forward_source_urls: forwardSourceUrls,
+    forward_mode: form.forwardMode,
+    skip_if_last_message_from_self: form.skipIfLastMessageFromSelf,
     dictionary,
     image_dictionary_token: sharedImageDictionaryName ? dictionaryToken(sharedImageDictionaryName) : null,
     message_rules: messageRules.map((rule) => ({
@@ -673,36 +824,40 @@ function buildUserChatActiveDraft(): TaskConfigDraft {
     delay_min_ms: secondsToMilliseconds(form.delayMinSeconds),
     delay_max_ms: secondsToMilliseconds(form.delayMaxSeconds),
     account_mode: form.accountMode,
-    message_mode: form.messageMode,
+    message_mode: effectiveMessageMode,
     target_mode: form.targetMode,
     max_messages: Math.max(0, form.maxMessages),
-    enable_ai_verification: form.enableAiVerification,
-    ai_model: form.enableAiVerification ? resolveAiModel() : null,
+    enable_ai_verification: form.messageActionMode === 'send_generated_text' && form.enableAiVerification,
+    ai_model: form.messageActionMode === 'send_generated_text' && form.enableAiVerification ? resolveAiModel() : null,
     verification_timeout_seconds: form.enableAiVerification ? form.verificationTimeoutSeconds : 15,
-    verification_timeout_as_failure: form.enableAiVerification && form.verificationTimeoutAsFailure,
+    verification_timeout_as_failure: form.messageActionMode === 'send_generated_text' && form.enableAiVerification && form.verificationTimeoutAsFailure,
     verification_match_mode: normalizeVerificationMode(form.verificationMatchMode),
-    verification_keywords: verificationKeywords,
-    verification_regexes: verificationRegexes,
-    verification_bot_username_filter: form.enableAiVerification && form.verificationBotUsernameFilterEnabled,
-    verification_bot_usernames: verificationBotUsernames,
+    verification_keywords: form.messageActionMode === 'send_generated_text' ? verificationKeywords : [],
+    verification_regexes: form.messageActionMode === 'send_generated_text' ? verificationRegexes : [],
+    verification_bot_username_filter: form.messageActionMode === 'send_generated_text' && form.enableAiVerification && form.verificationBotUsernameFilterEnabled,
+    verification_bot_usernames: form.messageActionMode === 'send_generated_text' ? verificationBotUsernames : [],
   }
 
   return validDraft(Math.max(0, form.maxMessages), config)
 }
 
+
 function buildPrivateCreateDraft(): TaskConfigDraft {
   const form = forms.privateCreate
-  const categoryIds = normalizedSelectedIds(form.categoryIds)
-  const selectedCategories = selectedAccountCategories(categoryIds)
-  if (categoryIds.length === 0 || selectedCategories.length === 0) throw new Error('请至少选择一个执行账号分类')
+  const { categoryIds, selectedCategories, accountNumbers } = activeAccountSource(form)
+  validateAccountSource(form.accountSourceMode, categoryIds, selectedCategories, accountNumbers)
+
   if (!form.titleTemplate.trim()) throw new Error('标题模板不能为空')
   validateDelay(form.minDelaySeconds, form.maxDelaySeconds)
   validateAvatar(form.avatarSource, form.fixedAvatarAssetPath, form.avatarDictionaryName)
 
   const isChannel = form.createType === 'channel'
   const config = {
+    account_source_mode: form.accountSourceMode,
     category_ids: categoryIds,
+
     category_names: selectedCategories.map((x) => x.name),
+    account_numbers: accountNumbers,
     create_type: isChannel ? 'channel' : 'group',
     channel_group_id: isChannel && form.channelGroupId > 0 ? form.channelGroupId : null,
     channel_group_name: isChannel && form.channelGroupId > 0 ? channelGroups.value.find((x) => x.id === form.channelGroupId)?.name || null : null,
@@ -720,14 +875,14 @@ function buildPrivateCreateDraft(): TaskConfigDraft {
     asset_scope_id: form.avatarSource === 'fixed' ? form.assetScopeId : null,
   }
 
-  return validDraft(automationTotal(categoryIds, form.perAccountBatchSize), config)
+  return validDraft(automationTotal(categoryIds, accountNumbers, form.perAccountBatchSize), config)
 }
 
 function buildPublicizeDraft(): TaskConfigDraft {
   const form = forms.publicize
-  const categoryIds = normalizedSelectedIds(form.categoryIds)
-  const selectedCategories = selectedAccountCategories(categoryIds)
-  if (categoryIds.length === 0 || selectedCategories.length === 0) throw new Error('请至少选择一个执行账号分类')
+  const { categoryIds, selectedCategories, accountNumbers } = activeAccountSource(form)
+  validateAccountSource(form.accountSourceMode, categoryIds, selectedCategories, accountNumbers)
+
   if (!form.titleTemplate.trim()) throw new Error('标题模板不能为空')
   if (!form.usernameTemplate.trim()) throw new Error('公开用户名模板不能为空')
   validateDelay(form.minDelaySeconds, form.maxDelaySeconds)
@@ -737,8 +892,11 @@ function buildPublicizeDraft(): TaskConfigDraft {
   const targetChannelGroupId = normalizeOptionalCategoryId(form.targetChannelGroupId)
   const targetGroupCategoryId = normalizeOptionalCategoryId(form.targetGroupCategoryId)
   const config = {
+    account_source_mode: form.accountSourceMode,
     category_ids: categoryIds,
+
     category_names: selectedCategories.map((x) => x.name),
+    account_numbers: accountNumbers,
     target_type: isChannel ? 'channel' : 'group',
     channel_group_id: isChannel && form.channelGroupId > 0 ? form.channelGroupId : null,
     channel_group_name: isChannel && form.channelGroupId > 0 ? channelGroups.value.find((x) => x.id === form.channelGroupId)?.name || null : null,
@@ -763,18 +921,21 @@ function buildPublicizeDraft(): TaskConfigDraft {
     asset_scope_id: form.avatarSource === 'fixed' ? form.assetScopeId : null,
   }
 
-  return validDraft(automationTotal(categoryIds, form.perAccountBatchSize), config)
+  return validDraft(automationTotal(categoryIds, accountNumbers, form.perAccountBatchSize), config)
 }
 
 function buildAutoLoginEmailDraft(): TaskConfigDraft {
   const form = forms.autoLoginEmail
-  const categoryIds = normalizedSelectedIds(form.categoryIds)
-  const selectedCategories = selectedAccountCategories(categoryIds)
-  if (categoryIds.length === 0 || selectedCategories.length === 0) throw new Error('请至少选择一个执行账号分类')
+  const { categoryIds, selectedCategories, accountNumbers } = activeAccountSource(form)
+  validateAccountSource(form.accountSourceMode, categoryIds, selectedCategories, accountNumbers)
+
   const triggerPhrases = uniqueLines(form.triggerPhrasesText)
   const config = {
+    account_source_mode: form.accountSourceMode,
     category_ids: categoryIds,
+
     category_names: selectedCategories.map((x) => x.name),
+    account_numbers: accountNumbers,
     domain: form.domain.trim().replace(/^@+/, '') || null,
     trigger_days_ago: clamp(form.triggerDaysAgo, 0, 30),
     trigger_window_hours: clamp(form.triggerWindowHours, 1, 336),
@@ -786,7 +947,7 @@ function buildAutoLoginEmailDraft(): TaskConfigDraft {
     trigger_phrases: triggerPhrases,
   }
 
-  return validDraft(automationTotal(categoryIds, 1), config)
+  return validDraft(automationTotal(categoryIds, accountNumbers, 1), config)
 }
 
 
@@ -831,6 +992,57 @@ function applyAiModelSelection(model?: string | null) {
   form.customAiModel = normalized
 }
 
+
+
+type AccountSourceForm = {
+  accountSourceMode: AccountSourceMode
+  categoryIds: number[]
+  accountNumbersText: string
+}
+
+function activeAccountSource(form: AccountSourceForm) {
+  const categoryIds = form.accountSourceMode === 'category' ? normalizedSelectedIds(form.categoryIds) : []
+  const selectedCategories = form.accountSourceMode === 'category' ? selectedAccountCategories(categoryIds) : []
+  const accountNumbers = form.accountSourceMode === 'number' ? parseAccountNumbers(form.accountNumbersText) : []
+  return { categoryIds, selectedCategories, accountNumbers }
+}
+
+function validateAccountSource(mode: AccountSourceMode, categoryIds: number[], selectedCategories: AccountCategory[], accountNumbers: number[]) {
+  if (mode === 'category') {
+    if (categoryIds.length === 0) throw new Error('请选择执行账号分类')
+    if (selectedCategories.length === 0) throw new Error('请选择有效的执行账号分类')
+    return
+  }
+
+  if (accountNumbers.length === 0) throw new Error('请填写账号编号')
+  const availableNumbers = new Set(operationAccounts.value.filter((x) => x.isActive).map((x) => x.displayNumber))
+  const missing = accountNumbers.filter((x) => !availableNumbers.has(x))
+  if (missing.length > 0) throw new Error(`账号编号不存在或不可操作：${missing.map((x) => `#${x}`).join('、')}`)
+}
+
+function resolveInitialAccountSourceMode(value: unknown, categoryIds: number[], accountNumbers: number[]): AccountSourceMode {
+  if (value === 'category' || value === 'number') return value
+  return categoryIds.length > 0 || accountNumbers.length === 0 ? 'category' : 'number'
+}
+
+
+function automationTotal(categoryIds: number[], accountNumbers: number[], perAccountBatchSize: number) {
+  return Math.max(0, selectedOperationAccounts(categoryIds, accountNumbers).length * Math.max(1, perAccountBatchSize))
+}
+
+function selectedOperationAccounts(categoryIds: number[], accountNumbers: number[]) {
+  const categorySet = new Set(categoryIds)
+  const numberSet = new Set(accountNumbers)
+  const accounts = new Map<number, OperationAccount>()
+  for (const account of operationAccounts.value) {
+    if (!account.isActive) continue
+    if ((account.categoryId && categorySet.has(account.categoryId)) || numberSet.has(account.displayNumber)) {
+      accounts.set(account.id, account)
+    }
+  }
+  return Array.from(accounts.values())
+}
+
 function resolveAiModel() {
   const form = forms.userChatActive
   if (form.selectedAiModelOption === '__global__') return null
@@ -843,11 +1055,6 @@ function selectedAccountCategories(ids: number[]) {
   return accountCategories.value.filter((x) => set.has(x.id))
 }
 
-function automationTotal(categoryIds: number[], perAccountBatchSize: number) {
-  const set = new Set(categoryIds)
-  const accountCount = operationAccounts.value.filter((x) => x.isActive && x.categoryId && set.has(x.categoryId)).length
-  return Math.max(0, accountCount * Math.max(1, perAccountBatchSize))
-}
 
 function validateDelay(min: number, max: number) {
   if (min < 0 || max < 0) throw new Error('间隔不能为负数')
@@ -878,10 +1085,18 @@ function invalidDraft(message: string): TaskConfigDraft {
 
 function defaultUserChatActiveForm() {
   return {
+    accountSourceMode: 'category' as AccountSourceMode,
+
     categoryIds: [] as number[],
+    accountNumbersText: '',
     targetsText: '',
     messageRules: [defaultUserChatActiveMessageRule()],
     bulkRulesText: '',
+    messageActionMode: 'send_generated_text' as UserChatActiveMessageActionMode,
+    replyToMessageUrl: '',
+    forwardSourceUrlsText: '',
+    forwardMode: 'with_attribution' as UserChatActiveForwardMode,
+    skipIfLastMessageFromSelf: false,
     delayMinSeconds: 15,
     delayMaxSeconds: 45,
     maxMessages: 0,
@@ -941,6 +1156,7 @@ function appendUserChatActiveLineRules() {
 function defaultPrivateCreateForm() {
   return {
     categoryIds: [] as number[],
+    accountNumbersText: '',
     createType: 'channel',
     channelGroupId: 0,
     groupCategoryId: 0,
@@ -950,6 +1166,8 @@ function defaultPrivateCreateForm() {
     minDelaySeconds: 10,
     maxDelaySeconds: 30,
     jitterPercent: 20,
+    accountSourceMode: 'category' as AccountSourceMode,
+
     avatarSource: 'none' as AvatarSource,
     fixedAvatarAssetPath: '',
     avatarDictionaryName: '',
@@ -961,6 +1179,7 @@ function defaultPrivateCreateForm() {
 function defaultPublicizeForm() {
   return {
     categoryIds: [] as number[],
+    accountNumbersText: '',
     targetType: 'channel',
     channelGroupId: 0,
     groupCategoryId: 0,
@@ -976,6 +1195,8 @@ function defaultPublicizeForm() {
     maxDelaySeconds: 30,
     jitterPercent: 20,
     avatarSource: 'none' as AvatarSource,
+    accountSourceMode: 'category' as AccountSourceMode,
+
     fixedAvatarAssetPath: '',
     avatarDictionaryName: '',
     assetScopeId: newScopeId(),
@@ -985,7 +1206,10 @@ function defaultPublicizeForm() {
 
 function defaultAutoLoginEmailForm() {
   return {
+    accountSourceMode: 'category' as AccountSourceMode,
+
     categoryIds: [] as number[],
+    accountNumbersText: '',
     domain: '',
     triggerDaysAgo: 6,
     triggerWindowHours: 24,
@@ -1048,6 +1272,28 @@ function normalizedSelectedIds(values: number[]) {
   return Array.from(new Set(values.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0)))
 }
 
+function parseAccountNumbers(value: string) {
+  return Array.from(new Set(
+    value
+      .split(/[\s,，;；]+/)
+      .map((x) => x.trim().replace(/^#+/, ''))
+      .filter(Boolean)
+      .map((x) => Number(x))
+      .filter((x) => Number.isFinite(x) && x > 0)
+      .map((x) => Math.trunc(x)),
+  ))
+}
+
+function formatAccountNumbers(values: number[]) {
+  return values.map((x) => `#${x}`).join('\n')
+}
+
+function readNumberArray(value: unknown) {
+  return Array.isArray(value)
+    ? Array.from(new Set(value.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).map((x) => Math.trunc(x))))
+    : []
+}
+
 function readOptionalCategoryId(value: unknown) {
   if (value === null || value === undefined) return -1
   const n = Number(value)
@@ -1093,6 +1339,12 @@ function readNumber(value: unknown, fallback = 0) {
   return Number.isFinite(n) ? n : fallback
 }
 
+function readOptionalPositiveNumber(value: unknown) {
+  if (value === null || value === undefined) return null
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null
+}
+
 function readBoolean(value: unknown) {
   return value === true
 }
@@ -1111,6 +1363,22 @@ function normalizeMode(value: string) {
 
 function isValidMode(value: string) {
   return value === 'random' || value === 'queue'
+}
+
+function normalizeMessageActionMode(value: string): UserChatActiveMessageActionMode {
+  return value === 'forward_url' ? 'forward_url' : 'send_generated_text'
+}
+
+function isValidMessageActionMode(value: string) {
+  return value === 'send_generated_text' || value === 'forward_url'
+}
+
+function normalizeForwardMode(value: string): UserChatActiveForwardMode {
+  return value === 'hide_attribution' ? 'hide_attribution' : 'with_attribution'
+}
+
+function isValidForwardMode(value: string) {
+  return value === 'with_attribution' || value === 'hide_attribution'
 }
 
 function normalizeVerificationMode(value: string) {
@@ -1239,6 +1507,10 @@ const AvatarFields = defineComponent({
 .form-hint.no-offset {
   margin-left: 0;
 }
+
+.task-config-form {
+  min-width: 0;
+}
 .message-rule-section {
   margin-bottom: 14px;
 }
@@ -1270,6 +1542,64 @@ const AvatarFields = defineComponent({
 
 .form-hint.compact {
   margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  .form-hint {
+    margin-left: 0;
+  }
+
+  .message-rule-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .message-rule-toolbar .el-button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  :deep(.el-row) {
+    row-gap: 0;
+  }
+
+  :deep(.el-col) {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  :deep(.el-form-item) {
+    display: block;
+  }
+
+  :deep(.el-form-item__label) {
+    justify-content: flex-start;
+    width: 100%;
+    height: auto;
+    margin-bottom: 6px;
+    line-height: 1.4;
+  }
+
+  :deep(.el-form-item__content) {
+    min-width: 0;
+    margin-left: 0 !important;
+  }
+
+  :deep(.el-radio-group) {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  :deep(.el-radio-button),
+  :deep(.el-radio-button__inner) {
+    width: 100%;
+  }
+
+  :deep(.el-radio-button__inner) {
+    white-space: normal;
+    line-height: 1.35;
+  }
 }
 
 .avatar-path {

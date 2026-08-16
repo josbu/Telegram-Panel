@@ -24,6 +24,15 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 - `POST /api/panel/accounts/cleanup-waste`：复查并清理明确失效的账号
 - `GET /api/panel/accounts/{id}/devices`：读取账号在线设备
 
+自 v1.31.57 起，账号列表、账号详情、任务账号候选和风控确认中的账号 DTO 都返回
+`displayNumber`。这是面向用户展示和手工填写任务账号范围的账号编号；`id` 仍是内部数据库
+主键，只用于接口路径、权限校验和持久化关联。删除账号后，新账号可以复用空出的
+`displayNumber`，因此外部系统不得把它当作长期不可变主键。成功判据是
+`GET /api/panel/accounts` 与 `GET /api/panel/accounts/{id}` 同时返回正整数
+`displayNumber`，前端任务表单在“账号来源”切到“账号编号填写”后可用 `#编号` 选择账号；该前端入口
+与“账号分类选择”二选一，不再把编号和分类合并执行。回滚到旧版前无需清理数据，但旧前端不会展示该字段。
+
+
 前端会为登录和导入请求明确携带 `proxyStrategy`；自定义调用也必须显式传入。省略策略、
 策略无效或所选代理不可用时，服务端会在连接 Telegram 前拒绝请求，不会回退直连。不要
 绕过这些入口自行先直连创建 Session。
@@ -192,7 +201,7 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 - `POST /api/panel/modules/install`：安装模块包
 - `/api/panel/extensions/{module-slug}`：模块自定义后台管理接口约定
 
-`GET /api/panel/tasks` 和 `GET /api/panel/tasks/{id}` 的 `BatchTaskDto` 包含可空 `name`。普通一次性任务可为空，前端使用“任务类型 #ID”兜底；计划任务触发或手动“立即执行”创建的批量任务会复制计划任务名称，历史任务应优先展示 `name`，并保留任务类型作为辅助说明。该字段通过 `BatchTasks.Name` 持久化；回滚到旧版需先忽略或删除该列。
+`GET /api/panel/tasks` 和 `GET /api/panel/tasks/{id}` 的 `BatchTaskDto` 包含可空 `name`。普通一次性任务可为空，前端使用“任务类型 #ID”兜底；计划任务触发或手动“立即执行”创建的批量任务会复制计划任务名称，历史任务应优先展示 `name`，并保留任务类型作为辅助说明。自 v1.31.57 起，`POST /api/panel/tasks` 和 `PATCH /api/panel/tasks/{id}` 支持可选 `name`，服务端会去除首尾空白并限制最多 100 个字符；即时任务传空或省略时继续使用兜底显示，编辑任务时省略 `name` 会保留原名称，传空字符串会清空名称。该字段通过 `BatchTasks.Name` 持久化；回滚到旧版需先忽略或删除该列。
 
 自 v1.31.44 起，`channel_group_private_create` 任务会在 `config.recent_failures`
 返回最近 20 条失败明细。字段包括 `time_utc`、`account_id`、`target_type`、
@@ -212,8 +221,16 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 `dictionary` 保存所有非空规则文字，只有全部规则共享同一个非空图片字典时才回写全局
 `image_dictionary_token`。成功判据是保存后任务详情包含 `message_rules`，重新编辑仍保留段落换行和
 每条图片字典，实际执行按规则随机或循环。图片字典无效时创建页或任务启动会返回模板校验错误。
+
+自当前开发版起，`user_chat_active` 创建/编辑表单的账号来源在“账号分类选择”和“账号编号填写”之间
+二选一。前端提交分类来源时只写入 `category_ids`，提交编号来源时只写入 `account_numbers`；后端仍按现有
+校验返回“请选择账号分类”或“请填写账号编号”。成功判据是创建页切换来源后只显示对应输入框，历史配置重新编辑时
+按已保存的编号或分类恢复来源。回滚到旧版前无需迁移数据，但同时写入两类来源的旧配置在新版编辑时会优先按
+账号编号来源展示。
 回滚到 v1.31.54 或更早版本时，旧字段仍可继续发送文字；每条规则使用不同图片字典的配置无法被旧版
 完整表达，回滚前应改为全部规则共用一个图片字典或纯文字规则。
+
+自 v1.31.56 起，`user_chat_active.config` 增加 `message_action_mode`、`reply_to_message_url`、`reply_to_message_id`、`forward_source_urls`、`forward_mode` 和 `skip_if_last_message_from_self`。`message_action_mode` 默认为 `send_generated_text`，继续使用 `message_rules` 发送；前端只展示 `reply_to_message_url`，通过 Telegram 消息链接解析回复消息 ID。`reply_to_message_id` 保留为原始 API 兼容字段，自动化调用可继续大于 0 传入，但与 `reply_to_message_url` 同时存在时必须指向同一条消息。`message_action_mode=forward_url` 时，`forward_source_urls` 必须至少包含一个 Telegram 消息链接，`forward_mode=with_attribution|hide_attribution` 控制原生转发是否保留来源引用；此时前端不展示内容模式，默认按随机来源选择保存，原始 API 仍可用 `message_mode=queue` 改为队列选择。此模式不执行模板渲染、图片字典或 AI 验证。`skip_if_last_message_from_self=true` 时，发送或转发前会读取目标最新普通消息；若它仍由当前执行账号发出，本轮记为已处理但不发送，以避免同账号连续刷屏。成功判据是任务详情配置摘要显示“发送动作”和“去重发送”，且转发模式不再显示内容模式；`recent_failures` 为空或只记录真实 Telegram 访问/权限错误。开启去重但无法读取目标最新消息时，本轮会失败并记录原因。回滚到 v1.31.55 或更早版本前，应把任务重新保存为 `send_generated_text` 并关闭去重，否则旧版不会理解转发来源和去重字段。
 
 `user_join_subscribe` 会在 `config.failures` 返回最多 200 条失败明细，字段包括 `accountId`、
 `target` 和 `reason`，并会对 Telegram 瞬时连接错误执行一次客户端重建重试。

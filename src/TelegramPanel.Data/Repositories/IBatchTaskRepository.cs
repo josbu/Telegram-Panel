@@ -19,6 +19,7 @@ public interface IBatchTaskRepository : IRepository<BatchTask>
     Task UpdateConfigColumnAsync(int id, string? config, CancellationToken cancellationToken = default);
     Task UpdateDraftColumnsAsync(int id, int total, string? config, CancellationToken cancellationToken = default);
     Task<bool> TryUpdateEditableDraftAsync(int id, int total, string? config, CancellationToken cancellationToken = default);
+    Task<bool> TryUpdateEditableDraftAsync(int id, int total, string? config, string? name, CancellationToken cancellationToken = default);
     Task<IEnumerable<BatchTask>> GetByStatusAsync(string status);
     Task<IEnumerable<BatchTask>> GetRunningTasksAsync();
     Task<IReadOnlyList<BatchTask>> GetActiveTasksAsync(CancellationToken cancellationToken = default);
