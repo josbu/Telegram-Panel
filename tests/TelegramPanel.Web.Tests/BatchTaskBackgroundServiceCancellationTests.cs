@@ -407,6 +407,24 @@ public sealed class BatchTaskBackgroundServiceCancellationTests
                 }));
         }
 
+        public Task<bool> TryUpdateEditableDraftAsync(
+            int id,
+            int total,
+            string? config,
+            string? name,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Transition(id,
+                task => task.Status is "paused" or "completed" or "failed" or "canceled",
+                task =>
+                {
+                    task.Name = name;
+                    task.Total = total;
+                    task.Config = config;
+                }));
+        }
+
         public Task<IEnumerable<BatchTask>> GetByStatusAsync(string status) =>
             Task.FromResult<IEnumerable<BatchTask>>(GetSnapshot().Where(task => task.Status == status).ToArray());
 

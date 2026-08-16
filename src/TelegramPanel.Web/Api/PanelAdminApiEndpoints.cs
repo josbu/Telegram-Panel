@@ -5148,8 +5148,13 @@ public static class PanelAdminApiEndpoints
         BatchTaskManagementService tasks)
     {
         ValidateTaskSubmission(request.TaskType, request.Config);
+        var nameResult = TryNormalizeBatchTaskName(request.Name, out var taskName);
+        if (nameResult != null)
+            return nameResult;
+
         var task = await tasks.CreateTaskAsync(new BatchTask
         {
+            Name = taskName,
             TaskType = request.TaskType.Trim(),
             Total = Math.Max(0, request.Total),
             Completed = 0,
@@ -5178,10 +5183,23 @@ public static class PanelAdminApiEndpoints
         if (!string.Equals(existing.TaskType, request.TaskType?.Trim(), StringComparison.OrdinalIgnoreCase))
             return Results.BadRequest(new OperationResultDto(false, "不允许修改任务类型"));
 
+        string? taskName;
+        if (request.Name == null)
+        {
+            taskName = existing.Name;
+        }
+        else
+        {
+            var nameResult = TryNormalizeBatchTaskName(request.Name, out taskName);
+            if (nameResult != null)
+                return nameResult;
+        }
+
         var updatedDraft = await tasks.TryUpdateEditableTaskDraftAsync(
             id,
             Math.Max(0, request.Total),
             NormalizeNullable(request.Config),
+            taskName,
             cancellationToken);
         if (!updatedDraft)
             return Results.Conflict(new OperationResultDto(false, "任务状态已变化，请暂停任务后重新编辑"));
@@ -6875,6 +6893,14 @@ public static class PanelAdminApiEndpoints
             System.Text.Json.JsonDocument.Parse(config);
     }
 
+    private static IResult? TryNormalizeBatchTaskName(string? value, out string? name)
+    {
+        name = NormalizeNullable(value);
+        return name is { Length: > 100 }
+            ? Results.BadRequest(new OperationResultDto(false, "任务名称不能超过 100 个字符"))
+            : null;
+    }
+
     private static string? NormalizeNullable(string? value)
     {
         var text = (value ?? string.Empty).Trim();
@@ -7812,8 +7838,8 @@ public sealed record StartAccountQrLoginRequestDto(
 public sealed record AccountLoginSessionRequestDto(int LoginId);
 public sealed record AccountLoginCodeRequestDto(int LoginId, string? Code);
 public sealed record AccountLoginPasswordRequestDto(int LoginId, string? Password, bool? SaveTwoFactorPassword = null);
-public sealed record CreateTaskRequestDto(string TaskType, int Total, string? Config);
-public sealed record UpdateTaskRequestDto(string TaskType, int Total, string? Config);
+public sealed record CreateTaskRequestDto(string TaskType, int Total, string? Config, string? Name = null);
+public sealed record UpdateTaskRequestDto(string TaskType, int Total, string? Config, string? Name = null);
 public sealed record CreateScheduledTaskRequestDto(
     string TaskType,
     int Total,

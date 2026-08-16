@@ -222,12 +222,21 @@
           </el-col>
         </el-row>
         <el-form-item label="提交方式">
-          <el-radio-group v-model="createDialog.form.mode">
+          <el-radio-group v-model="createDialog.form.mode" @change="onCreateModeChanged">
             <el-radio-button label="once">立即执行</el-radio-button>
             <el-radio-button label="scheduled">Cron 计划</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-alert v-if="currentCreateDefinition?.description" :title="currentCreateDefinition.description" type="info" :closable="false" class="mb-3" />
+        <el-form-item v-if="!currentCreateTarget" label="任务名称">
+          <el-input
+            v-model="createDialog.form.name"
+            maxlength="100"
+            show-word-limit
+            placeholder="可选，留空则显示任务类型和 ID"
+          />
+        </el-form-item>
+
 
         <template v-if="currentCreateTarget">
           <el-alert
@@ -251,14 +260,6 @@
         />
 
         <template v-if="!currentCreateTarget && createDialog.form.mode === 'scheduled'">
-          <el-form-item label="任务名称">
-            <el-input
-              v-model="createDialog.form.name"
-              maxlength="100"
-              show-word-limit
-              placeholder="例如：工作日上午同步账号"
-            />
-          </el-form-item>
           <el-form-item label="Cron">
             <el-input v-model="createDialog.form.cronExpression" placeholder="0 9 * * *" />
           </el-form-item>
@@ -328,6 +329,14 @@
       <el-form :label-position="isTaskDialogCompact ? 'top' : 'right'" :label-width="isTaskDialogCompact ? 'auto' : '96px'">
         <el-form-item label="任务类型">
           <el-input :model-value="taskName(editTaskDialog.form.taskType)" disabled />
+        </el-form-item>
+        <el-form-item label="任务名称">
+          <el-input
+            v-model="editTaskDialog.form.name"
+            maxlength="100"
+            show-word-limit
+            placeholder="可选，留空则显示任务类型和 ID"
+          />
         </el-form-item>
         <TaskConfigForm
           v-if="hasTaskConfigForm(editTaskDialog.form.taskType)"
@@ -478,6 +487,7 @@ const editTaskDialog = ref({
   id: 0,
   form: {
     taskType: '',
+    name: '',
     total: 0,
     config: '',
   },
@@ -677,17 +687,28 @@ function openCreateDialog() {
 function ensureTaskType() {
   const first = creatableDefinitions.value[0]
   createDialog.value.form.taskType = first?.taskType || ''
-  createDialog.value.form.name = taskName(createDialog.value.form.taskType)
+  createDialog.value.form.name = ''
   createDialog.value.form.config = ''
   createDialog.value.form.total = defaultTotalForTask(createDialog.value.form.taskType)
   createDraft.value = emptyDraft()
 }
 
 function onTaskTypeChanged() {
-  createDialog.value.form.name = taskName(createDialog.value.form.taskType)
+  createDialog.value.form.name = ''
   createDialog.value.form.config = ''
   createDialog.value.form.total = defaultTotalForTask(createDialog.value.form.taskType)
   createDraft.value = emptyDraft()
+}
+
+function onCreateModeChanged(mode: string | number | boolean | undefined) {
+  const defaultName = taskName(createDialog.value.form.taskType)
+  if (mode === 'scheduled' && !createDialog.value.form.name.trim()) {
+    createDialog.value.form.name = defaultName
+    return
+  }
+  if (mode === 'once' && createDialog.value.form.name.trim() === defaultName) {
+    createDialog.value.form.name = ''
+  }
 }
 
 async function submitCreate() {
@@ -724,13 +745,13 @@ async function submitCreate() {
     ElMessage.warning('请填写计划任务名称')
     return
   }
-  form.name = form.name.trim()
-
+  const taskDisplayName = form.name.trim()
+  form.name = taskDisplayName
   createDialog.value.saving = true
   try {
     if (form.mode === 'scheduled') {
       await panelApi.createScheduledTask({
-        name: form.name,
+        name: taskDisplayName,
         taskType: form.taskType,
         total,
         configJson: config,
@@ -741,6 +762,7 @@ async function submitCreate() {
     } else {
       await panelApi.createTask({
         taskType: form.taskType,
+        name: taskDisplayName || null,
         total,
         config,
       })
@@ -886,6 +908,7 @@ async function openEditTask(task: BatchTask) {
     id: fullTask.id,
     form: {
       taskType: fullTask.taskType,
+      name: fullTask.name?.trim() || '',
       total: Math.max(0, fullTask.total),
       config: fullTask.config || '',
     },
@@ -914,6 +937,7 @@ async function submitEditTask() {
   try {
     await panelApi.updateTask(dialog.id, {
       taskType: dialog.form.taskType,
+      name: dialog.form.name.trim(),
       total: Math.max(0, total),
       config: config || null,
     })
@@ -940,6 +964,7 @@ async function rerunTask(task: BatchTask) {
   const fullTask = await loadTaskDetail(task.id)
   await panelApi.createTask({
     taskType: fullTask.taskType,
+    name: fullTask.name?.trim() || null,
     total: Math.max(0, fullTask.total),
     config: fullTask.config ? stripRuntimeFields(fullTask.config) : null,
   })

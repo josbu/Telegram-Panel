@@ -106,6 +106,22 @@ public class BatchTaskManagementService
             cancellationToken);
     }
 
+    public async Task<bool> TryUpdateEditableTaskDraftAsync(
+        int taskId,
+        int total,
+        string? config,
+        string? name,
+        CancellationToken cancellationToken = default)
+    {
+        if (total < 0) total = 0;
+        return await _batchTaskRepository.TryUpdateEditableDraftAsync(
+            taskId,
+            total,
+            config,
+            name,
+            cancellationToken);
+    }
+
     public async Task StartTaskAsync(int taskId)
     {
         await TryStartTaskAsync(taskId);

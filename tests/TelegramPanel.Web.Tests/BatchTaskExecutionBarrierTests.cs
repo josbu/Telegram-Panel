@@ -479,6 +479,26 @@ public sealed class BatchTaskExecutionBarrierTests
             }
         }
 
+        public Task<bool> TryUpdateEditableDraftAsync(
+            int id,
+            int total,
+            string? config,
+            string? name,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_sync)
+            {
+                if (!_tasks.TryGetValue(id, out var task) ||
+                    task.Status is not ("paused" or "completed" or "failed" or "canceled"))
+                    return Task.FromResult(false);
+                task.Name = name;
+                task.Total = total;
+                task.Config = config;
+                return Task.FromResult(true);
+            }
+        }
+
         public Task<IEnumerable<BatchTask>> GetByStatusAsync(string status) =>
             Task.FromResult<IEnumerable<BatchTask>>(Snapshot().Where(x => x.Status == status).ToArray());
 
