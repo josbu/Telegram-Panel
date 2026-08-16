@@ -93,3 +93,13 @@ test('新建和编辑即时任务支持自定义任务名称', () => {
   assert.match(tasksSource, /name:\s*dialog\.form\.name\.trim\(\)/)
   assert.match(tasksSource, /name:\s*fullTask\.name\?\.trim\(\) \|\| null/)
 })
+
+test('任务账号来源只能在分类和编号之间二选一', () => {
+  assert.match(taskConfigFormSource, /账号来源/)
+  assert.match(taskConfigFormSource, /账号分类选择/)
+  assert.match(taskConfigFormSource, /账号编号填写/)
+  assert.match(taskConfigFormSource, /accountSourceMode === 'category'/)
+  assert.match(taskConfigFormSource, /activeAccountSource\(form\)/)
+  assert.doesNotMatch(taskConfigFormSource, /与账号分类合并执行/)
+  assert.doesNotMatch(taskConfigFormSource, /请至少选择账号分类或填写账号编号/)
+})
