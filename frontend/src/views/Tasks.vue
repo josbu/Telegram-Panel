@@ -56,12 +56,13 @@
         <el-table-column label="上次运行" width="180">
           <template #default="{ row }">{{ formatTime(row.lastRunAtUtc) || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="270" fixed="right">
           <template #default="{ row }">
             <div class="icon-actions">
               <el-button link type="primary" :icon="InfoFilled" title="详情" @click="showScheduledDetails(row)" />
               <el-button link type="success" :icon="VideoPlay" title="立即执行" @click="runScheduledNow(row)" />
               <el-button link type="primary" :icon="Edit" title="编辑" @click="openEditScheduled(row)" />
+              <el-button v-if="canCopyScheduled(row)" link type="primary" :icon="CopyDocument" title="复制" @click="copyScheduledTask(row)" />
               <el-button v-if="row.status === 'enabled'" link type="warning" :icon="VideoPause" title="暂停" @click="pauseScheduled(row)" />
               <el-button v-else link type="success" :icon="VideoPlay" title="恢复" @click="resumeScheduled(row.id)" />
               <el-button link type="danger" :icon="Delete" title="删除" @click="deleteScheduled(row)" />
@@ -111,13 +112,14 @@
         <el-table-column label="完成时间" width="180">
           <template #default="{ row }">{{ formatTime(row.completedAt) || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="270" fixed="right">
           <template #default="{ row }">
             <div class="icon-actions">
               <el-button link type="primary" :icon="InfoFilled" title="详情" @click="showTaskDetails(row)" />
               <el-button v-if="canPause(row)" link type="warning" :icon="VideoPause" title="暂停" @click="pauseTask(row.id)" />
               <el-button v-if="canResume(row)" link type="success" :icon="VideoPlay" title="恢复" @click="resumeTask(row.id)" />
               <el-button v-if="canEdit(row)" link type="primary" :icon="Edit" title="编辑" @click="openEditTask(row)" />
+              <el-button v-if="canCopyTask(row)" link type="primary" :icon="CopyDocument" title="复制" @click="copyTask(row)" />
               <el-button v-if="canCancel(row)" link type="warning" :icon="CircleCloseFilled" title="取消" @click="cancelTask(row.id)" />
               <el-button link type="danger" :icon="Delete" title="删除" @click="deleteTask(row)" />
             </div>
@@ -171,11 +173,12 @@
         <el-table-column label="完成时间" width="180">
           <template #default="{ row }">{{ formatTime(row.completedAt) || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="210" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <div class="icon-actions">
               <el-button link type="primary" :icon="InfoFilled" title="详情" @click="showTaskDetails(row)" />
               <el-button v-if="canEdit(row)" link type="primary" :icon="Edit" title="编辑" @click="openEditTask(row)" />
+              <el-button v-if="canCopyTask(row)" link type="primary" :icon="CopyDocument" title="复制" @click="copyTask(row)" />
               <el-button v-if="canRerun(row)" link type="success" :icon="RefreshRight" title="重跑" @click="rerunTask(row)" />
               <el-button link type="danger" :icon="Delete" title="删除" @click="deleteTask(row)" />
             </div>
@@ -228,6 +231,13 @@
           </el-radio-group>
         </el-form-item>
         <el-alert v-if="currentCreateDefinition?.description" :title="currentCreateDefinition.description" type="info" :closable="false" class="mb-3" />
+        <el-alert
+          v-if="createDialog.sourceTaskId > 0"
+          :title="`已复制任务 #${createDialog.sourceTaskId} 的配置；确认后会创建新任务，原任务不会被修改。`"
+          type="success"
+          :closable="false"
+          class="mb-3"
+        />
         <el-form-item v-if="!currentCreateTarget" label="任务名称">
           <el-input
             v-model="createDialog.form.name"
@@ -256,6 +266,7 @@
         <TaskConfigForm
           v-else-if="hasTaskConfigForm(createDialog.form.taskType)"
           :task-type="createDialog.form.taskType"
+          :initial-config-json="createDialog.form.config"
           @draft-changed="onCreateDraftChanged"
         />
 
@@ -415,7 +426,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleCloseFilled, CirclePlus, Delete, Edit, InfoFilled, Refresh, RefreshRight, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+import { CircleCloseFilled, CirclePlus, CopyDocument, Delete, Edit, InfoFilled, Refresh, RefreshRight, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { panelApi } from '@/api/panel'
 import type { BatchTask, ScheduledTask, TaskDefinition } from '@/api/types'
@@ -640,6 +651,19 @@ function canRerun(task: BatchTask) {
   return taskDefinition(task.taskType)?.canRerun && isHistoryStatus(displayStatus(task))
 }
 
+function canCopyTask(task: BatchTask) {
+  return canCopyDefinition(task.taskType)
+}
+
+function canCopyScheduled(task: ScheduledTask) {
+  return canCopyDefinition(task.taskType)
+}
+
+function canCopyDefinition(taskType: string) {
+  const def = taskDefinition(taskType)
+  return !!def?.canCreate && hasTaskConfigForm(taskType) && taskCategory(taskType) !== 'system' && !resolveCreateTarget(def)
+}
+
 function canEdit(task: BatchTask) {
   const def = taskDefinition(task.taskType)
   if (!def?.canEdit) return false
@@ -671,6 +695,7 @@ async function load(options: { silent?: boolean } = {}) {
 
 function openCreateDialog() {
   const firstCategory = creatableCategories.value[0] || 'user'
+  createDialog.value.sourceTaskId = 0
   createDraft.value = emptyDraft()
   createDialog.value.form = {
     category: firstCategory,
@@ -687,6 +712,7 @@ function openCreateDialog() {
 
 function ensureTaskType() {
   const first = creatableDefinitions.value[0]
+  createDialog.value.sourceTaskId = 0
   createDialog.value.form.taskType = first?.taskType || ''
   createDialog.value.form.name = ''
   createDialog.value.form.config = ''
@@ -695,6 +721,7 @@ function ensureTaskType() {
 }
 
 function onTaskTypeChanged() {
+  createDialog.value.sourceTaskId = 0
   createDialog.value.form.name = ''
   createDialog.value.form.config = ''
   createDialog.value.form.total = defaultTotalForTask(createDialog.value.form.taskType)
@@ -948,6 +975,67 @@ async function submitEditTask() {
   } finally {
     dialog.saving = false
   }
+}
+
+async function copyTask(task: BatchTask) {
+  const fullTask = await loadTaskDetail(task.id)
+  openCopiedCreateDialog({
+    sourceTaskId: fullTask.id,
+    taskType: fullTask.taskType,
+    name: batchTaskName(fullTask),
+    mode: 'once',
+    total: Math.max(0, fullTask.total),
+    config: fullTask.config ? stripRuntimeFields(fullTask.config) : '',
+  })
+  ElMessage.success(`已复制任务 #${fullTask.id} 到新建表单`)
+}
+
+async function copyScheduledTask(task: ScheduledTask) {
+  const fullTask = await loadScheduledTaskDetail(task.id, task)
+  openCopiedCreateDialog({
+    sourceTaskId: fullTask.id,
+    taskType: fullTask.taskType,
+    name: scheduledName(fullTask),
+    mode: 'scheduled',
+    cronExpression: fullTask.cronExpression,
+    total: Math.max(0, fullTask.total),
+    config: fullTask.configJson ? stripRuntimeFields(fullTask.configJson) : '',
+  })
+  ElMessage.success(`已复制计划任务 #${fullTask.id} 到新建表单`)
+}
+
+function openCopiedCreateDialog(options: {
+  sourceTaskId: number
+  taskType: string
+  name: string
+  mode: string
+  total: number
+  config: string
+  cronExpression?: string
+}) {
+  const def = taskDefinition(options.taskType)
+  createDraft.value = emptyDraft()
+  createDialog.value = {
+    visible: true,
+    saving: false,
+    sourceTaskId: options.sourceTaskId,
+    form: {
+      category: def?.category || creatableCategories.value[0] || 'user',
+      taskType: options.taskType,
+      name: copiedTaskName(options.name),
+      mode: options.mode,
+      cronExpression: options.cronExpression || '0 9 * * *',
+      config: options.config,
+      total: Math.max(0, options.total),
+    },
+  }
+}
+
+function copiedTaskName(name: string) {
+  const base = name.trim() || '任务'
+  const suffix = ' 副本'
+  if (base.endsWith(suffix)) return base.slice(0, 100)
+  return `${base.slice(0, 100 - suffix.length)}${suffix}`
 }
 
 async function deleteTask(task: BatchTask) {
