@@ -47,14 +47,12 @@ public sealed class BatchTaskBackgroundService : BackgroundService
         if (seconds > 30) seconds = 30;
         var interval = TimeSpan.FromSeconds(seconds);
 
-        var maxConcurrent = _configuration.GetValue("BatchTasks:MaxConcurrent", 1);
-        if (maxConcurrent < 1) maxConcurrent = 1;
-        if (maxConcurrent > 10) maxConcurrent = 10;
+        var initialMaxConcurrent = ReadMaxConcurrent();
 
         _logger.LogInformation(
             "Batch task runner started, interval {IntervalSeconds} seconds, maxConcurrent {MaxConcurrent}",
             seconds,
-            maxConcurrent);
+            initialMaxConcurrent);
 
         // 延迟一点，避免与启动时 DB 迁移抢资源
         await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
@@ -67,6 +65,7 @@ public sealed class BatchTaskBackgroundService : BackgroundService
             {
                 // 先清理已结束的任务，避免“占位”导致无法继续启动新任务
                 CleanupCompletedTasks();
+                var maxConcurrent = ReadMaxConcurrent();
 
                 while (_runningTasks.Count < maxConcurrent)
                 {
@@ -86,6 +85,14 @@ public sealed class BatchTaskBackgroundService : BackgroundService
 
             await Task.Delay(interval, stoppingToken);
         }
+    }
+
+    private int ReadMaxConcurrent()
+    {
+        var maxConcurrent = _configuration.GetValue("BatchTasks:MaxConcurrent", 1);
+        if (maxConcurrent < 1) return 1;
+        if (maxConcurrent > 10) return 10;
+        return maxConcurrent;
     }
 
     private async Task RecoverInterruptedTasksAsync(CancellationToken cancellationToken)
