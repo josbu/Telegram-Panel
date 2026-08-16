@@ -135,6 +135,21 @@ public class BatchTaskRepository : Repository<BatchTask>, IBatchTaskRepository
             cancellationToken);
     }
 
+    public Task<bool> TryUpdateEditableDraftAsync(int id, int total, string? config, string? name, CancellationToken cancellationToken = default)
+    {
+        return ExecuteConditionalUpdateAsync(
+            _dbSet.Where(t => t.Id == id
+                && (t.Status == "paused"
+                    || t.Status == "completed"
+                    || t.Status == "failed"
+                    || t.Status == "canceled")),
+            setters => setters
+                .SetProperty(t => t.Name, name)
+                .SetProperty(t => t.Total, total)
+                .SetProperty(t => t.Config, config),
+            cancellationToken);
+    }
+
     public async Task<IEnumerable<BatchTask>> GetByStatusAsync(string status)
     {
         return await _dbSet

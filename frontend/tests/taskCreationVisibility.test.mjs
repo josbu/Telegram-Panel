@@ -80,3 +80,16 @@ test('新建任务弹窗在手机端收窄并纵向排版', () => {
   assert.match(taskConfigFormSource, /grid-template-columns: 1fr;/)
   assert.match(taskConfigFormSource, /:deep\(\.el-form-item__content\)/)
 })
+
+test('新建和编辑即时任务支持自定义任务名称', () => {
+  assert.match(typesSource, /name\?:\s*string \| null/)
+  assert.match(tasksSource, /<el-form-item v-if="!currentCreateTarget" label="任务名称">/)
+  assert.match(tasksSource, /placeholder="可选，留空则显示任务类型和 ID"/)
+  assert.match(tasksSource, /@change="onCreateModeChanged"/)
+  assert.match(tasksSource, /function onCreateModeChanged\(mode: string \| number \| boolean \| undefined\)/)
+  assert.match(tasksSource, /const taskDisplayName = form\.name\.trim\(\)/)
+  assert.match(tasksSource, /name:\s*taskDisplayName \|\| null/)
+  assert.match(tasksSource, /name:\s*fullTask\.name\?\.trim\(\) \|\| ''/)
+  assert.match(tasksSource, /name:\s*dialog\.form\.name\.trim\(\)/)
+  assert.match(tasksSource, /name:\s*fullTask\.name\?\.trim\(\) \|\| null/)
+})

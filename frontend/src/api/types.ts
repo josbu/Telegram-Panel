@@ -728,6 +728,7 @@ export interface CreateChatMembershipTaskRequest {
 export interface CreateTaskRequest {
   taskType: string
   total: number
+  name?: string | null
   config?: string | null
 }
 
