@@ -38,14 +38,14 @@
                     <el-input v-model="profile.apiId" />
                   </el-form-item>
                 </el-col>
-                <el-col :xs="24" :sm="7">
+                <el-col :xs="24" :sm="6">
                   <el-form-item label="ApiHash">
                     <el-input v-model="profile.apiHash" />
                   </el-form-item>
                 </el-col>
-                <el-col :xs="12" :sm="3">
+                <el-col :xs="12" :sm="4">
                   <el-form-item label="权重">
-                    <el-input-number v-model="profile.weight" :min="1" :max="1000" class="full" />
+                    <el-input-number v-model="profile.weight" :min="1" :max="1000" :controls="false" class="full" />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="12" :sm="3">
