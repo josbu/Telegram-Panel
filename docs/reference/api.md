@@ -203,6 +203,8 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 
 `GET /api/panel/tasks` 和 `GET /api/panel/tasks/{id}` 的 `BatchTaskDto` 包含可空 `name`。普通一次性任务可为空，前端使用“任务类型 #ID”兜底；计划任务触发或手动“立即执行”创建的批量任务会复制计划任务名称，历史任务应优先展示 `name`，并保留任务类型作为辅助说明。自 v1.31.57 起，`POST /api/panel/tasks` 和 `PATCH /api/panel/tasks/{id}` 支持可选 `name`，服务端会去除首尾空白并限制最多 100 个字符；即时任务传空或省略时继续使用兜底显示，编辑任务时省略 `name` 会保留原名称，传空字符串会清空名称。该字段通过 `BatchTasks.Name` 持久化；回滚到旧版需先忽略或删除该列。
 
+自 v1.31.58 起，任务中心操作列提供“复制”入口。复制普通批量任务会读取 `GET /api/panel/tasks/{id}` 的完整配置，清理运行态字段后打开“新建任务”弹窗，并默认以一次性任务提交；复制计划任务会读取 `GET /api/panel/scheduled-tasks/{id}` 的配置和 Cron，打开“新建任务”弹窗并默认选择 Cron 计划。复制不会修改原任务，也不会立即创建新任务，用户必须在弹窗中确认提交；真正落库仍复用既有 `POST /api/panel/tasks` 或 `POST /api/panel/scheduled-tasks`。成功判据是操作列出现“复制”，点击后弹窗显示“已复制任务 #ID 的配置”，专用表单字段按原配置回填，旧配置中的 `items`、`failures`、`recent_failures` 不会带入新任务。
+
 自 v1.31.44 起，`channel_group_private_create` 任务会在 `config.recent_failures`
 返回最近 20 条失败明细。字段包括 `time_utc`、`account_id`、`target_type`、
 `target` 和 `reason`。自 v1.31.48 起，`user_chat_active` 会在

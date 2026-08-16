@@ -103,3 +103,16 @@ test('任务账号来源只能在分类和编号之间二选一', () => {
   assert.doesNotMatch(taskConfigFormSource, /与账号分类合并执行/)
   assert.doesNotMatch(taskConfigFormSource, /请至少选择账号分类或填写账号编号/)
 })
+
+test('任务操作支持复制到新建表单而不是立即重跑', () => {
+  assert.match(tasksSource, /CopyDocument/)
+  assert.match(tasksSource, /title="复制"/)
+  assert.match(tasksSource, /@click="copyTask\(row\)"/)
+  assert.match(tasksSource, /@click="copyScheduledTask\(row\)"/)
+  assert.match(tasksSource, /initial-config-json="createDialog\.form\.config"/)
+  assert.match(tasksSource, /已复制任务 #\$\{createDialog\.sourceTaskId\} 的配置/)
+  assert.match(tasksSource, /function copyTask\(task: BatchTask\)/)
+  assert.match(tasksSource, /function copyScheduledTask\(task: ScheduledTask\)/)
+  assert.match(tasksSource, /function openCopiedCreateDialog/)
+  assert.match(tasksSource, /stripRuntimeFields\(fullTask\.config\)/)
+})
