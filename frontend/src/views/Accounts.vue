@@ -544,8 +544,8 @@
           />
           <el-form-item label="头像来源">
             <el-radio-group v-model="batchProfile.avatarSource">
-              <el-radio-button label="fixed">固定上传</el-radio-button>
-              <el-radio-button label="dictionary">图片字典变量</el-radio-button>
+              <el-radio-button value="fixed">固定上传</el-radio-button>
+              <el-radio-button value="dictionary">图片字典变量</el-radio-button>
             </el-radio-group>
           </el-form-item>
           <el-form-item v-if="batchProfile.avatarSource === 'fixed'" label="头像图片">
@@ -1894,6 +1894,7 @@ async function openMemberships(row: Row, type: 'channels' | 'groups') {
 }
 
 async function openInbox(row: Row) {
+  listDialog.visible = true
   listDialog.title = `系统通知（验证码） - ${accountLabel(row)}`
   listDialog.loading = true
   listDialog.type = 'messages'
@@ -1908,6 +1909,7 @@ async function openInbox(row: Row) {
 
 
 async function openDevices(row: Row) {
+  listDialog.visible = true
   listDialog.title = `在线设备 - ${accountLabel(row)}`
   listDialog.loading = true
   listDialog.type = 'devices'

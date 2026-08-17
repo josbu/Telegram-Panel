@@ -56,12 +56,13 @@
         <el-table-column label="上次运行" width="180">
           <template #default="{ row }">{{ formatTime(row.lastRunAtUtc) || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="270" fixed="right">
           <template #default="{ row }">
             <div class="icon-actions">
               <el-button link type="primary" :icon="InfoFilled" title="详情" @click="showScheduledDetails(row)" />
               <el-button link type="success" :icon="VideoPlay" title="立即执行" @click="runScheduledNow(row)" />
               <el-button link type="primary" :icon="Edit" title="编辑" @click="openEditScheduled(row)" />
+              <el-button v-if="canCopyScheduled(row)" link type="primary" :icon="CopyDocument" title="复制" @click="copyScheduledTask(row)" />
               <el-button v-if="row.status === 'enabled'" link type="warning" :icon="VideoPause" title="暂停" @click="pauseScheduled(row)" />
               <el-button v-else link type="success" :icon="VideoPlay" title="恢复" @click="resumeScheduled(row.id)" />
               <el-button link type="danger" :icon="Delete" title="删除" @click="deleteScheduled(row)" />
@@ -111,13 +112,14 @@
         <el-table-column label="完成时间" width="180">
           <template #default="{ row }">{{ formatTime(row.completedAt) || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="270" fixed="right">
           <template #default="{ row }">
             <div class="icon-actions">
               <el-button link type="primary" :icon="InfoFilled" title="详情" @click="showTaskDetails(row)" />
               <el-button v-if="canPause(row)" link type="warning" :icon="VideoPause" title="暂停" @click="pauseTask(row.id)" />
               <el-button v-if="canResume(row)" link type="success" :icon="VideoPlay" title="恢复" @click="resumeTask(row.id)" />
               <el-button v-if="canEdit(row)" link type="primary" :icon="Edit" title="编辑" @click="openEditTask(row)" />
+              <el-button v-if="canCopyTask(row)" link type="primary" :icon="CopyDocument" title="复制" @click="copyTask(row)" />
               <el-button v-if="canCancel(row)" link type="warning" :icon="CircleCloseFilled" title="取消" @click="cancelTask(row.id)" />
               <el-button link type="danger" :icon="Delete" title="删除" @click="deleteTask(row)" />
             </div>
@@ -171,11 +173,12 @@
         <el-table-column label="完成时间" width="180">
           <template #default="{ row }">{{ formatTime(row.completedAt) || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="210" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <div class="icon-actions">
               <el-button link type="primary" :icon="InfoFilled" title="详情" @click="showTaskDetails(row)" />
               <el-button v-if="canEdit(row)" link type="primary" :icon="Edit" title="编辑" @click="openEditTask(row)" />
+              <el-button v-if="canCopyTask(row)" link type="primary" :icon="CopyDocument" title="复制" @click="copyTask(row)" />
               <el-button v-if="canRerun(row)" link type="success" :icon="RefreshRight" title="重跑" @click="rerunTask(row)" />
               <el-button link type="danger" :icon="Delete" title="删除" @click="deleteTask(row)" />
             </div>
@@ -205,7 +208,27 @@
         class="mb-3"
       />
       <el-form :label-position="isTaskDialogCompact ? 'top' : 'right'" :label-width="isTaskDialogCompact ? 'auto' : '96px'">
-        <el-row :gutter="12">
+        <template v-if="createDialog.sourceTaskId > 0">
+          <el-alert
+            :title="`已复制 ${createDialog.sourceDescription} 的配置；确认任务名称、提交方式和配置后再提交，不会修改原任务。`"
+            type="success"
+            :closable="false"
+            class="mb-3"
+          />
+          <el-row :gutter="12">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="来源任务">
+                <el-input :model-value="createDialog.sourceDescription" disabled />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="任务类型">
+                <el-input :model-value="taskName(createDialog.form.taskType)" disabled />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </template>
+        <el-row v-else :gutter="12">
           <el-col :xs="24" :sm="12">
             <el-form-item label="任务分类">
               <el-select v-model="createDialog.form.category" class="full" @change="ensureTaskType">
@@ -223,8 +246,8 @@
         </el-row>
         <el-form-item label="提交方式">
           <el-radio-group v-model="createDialog.form.mode" @change="onCreateModeChanged">
-            <el-radio-button label="once">立即执行</el-radio-button>
-            <el-radio-button label="scheduled">Cron 计划</el-radio-button>
+            <el-radio-button value="once">立即执行</el-radio-button>
+            <el-radio-button value="scheduled">Cron 计划</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-alert v-if="currentCreateDefinition?.description" :title="currentCreateDefinition.description" type="info" :closable="false" class="mb-3" />
@@ -256,6 +279,7 @@
         <TaskConfigForm
           v-else-if="hasTaskConfigForm(createDialog.form.taskType)"
           :task-type="createDialog.form.taskType"
+          :initial-config-json="createDialog.form.config"
           @draft-changed="onCreateDraftChanged"
         />
 
@@ -269,7 +293,7 @@
             </el-button>
           </el-form-item>
         </template>
-        <el-collapse v-if="!currentCreateTarget && !hasTaskConfigForm(createDialog.form.taskType)" class="mb-3">
+        <el-collapse v-if="!currentCreateTarget && !hasTaskConfigForm(createDialog.form.taskType)" :model-value="createDialog.sourceTaskId > 0 ? ['json'] : []" class="mb-3">
           <el-collapse-item title="高级 JSON 配置" name="json">
             <el-alert
               title="该任务没有专用表单时，可填写通用 JSON 配置；模块后台会按任务类型解析。无需配置可留空。"
@@ -384,8 +408,8 @@
         </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="editScheduledDialog.form.status">
-            <el-radio-button label="enabled">启用</el-radio-button>
-            <el-radio-button label="paused">暂停</el-radio-button>
+            <el-radio-button value="enabled">启用</el-radio-button>
+            <el-radio-button value="paused">暂停</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <TaskConfigForm
@@ -415,7 +439,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleCloseFilled, CirclePlus, Delete, Edit, InfoFilled, Refresh, RefreshRight, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+import { CircleCloseFilled, CirclePlus, CopyDocument, Delete, Edit, InfoFilled, Refresh, RefreshRight, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { panelApi } from '@/api/panel'
 import type { BatchTask, ScheduledTask, TaskDefinition } from '@/api/types'
@@ -457,6 +481,7 @@ const createDialog = ref({
   visible: false,
   saving: false,
   sourceTaskId: 0,
+  sourceDescription: '',
   form: {
     category: '',
     taskType: '',
@@ -516,7 +541,7 @@ const availableCategories = computed(() => {
 })
 
 const taskCenterCreateDefinitions = computed(() =>
-  definitions.value.filter((x) => x.canCreate && hasTaskConfigForm(x.taskType) && x.category !== 'system'),
+  definitions.value.filter((x) => hasTaskConfigForm(x.taskType) && (x.canCreate || x.category !== 'system')),
 )
 
 const creatableCategories = computed(() => {
@@ -531,7 +556,12 @@ const creatableDefinitions = computed(() =>
 )
 
 const currentCreateDefinition = computed(() => definitions.value.find((x) => x.taskType === createDialog.value.form.taskType))
-const currentCreateTarget = computed(() => resolveCreateTarget(currentCreateDefinition.value))
+const currentCreateTarget = computed(() => {
+  const definition = currentCreateDefinition.value
+  if (createDialog.value.sourceTaskId > 0) return ''
+  if (!definition || hasTaskConfigForm(definition.taskType)) return ''
+  return resolveCreateTarget(definition)
+})
 
 const categoryFilteredTasks = computed(() =>
   tasks.value.filter((x) => filterCategory.value === 'all' || taskCategory(x.taskType) === filterCategory.value),
@@ -588,6 +618,7 @@ function categoryName(category: string) {
   if (category === 'user') return '用户任务'
   if (category === 'bot') return 'Bot 任务'
   if (category === 'system') return '系统任务'
+  if (category === 'channel') return '频道任务'
   return category || '-'
 }
 
@@ -647,6 +678,18 @@ function canEdit(task: BatchTask) {
   return !['pending', 'running'].includes(status) || def.autoPauseBeforeEdit
 }
 
+function canCopyTask(task: BatchTask) {
+  return canCopyDefinition(task.taskType)
+}
+
+function canCopyScheduled(task: ScheduledTask) {
+  return canCopyDefinition(task.taskType)
+}
+
+function canCopyDefinition(taskType: string) {
+  return !!taskType.trim() && !!taskDefinition(taskType)
+}
+
 async function load(options: { silent?: boolean } = {}) {
   const showLoading = !options.silent
   if (showLoading) loading.value = true
@@ -672,6 +715,8 @@ async function load(options: { silent?: boolean } = {}) {
 function openCreateDialog() {
   const firstCategory = creatableCategories.value[0] || 'user'
   createDraft.value = emptyDraft()
+  createDialog.value.sourceTaskId = 0
+  createDialog.value.sourceDescription = ''
   createDialog.value.form = {
     category: firstCategory,
     taskType: '',
@@ -687,6 +732,8 @@ function openCreateDialog() {
 
 function ensureTaskType() {
   const first = creatableDefinitions.value[0]
+  createDialog.value.sourceTaskId = 0
+  createDialog.value.sourceDescription = ''
   createDialog.value.form.taskType = first?.taskType || ''
   createDialog.value.form.name = ''
   createDialog.value.form.config = ''
@@ -695,6 +742,8 @@ function ensureTaskType() {
 }
 
 function onTaskTypeChanged() {
+  createDialog.value.sourceTaskId = 0
+  createDialog.value.sourceDescription = ''
   createDialog.value.form.name = ''
   createDialog.value.form.config = ''
   createDialog.value.form.total = defaultTotalForTask(createDialog.value.form.taskType)
@@ -836,6 +885,7 @@ function hasTaskConfigForm(taskType: string) {
   return taskType === 'user_chat_active'
     || taskType === 'channel_group_private_create'
     || taskType === 'channel_group_publicize'
+    || taskType === 'fragment_username_monitor'
     || taskType === 'auto_change_login_email'
 }
 
@@ -967,9 +1017,69 @@ async function rerunTask(task: BatchTask) {
     taskType: fullTask.taskType,
     name: fullTask.name?.trim() || null,
     total: Math.max(0, fullTask.total),
-    config: fullTask.config ? stripRuntimeFields(fullTask.config) : null,
+    config: fullTask.config ? stripRuntimeFields(fullTask.taskType, fullTask.config) : null,
   })
   await load()
+}
+
+async function copyTask(task: BatchTask) {
+  const fullTask = await loadTaskDetail(task.id)
+  openCopiedCreateDialog({
+    sourceTaskId: fullTask.id,
+    sourceDescription: `执行任务 #${fullTask.id}`,
+    taskType: fullTask.taskType,
+    name: fullTask.name?.trim() || '',
+    mode: 'once',
+    cronExpression: '0 9 * * *',
+    total: Math.max(0, fullTask.total),
+    config: fullTask.config ? stripRuntimeFields(fullTask.taskType, fullTask.config) : '',
+  })
+}
+
+async function copyScheduledTask(task: ScheduledTask) {
+  const fullTask = await loadScheduledTaskDetail(task.id, task)
+  openCopiedCreateDialog({
+    sourceTaskId: fullTask.id,
+    sourceDescription: `计划任务 #${fullTask.id}`,
+    taskType: fullTask.taskType,
+    name: scheduledName(fullTask),
+    mode: 'scheduled',
+    cronExpression: fullTask.cronExpression,
+    total: Math.max(0, fullTask.total),
+    config: fullTask.configJson ? stripRuntimeFields(fullTask.taskType, fullTask.configJson) : '',
+  })
+}
+
+function openCopiedCreateDialog(draft: {
+  sourceTaskId: number
+  sourceDescription: string
+  taskType: string
+  name: string
+  mode: string
+  cronExpression: string
+  total: number
+  config: string
+}) {
+  const def = taskDefinition(draft.taskType)
+  if (!def) {
+    ElMessage.warning('该任务类型当前未安装或不可识别，无法复制')
+    return
+  }
+
+  createDraft.value = emptyDraft()
+  moduleWindow.value.visible = false
+  createDialog.value.sourceTaskId = draft.sourceTaskId
+  createDialog.value.sourceDescription = draft.sourceDescription
+  createDialog.value.form = {
+    category: def.category || '',
+    taskType: draft.taskType,
+    name: draft.name,
+    mode: draft.mode,
+    cronExpression: draft.cronExpression || '0 9 * * *',
+    config: draft.config,
+    total: Math.max(0, draft.total),
+  }
+  createDialog.value.visible = true
 }
 
 async function runScheduledNow(task: ScheduledTask) {
@@ -1149,12 +1259,15 @@ function parseJsonObject(config: string): Record<string, any> | null {
   }
 }
 
-function stripRuntimeFields(config: string) {
+function stripRuntimeFields(taskType: string, config: string) {
   const obj = parseJsonObject(config)
   if (!obj) return config
   delete obj.items
   delete obj.recent_failures
   delete obj.failures
+  if (taskType === 'fragment_username_monitor') {
+    for (const key of ['StartedAtUtc', 'AssignedUsernames', 'LastCheckTime', 'Error', 'Canceled']) delete obj[key]
+  }
   return JSON.stringify(obj, null, 2)
 }
 
@@ -1166,10 +1279,49 @@ function buildReadableConfigDetails(taskType: string, config: string) {
   if (taskType === 'channel_group_publicize') return buildPublicizeDetails(obj)
   if (taskType === 'account_auto_sync') return buildAccountSyncDetails(obj)
   if (taskType === 'auto_change_login_email') return buildAutoLoginEmailDetails(obj)
+  if (taskType === 'fragment_username_monitor') return buildFragmentUsernameDetails(obj)
+
 
   if (taskType === 'user_join_subscribe') return buildUserJoinSubscribeDetails(obj)
 
   return buildGenericConfigDetails(obj)
+}
+
+function buildFragmentUsernameDetails(obj: Record<string, any>) {
+  const usernames = readConfigArray(obj, 'Usernames', 'usernames')
+  const targetGroupIds = readConfigArray(obj, 'TargetGroupIds', 'targetGroupIds')
+  const assignedUsernames = readConfigArray(obj, 'AssignedUsernames', 'assignedUsernames')
+  const durationHours = readConfigNumber(obj, 0, 'DurationHours', 'durationHours')
+  const lines = [
+    `监控用户名数: ${usernames.length}`,
+    `目标频道分类: ${targetGroupIds.length > 0 ? targetGroupIds.map((x) => `#${x}`).join(', ') : '-'}`,
+    `检查间隔: ${readConfigNumber(obj, 300, 'CheckIntervalSeconds', 'checkIntervalSeconds')} 秒`,
+    `查询延迟: ${readConfigNumber(obj, 1500, 'QueryDelayMs', 'queryDelayMs')} ms`,
+    `运行时长: ${durationHours <= 0 ? '持续运行' : `${durationHours} 小时`}`,
+  ]
+  if (assignedUsernames.length > 0) lines.push(`已抢注: ${assignedUsernames.join(', ')}`)
+  const lastCheckTime = String(obj.LastCheckTime || obj.lastCheckTime || '').trim()
+  if (lastCheckTime) lines.push(`上次检查: ${formatTime(lastCheckTime)}`)
+  const error = String(obj.Error || obj.error || '').trim()
+  if (error) lines.push(`错误: ${error}`)
+  if (obj.Canceled === true || obj.canceled === true) lines.push('取消标记: 是')
+  return lines
+}
+
+function readConfigArray(obj: Record<string, any>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = obj[key]
+    if (Array.isArray(value)) return value.map((x) => String(x ?? '').trim()).filter(Boolean)
+  }
+  return []
+}
+
+function readConfigNumber(obj: Record<string, any>, fallback: number, ...keys: string[]) {
+  for (const key of keys) {
+    const value = Number(obj[key])
+    if (Number.isFinite(value)) return value
+  }
+  return fallback
 }
 
 function buildPrivateCreateDetails(obj: Record<string, any>) {

@@ -1,12 +1,99 @@
 <template>
   <div class="category-page">
-    <el-card shadow="never" class="page-card category-create-card">
+    <el-card shadow="never" class="page-card">
       <template #header>
-        <div class="card-header">
-          <span>添加分类</span>
-          <span class="muted">新增后可用于导入、账号筛选和批量任务排除</span>
+        <div class="card-header category-header">
+          <div>
+            <div class="card-title">账号批量改分类</div>
+            <div class="muted">和账号列表一致：先筛选/多选账号，再在顶部操作栏批量改到目标分类。</div>
+          </div>
+          <el-button :icon="Refresh" :loading="accountsLoading || loading" @click="loadAll">刷新</el-button>
         </div>
       </template>
+
+      <div class="toolbar category-account-toolbar">
+        <el-select v-model="filterCategoryId" class="filter" placeholder="全部分类" @change="clearAccountSelection">
+          <el-option label="全部分类" :value="-1" />
+          <el-option label="未分类" :value="0" />
+          <el-option v-for="category in categories" :key="category.id" :label="category.name" :value="category.id" />
+        </el-select>
+        <el-input
+          v-model="accountSearch"
+          class="search"
+          placeholder="搜索账号编号、手机号、昵称、用户名..."
+          clearable
+          :prefix-icon="Search"
+          @clear="clearAccountSelection"
+          @input="clearAccountSelection"
+        />
+        <el-select v-model="batchCategoryId" class="filter" placeholder="目标分类">
+          <el-option label="改为未分类" :value="0" />
+          <el-option v-for="category in categories" :key="category.id" :label="category.name" :value="category.id" />
+        </el-select>
+        <el-button :icon="Select" :disabled="accountsLoading || filteredAccounts.length === 0" @click="selectFilteredAccounts">
+          全选当前筛选
+        </el-button>
+        <el-button :disabled="selectedAccountIds.length === 0" @click="clearAccountSelection">清空选择</el-button>
+        <el-button
+          type="primary"
+          :icon="Select"
+          :loading="savingBatchCategory"
+          :disabled="selectedAccountIds.length === 0 || batchCategoryId === undefined"
+          @click="applyBatchCategory"
+        >
+          批量修改分类（已选）
+        </el-button>
+        <el-tag v-if="selectedAccountIds.length > 0" type="info">已选 {{ selectedAccountIds.length }}</el-tag>
+        <span v-else class="muted">账号 {{ filteredAccounts.length }} / {{ accounts.length }}</span>
+      </div>
+
+      <el-table
+        ref="accountTableRef"
+        v-loading="accountsLoading"
+        :data="filteredAccounts"
+        row-key="id"
+        stripe
+        class="mt-4"
+        @selection-change="onAccountSelectionChange"
+      >
+        <el-table-column type="selection" width="48" reserve-selection />
+        <el-table-column prop="displayNumber" label="编号" width="96">
+          <template #default="{ row }">#{{ row.displayNumber }}</template>
+        </el-table-column>
+        <el-table-column prop="displayPhone" label="手机号" min-width="150" />
+        <el-table-column label="账号信息" min-width="220">
+          <template #default="{ row }">
+            <div>{{ row.nickname || row.remark || '-' }}</div>
+            <div class="cell-sub">{{ row.username ? `@${row.username}` : '无用户名' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="当前分类" min-width="150">
+          <template #default="{ row }">
+            <el-tag v-if="row.category" effect="plain" class="category-name-tag" :style="accountCategoryTagStyle(row.category)">
+              {{ row.category.name }}
+            </el-tag>
+            <el-tag v-else type="info" effect="plain">未分类</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.isActive ? 'success' : 'info'" size="small">{{ row.isActive ? '启用' : '停用' }}</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card shadow="never" class="page-card mt-4">
+      <template #header>
+        <div class="card-header category-header">
+          <div>
+            <div class="card-title">分类管理</div>
+            <div class="muted">维护分类名称、描述和“是否排除在创建/批量任务之外”。</div>
+          </div>
+          <el-button :icon="Refresh" :loading="loading" @click="loadCategories">刷新分类</el-button>
+        </div>
+      </template>
+
       <el-form label-position="top" class="category-create-form">
         <el-form-item label="分类名称" class="category-name-field">
           <el-input v-model="createForm.name" placeholder="例如：AI广告" />
@@ -18,28 +105,16 @@
           <el-checkbox v-model="createForm.excludeFromOperations">不出现在创建/批量任务中</el-checkbox>
         </el-form-item>
         <el-form-item class="category-submit-field">
-          <el-button type="primary" class="full-btn" :disabled="!createForm.name.trim()" :loading="creating" @click="createCategory">
+          <el-button type="primary" class="full-btn" :icon="Plus" :disabled="!createForm.name.trim()" :loading="creating" @click="createCategory">
             添加分类
           </el-button>
         </el-form-item>
       </el-form>
-    </el-card>
 
-    <el-card shadow="never" class="page-card mt-4">
-      <template #header>
-        <div class="card-header">
-          <span>分类列表</span>
-          <el-button :icon="Refresh" :loading="loading" @click="loadAll">刷新</el-button>
-        </div>
-      </template>
-      <el-table v-loading="loading" :data="categories" stripe>
+      <el-table v-loading="loading" :data="categories" stripe class="mt-4">
         <el-table-column label="分类名称" min-width="150">
           <template #default="{ row }">
-            <el-tag
-              effect="plain"
-              class="category-name-tag"
-              :style="accountCategoryTagStyle(row)"
-            >
+            <el-tag effect="plain" class="category-name-tag" :style="accountCategoryTagStyle(row)">
               {{ row.name }}
             </el-tag>
           </template>
@@ -56,58 +131,14 @@
         <el-table-column prop="accountCount" label="账号数量" width="100" />
         <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" :icon="Edit" @click="openEdit(row)" />
-            <el-button link type="danger" :icon="Delete" @click="deleteCategory(row)" />
+            <el-button link type="primary" :icon="Edit" title="编辑" @click="openEdit(row)" />
+            <el-button link type="danger" :icon="Delete" title="删除" @click="deleteCategory(row)" />
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <el-card shadow="never" class="page-card mt-4">
-      <template #header>
-        <div class="card-header">
-          <span>分类绑定账号</span>
-        </div>
-      </template>
-      <div class="toolbar category-assignment-toolbar">
-        <el-select v-model="assignCategoryId" placeholder="-- 请选择分类 --" class="filter" @change="syncSelectedAccounts">
-          <el-option label="-- 请选择分类 --" :value="0" />
-          <el-option v-for="category in categories" :key="category.id" :label="category.name" :value="category.id" />
-        </el-select>
-        <el-button type="primary" :disabled="assignCategoryId === 0 || accountsLoading" :loading="savingAssignments" @click="saveAssignments">
-          保存勾选到分类
-        </el-button>
-        <span class="muted">已选 {{ selectedAccountIds.length }} / {{ accounts.length }}</span>
-      </div>
-
-      <el-table
-        ref="accountTableRef"
-        v-loading="accountsLoading"
-        :data="accounts"
-        row-key="id"
-        stripe
-        class="mt-4"
-        @selection-change="onAccountSelectionChange"
-      >
-        <el-table-column type="selection" width="48" reserve-selection />
-        <el-table-column prop="displayNumber" label="编号" width="96">
-          <template #default="{ row }">#{{ row.displayNumber }}</template>
-        </el-table-column>
-
-        <el-table-column prop="displayPhone" label="手机号" min-width="150" />
-        <el-table-column prop="nickname" label="昵称" min-width="130">
-          <template #default="{ row }">{{ row.nickname || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="username" label="用户名" min-width="130">
-          <template #default="{ row }">{{ row.username ? `@${row.username}` : '-' }}</template>
-        </el-table-column>
-        <el-table-column label="当前分类" min-width="140">
-          <template #default="{ row }">{{ row.category?.name || '未分类' }}</template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <el-dialog v-model="editDialog.visible" title="编辑分类" width="460px">
+    <el-dialog v-model="editDialog.visible" title="编辑分类" width="min(460px, calc(100vw - 24px))">
       <el-form label-position="top">
         <el-form-item label="分类名称">
           <el-input v-model="editDialog.form.name" />
@@ -130,10 +161,10 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import type { TableInstance } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Edit, Refresh } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus, Refresh, Search, Select } from '@element-plus/icons-vue'
 import { panelApi } from '@/api/panel'
 import type { AccountCategory, AccountListItem } from '@/api/types'
 import { accountCategoryTagStyle } from '@/utils/categoryStyle'
@@ -143,8 +174,10 @@ const accounts = ref<AccountListItem[]>([])
 const loading = ref(false)
 const accountsLoading = ref(false)
 const creating = ref(false)
-const savingAssignments = ref(false)
-const assignCategoryId = ref(0)
+const savingBatchCategory = ref(false)
+const filterCategoryId = ref(-1)
+const batchCategoryId = ref<number | undefined>(undefined)
+const accountSearch = ref('')
 const selectedAccountIds = ref<number[]>([])
 const accountTableRef = ref<TableInstance>()
 
@@ -164,6 +197,37 @@ const editDialog = reactive({
     excludeFromOperations: false,
   },
 })
+
+const filteredAccounts = computed(() => {
+  const search = accountSearch.value.trim().toLowerCase()
+  return accounts.value.filter((account) => {
+    if (filterCategoryId.value === 0 && account.category) return false
+    if (filterCategoryId.value > 0 && account.category?.id !== filterCategoryId.value) return false
+    if (!search) return true
+    return accountSearchText(account).includes(search)
+  })
+})
+
+function accountSearchText(account: AccountListItem) {
+  return [
+    `#${account.displayNumber}`,
+    String(account.displayNumber || ''),
+    account.displayPhone,
+    account.phone,
+    account.nickname,
+    account.username,
+    account.remark,
+    account.category?.name,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
+
+function targetCategoryName() {
+  if (batchCategoryId.value === 0) return '未分类'
+  return categories.value.find((x) => x.id === batchCategoryId.value)?.name || ''
+}
 
 async function loadCategories() {
   loading.value = true
@@ -207,7 +271,7 @@ async function loadAllAccounts() {
 
 async function loadAll() {
   await Promise.all([loadCategories(), loadAccounts()])
-  await syncSelectedAccounts()
+  clearAccountSelection()
 }
 
 async function createCategory() {
@@ -261,39 +325,58 @@ async function deleteCategory(category: AccountCategory) {
     cancelButtonText: '取消',
   })
   await panelApi.deleteAccountCategory(category.id)
-  if (assignCategoryId.value === category.id) assignCategoryId.value = 0
+  if (filterCategoryId.value === category.id) filterCategoryId.value = -1
+  if (batchCategoryId.value === category.id) batchCategoryId.value = undefined
   ElMessage.success('删除成功')
   await loadAll()
-}
-
-async function syncSelectedAccounts() {
-  await nextTick()
-  accountTableRef.value?.clearSelection()
-  selectedAccountIds.value = []
-  if (assignCategoryId.value <= 0) return
-  accounts.value
-    .filter((account) => account.category?.id === assignCategoryId.value)
-    .forEach((account) => accountTableRef.value?.toggleRowSelection(account, true))
 }
 
 function onAccountSelectionChange(selection: AccountListItem[]) {
   selectedAccountIds.value = selection.map((x) => x.id)
 }
 
-async function saveAssignments() {
-  if (assignCategoryId.value <= 0) {
-    ElMessage.warning('请选择分类')
+async function selectFilteredAccounts() {
+  await nextTick()
+  accountTableRef.value?.clearSelection()
+  filteredAccounts.value.forEach((account) => accountTableRef.value?.toggleRowSelection(account, true))
+}
+
+function clearAccountSelection() {
+  accountTableRef.value?.clearSelection()
+  selectedAccountIds.value = []
+}
+
+async function applyBatchCategory() {
+  if (selectedAccountIds.value.length === 0) {
+    ElMessage.warning('请先选择账号')
     return
   }
-  savingAssignments.value = true
+  if (batchCategoryId.value === undefined) {
+    ElMessage.warning('请选择目标分类')
+    return
+  }
+
+  const target = targetCategoryName()
+  await ElMessageBox.confirm(
+    `将把已选 ${selectedAccountIds.value.length} 个账号修改为「${target}」。是否继续？`,
+    '确认批量修改分类',
+    { type: 'warning', confirmButtonText: '修改分类', cancelButtonText: '取消' },
+  )
+
+  savingBatchCategory.value = true
   try {
-    await panelApi.saveAccountCategoryAssignments(assignCategoryId.value, selectedAccountIds.value)
-    ElMessage.success('分类绑定已保存')
+    const categoryId = batchCategoryId.value > 0 ? batchCategoryId.value : null
+    await panelApi.batchSetAccountCategory(selectedAccountIds.value, categoryId)
+    ElMessage.success(`分类已更新：${selectedAccountIds.value.length} 个账号`)
     await loadAll()
   } finally {
-    savingAssignments.value = false
+    savingBatchCategory.value = false
   }
 }
+
+watch([filterCategoryId, accountSearch], () => {
+  clearAccountSelection()
+})
 
 onMounted(loadAll)
 </script>
@@ -308,6 +391,16 @@ onMounted(loadAll)
   width: 100%;
   margin-left: 0;
   margin-right: 0;
+}
+
+.category-header {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.card-title {
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .category-create-form {
@@ -325,8 +418,12 @@ onMounted(loadAll)
   align-items: end;
 }
 
-.category-assignment-toolbar .filter {
+.category-account-toolbar .filter {
   width: 220px;
+}
+
+.category-account-toolbar .search {
+  width: min(360px, 100%);
 }
 
 .full-btn {
@@ -348,8 +445,9 @@ onMounted(loadAll)
     grid-template-columns: 1fr;
   }
 
-  .category-assignment-toolbar .filter,
-  .category-assignment-toolbar .el-button {
+  .category-account-toolbar .filter,
+  .category-account-toolbar .search,
+  .category-account-toolbar .el-button {
     width: 100%;
   }
 }

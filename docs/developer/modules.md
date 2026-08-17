@@ -245,6 +245,8 @@ await taskManagement.UpdateTaskConfigAsync(
 
 任务中心创建普通批量任务时可传 `name` 作为用户可读任务名称，宿主会写入 `BatchTasks.Name` 并在执行中/历史任务列表优先展示；名称可空，留空时前端按“任务类型 #ID”兜底。模块或自动化调用编辑已有批量任务时，如果不想改变名称应省略 `name` 字段；传空字符串表示清空名称。名称最长 100 个字符，超过时宿主应返回可展示的校验错误。
 
+任务中心“复制”是宿主通用能力，不依赖模块是否提供任务中心专用表单或 `CreateRoute`。前端会读取原 `BatchTask` / `ScheduledTask` 的完整 `taskType`、`name`、`total`、`config` / `configJson` 和 Cron，清理已知运行态字段后打开“新建任务”弹窗；没有宿主专用表单的模块任务会使用通用 JSON 配置区提交到 `POST /api/panel/tasks` 或 `POST /api/panel/scheduled-tasks`。模块作者必须把可复用配置与运行态结果分开，避免复制任务时把进度、锁、游标或失败明细当作新任务输入。
+
 ### 6）持续任务的停止条件要写清楚
 
 模块作者最好明确区分以下几种结束原因：
@@ -735,6 +737,8 @@ public IEnumerable<ModulePageDefinition> GetPages(ModuleHostContext context)
 - 不实现旧 Razor 页面时，`GetPages()` 返回空。
 - 静态资源不会被宿主自动映射，模块必须自己在 `MapEndpoints` 中提供资源访问接口，或把脚本样式内联到 HTML。
 - 修改页面/API 后必须递增 `manifest.json` 的版本，重新打包并更新生产模块包。
+- Fragment 用户名监控模块自 1.2.9 起已切换为模块自带静态页面：入口仍是 `/ext/fragment-username-checker/main`，`GetPages()` 返回空，页面通过 `/api/panel/extensions/fragment-username-checker` 聚合接口读取分类、可用私密频道数和可编辑任务配置。
+- 适用宿主前端已包含 Fragment 任务中心表单且已安装 Fragment 模块 1.2.9+ 时，`fragment_username_monitor` 可以直接在「任务中心」新建、编辑和保存配置；任务中心不再因为该任务的 `CreateRoute` 自动跳到模块静态页，模块页 `/ext/fragment-username-checker/main` 只作为独立入口保留。
 - 如果线上仍看到旧 Razor 页面，通常是生产环境还装着旧 `.tpm`，或模块加载失败后回滚到了 `LastGoodVersion`。
 
 ## 旧版 UI 模块项目模板（Razor 组件，兼容模式）
@@ -978,7 +982,7 @@ public IEnumerable<ModuleTaskDefinition> GetTasks(ModuleHostContext context)
 
 这些宿主方法会对 `A task was canceled`、连接关闭、代理断开等瞬时连接错误执行一次客户端重建重试；调用方取消任务时仍会传播取消，不会被当作普通失败。
 
-`user_chat_active` 账号持续活跃任务的目标字段也使用同一套目标解析边界：群组/频道链接按聊天目标解析，`@xxxbot`、`t.me/xxxbot?start=abc` 和 `tg://resolve?domain=xxxbot` 会解析为 Bot 私聊目标。自 v1.31.55 起，消息配置使用 `message_rules` 数组；每条规则由多行 `text` 和可选的单个 `image_dictionary_token` 组成，执行器按 `message_mode` 对整条规则随机或队列循环。规则可为纯文字、纯图片或图片加说明文字，内部换行必须原样保留。模块编辑器保存时同时维护旧版 `dictionary`，且仅在所有规则共享同一个非空图片字典时维护全局 `image_dictionary_token`；读取时若 `message_rules` 为空，则从这两个旧字段迁移。前置条件是目标和引用字典均可由宿主模板服务解析；成功判据是创建、重跑和实际执行使用同一套规则归一化结果。无效图片字典应在创建或启动阶段失败，不得静默降级。回滚到 v1.31.54 或更早版本前，应把配置收敛为纯文字或所有规则共享同一图片字典，否则旧版无法完整表达每条独立图片字典。图片字典只适用于群组/频道等支持媒体发送的目标；Bot 私聊保活建议使用文字规则。
+`user_chat_active` 账号持续活跃任务的目标字段也使用同一套目标解析边界：群组/频道链接按聊天目标解析，`@xxxbot`、`t.me/xxxbot?start=abc` 和 `tg://resolve?domain=xxxbot` 会解析为 Bot 私聊目标。目标列表支持固定目标，也支持把某一行写成单个文本字典变量（例如 `{groups}`）；执行器会把该文本字典的全部启用内容展开为目标，字典内容可用换行、空格或逗号分隔多个目标。目标字典必须是已启用且有可用内容的文本字典，不能使用 `{time}` 或图片字典。自 v1.31.55 起，消息配置使用 `message_rules` 数组；每条规则由多行 `text` 和可选的单个 `image_dictionary_token` 组成，执行器按 `message_mode` 对整条规则随机或队列循环。规则可为纯文字、纯图片或图片加说明文字，内部换行必须原样保留。模块编辑器保存时同时维护旧版 `dictionary`，且仅在所有规则共享同一个非空图片字典时维护全局 `image_dictionary_token`；读取时若 `message_rules` 为空，则从这两个旧字段迁移。前置条件是目标和引用字典均可由宿主模板服务解析；成功判据是创建、重跑和实际执行使用同一套规则归一化结果。无效目标文本字典或图片字典应在创建或启动阶段失败，不得静默降级。回滚到 v1.31.54 或更早版本前，应把配置收敛为固定目标和纯文字规则，或所有规则共享同一图片字典，否则旧版无法完整表达每条独立图片字典。图片字典只适用于群组/频道等支持媒体发送的目标；Bot 私聊保活建议使用文字规则。
 
 自 v1.31.56 起，`user_chat_active` 增加发送动作合同：`message_action_mode=send_generated_text|forward_url`。默认 `send_generated_text` 保持原规则发送，并可通过 `reply_to_message_url` 让文字/图片消息回复目标内的指定消息；前端只填写 Telegram 消息链接并从链接提取消息 ID，原始 API 仍兼容 `reply_to_message_id`，但不再作为界面字段展示。`forward_url` 会忽略 `message_rules`、`dictionary`、图片字典和 AI 验证，改用 `forward_source_urls` 作为来源消息链接列表后调用 Telegram 原生转发；前端不展示内容模式，来源选择按默认随机策略保存，API 自动化如需队列选择仍可显式传 `message_mode=queue`。`forward_mode=with_attribution|hide_attribution` 控制是否保留原作者引用。`skip_if_last_message_from_self=true` 时，执行器会在每次发送或转发前读取目标最新普通消息，若该消息仍由当前执行账号发出，则把本轮记为已处理但不发送，用于避免同账号连续刷屏。前置条件是执行账号能访问来源消息和目标会话；成功判据是任务详情显示发送动作、来源数或回复链接，开启去重时同账号连续发言会跳过本轮，实际发送返回 Telegram 消息 ID。失败排查先看 `recent_failures.reason`，常见原因为回复/来源链接无消息 ID、账号无权访问来源、目标无权发言、回复消息在目标中不存在，或开启去重后无法读取目标最新消息。回滚到 v1.31.55 或更早版本前，应把任务改回 `send_generated_text` 并关闭去重，否则旧版只会按空消息规则处理转发配置且不识别去重字段。
 
