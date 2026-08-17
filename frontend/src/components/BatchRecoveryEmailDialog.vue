@@ -56,6 +56,14 @@
       </div>
 
       <el-alert
+        v-if="running"
+        class="mt-3"
+        type="info"
+        :closable="false"
+        show-icon
+        :title="progressText"
+      />
+      <el-alert
         class="mt-3"
         type="warning"
         :closable="false"
@@ -66,7 +74,7 @@
 
     <template #footer>
       <el-button :disabled="running" @click="visible = false">关闭</el-button>
-      <el-button type="primary" :loading="running" @click="submit">开始批量换绑</el-button>
+      <el-button type="primary" :loading="running" :disabled="running" @click="submit">开始批量换绑</el-button>
     </template>
   </el-dialog>
 </template>
@@ -75,7 +83,7 @@
 import { reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { panelApi } from '@/api/panel'
-import type { AccountBatchOperationResult } from '@/api/types'
+import type { AccountBatchOperationResult, AccountOperationItem, BatchChangeRecoveryEmailRequest } from '@/api/types'
 
 const emit = defineEmits<{
   completed: [result: AccountBatchOperationResult]
@@ -84,6 +92,7 @@ const emit = defineEmits<{
 const visible = ref(false)
 const running = ref(false)
 const accountIds = ref<number[]>([])
+const progressText = ref('')
 
 const form = reactive({
   cloudMailBaseUrl: '',
@@ -107,8 +116,8 @@ async function open(ids: number[]) {
     return
   }
 
-  await loadDefaults()
   visible.value = true
+  void loadDefaults()
 }
 
 async function loadDefaults() {
@@ -124,6 +133,7 @@ async function loadDefaults() {
 
 function resetRuntime() {
   running.value = false
+  progressText.value = ''
 }
 
 async function submit() {
@@ -152,8 +162,8 @@ async function submit() {
 
   running.value = true
   try {
-    const result = await panelApi.batchChangeRecoveryEmail({
-      accountIds: accountIds.value,
+    const result = await runAccountsSequentially({
+      accountIds: [],
       cloudMailBaseUrl: form.cloudMailBaseUrl,
       cloudMailToken: form.cloudMailToken,
       domain: form.domain.replace(/^@+/, ''),
@@ -171,7 +181,67 @@ async function submit() {
     emit('completed', result)
   } finally {
     running.value = false
+    progressText.value = ''
   }
+}
+
+async function runAccountsSequentially(basePayload: BatchChangeRecoveryEmailRequest): Promise<AccountBatchOperationResult> {
+  const ids = [...accountIds.value]
+  const items: AccountOperationItem[] = []
+
+  for (let index = 0; index < ids.length; index += 1) {
+    const accountId = ids[index]
+    progressText.value = `正在处理 ${index + 1}/${ids.length}：账号 #${accountId}`
+
+    try {
+      const result = await panelApi.batchChangeRecoveryEmail({
+        ...basePayload,
+        accountIds: [accountId],
+      })
+      if (result.items.length > 0) {
+        items.push(...result.items)
+      } else {
+        items.push({
+          accountId,
+          phone: `#${accountId}`,
+          success: result.failed === 0,
+          summary: result.failed === 0 ? '已处理' : '处理失败',
+          error: result.failed === 0 ? null : '接口未返回账号明细',
+        })
+      }
+    } catch (error) {
+      const message = toRequestErrorMessage(error)
+      items.push({
+        accountId,
+        phone: `#${accountId}`,
+        success: false,
+        summary: '请求中断',
+        error: `单账号请求失败：${message}`,
+      })
+
+      for (const remainingId of ids.slice(index + 1)) {
+        items.push({
+          accountId: remainingId,
+          phone: `#${remainingId}`,
+          success: false,
+          summary: '未执行',
+          error: '已停止：前一个账号请求中断，避免重复并发操作',
+        })
+      }
+      break
+    }
+  }
+
+  return {
+    success: items.filter((item) => item.success).length,
+    failed: items.filter((item) => !item.success).length,
+    items,
+  }
+}
+
+function toRequestErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  return 'Network Error'
 }
 
 defineExpose({ open })

@@ -6,20 +6,43 @@ const tasksSource = await readFile(new URL('../src/views/Tasks.vue', import.meta
 const taskConfigFormSource = await readFile(new URL('../src/components/TaskConfigForm.vue', import.meta.url), 'utf8')
 const typesSource = await readFile(new URL('../src/api/types.ts', import.meta.url), 'utf8')
 
-test('新建任务只展示宿主明确支持且有专用表单的任务类型', () => {
+test('新建任务展示宿主前端支持的专用表单任务类型', () => {
   assert.match(typesSource, /canCreate:\s*boolean/)
   assert.match(
     tasksSource,
-    /definitions\.value\.filter\(\(x\) => x\.canCreate && hasTaskConfigForm\(x\.taskType\) && x\.category !== 'system'\)/,
+    /definitions\.value\.filter\(\(x\) => hasTaskConfigForm\(x\.taskType\) && \(x\.canCreate \|\| x\.category !== 'system'\)\)/,
   )
   assert.match(tasksSource, /taskCenterCreateDefinitions\.value\.map/)
   assert.match(tasksSource, /taskCenterCreateDefinitions\.value\s*\.filter/)
+})
+
+test('Fragment 用户名监控在任务中心使用独立配置表单', () => {
+  assert.match(tasksSource, /taskType === 'fragment_username_monitor'/)
+  assert.match(tasksSource, /if \(!definition \|\| hasTaskConfigForm\(definition\.taskType\)\) return ''/)
+  assert.match(tasksSource, /editRoute && !hasTaskConfigForm\(def\.taskType\)/)
+  assert.match(taskConfigFormSource, /taskType === 'fragment_username_monitor'/)
+  assert.match(taskConfigFormSource, /Usernames:/)
+  assert.match(taskConfigFormSource, /TargetGroupIds:/)
+  assert.match(taskConfigFormSource, /CheckIntervalSeconds:/)
+  assert.match(taskConfigFormSource, /AssignedUsernames: \[\]/)
 })
 
 test('独立模块任务编辑时携带任务 ID 返回模块页面', () => {
   assert.match(tasksSource, /resolveCreateTarget\(def\)/)
   assert.match(tasksSource, /taskId=\$\{encodeURIComponent\(String\(task\.id\)\)\}/)
   assert.match(tasksSource, /withModulePageMode\(routeWithTaskId, false\)/)
+})
+
+test('任务复制对模块任务走通用 JSON 新建表单', () => {
+  assert.match(tasksSource, /CopyDocument/)
+  assert.match(tasksSource, /v-if="canCopyTask\(row\)"[\s\S]*?title="复制"[\s\S]*?@click="copyTask\(row\)"/)
+  assert.match(tasksSource, /v-if="canCopyScheduled\(row\)"[\s\S]*?title="复制"[\s\S]*?@click="copyScheduledTask\(row\)"/)
+  assert.match(tasksSource, /function canCopyDefinition\(taskType: string\) \{\s*return !!taskType\.trim\(\) && !!taskDefinition\(taskType\)\s*\}/)
+  assert.match(tasksSource, /if \(createDialog\.value\.sourceTaskId > 0\) return ''/)
+  assert.match(tasksSource, /sourceDescription: `执行任务 #\$\{fullTask\.id\}`/)
+  assert.match(tasksSource, /sourceDescription: `计划任务 #\$\{fullTask\.id\}`/)
+  assert.match(tasksSource, /:model-value="createDialog\.sourceTaskId > 0 \? \['json'\] : \[\]"/)
+  assert.match(tasksSource, /:initial-config-json="createDialog\.form\.config"/)
 })
 
 test('宿主任务页面和通用表单不植入独立举报模块', () => {
@@ -29,6 +52,12 @@ test('宿主任务页面和通用表单不植入独立举报模块', () => {
   for (const source of [tasksSource, taskConfigFormSource]) {
     assert.doesNotMatch(source, /messageReport|BuildMessageReport|reportPresetName/)
   }
+})
+
+test('账号编号输入说明和解析支持逗号与顿号', () => {
+  assert.match(taskConfigFormSource, /accountNumbersPlaceholder = '可选：每行一个，或用英文逗号、中文逗号、顿号分隔；如 #1,#2、#3'/)
+  assert.match(taskConfigFormSource, /:placeholder="accountNumbersPlaceholder"/)
+  assert.match(taskConfigFormSource, /\.split\(\/\[\\s,，、;；\]\+\//)
 })
 
 test('待执行或执行中任务编辑前必须经过暂停屏障', () => {
@@ -68,6 +97,16 @@ test('账号持续活跃支持回复消息与转发来源配置', () => {
   assert.match(taskConfigFormSource, /message_mode: effectiveMessageMode/)
   assert.match(tasksSource, /\.\.\.\(isForwardMode \? \[\] : \[`内容模式:/)
 
+})
+
+test('账号持续活跃目标字段说明并校验文本字典变量', () => {
+  assert.match(taskConfigFormSource, /目标支持固定群组\/频道\/Bot 用户名\/链接，也支持单个文本字典变量/)
+  assert.match(taskConfigFormSource, /placeholder="每行一个固定目标，或单独填写一个文本字典变量，例如 \{groups\}"/)
+  assert.match(taskConfigFormSource, /支持文本字典变量：\{\{ targetVariableHint \}\}/)
+  assert.match(taskConfigFormSource, /function validateUserChatActiveTargetDictionaries\(targets: string\[\]\)/)
+  assert.match(taskConfigFormSource, /目标字典不能使用内置时间变量 \{time\}/)
+  assert.match(taskConfigFormSource, /不是已启用且有内容的文本字典/)
+  assert.match(taskConfigFormSource, /validateUserChatActiveTargetDictionaries\(targets\)/)
 })
 
 test('任务弹窗在手机端收窄并纵向排版', () => {
@@ -121,5 +160,5 @@ test('任务操作支持复制到新建表单而不是立即重跑', () => {
   assert.match(tasksSource, /function copyTask\(task: BatchTask\)/)
   assert.match(tasksSource, /function copyScheduledTask\(task: ScheduledTask\)/)
   assert.match(tasksSource, /function openCopiedCreateDialog/)
-  assert.match(tasksSource, /stripRuntimeFields\(fullTask\.config\)/)
+  assert.match(tasksSource, /stripRuntimeFields\(fullTask\.taskType, fullTask\.config\)/)
 })

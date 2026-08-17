@@ -4,7 +4,7 @@
 
     <template v-if="taskType === 'user_chat_active'">
       <el-alert
-        title="MaxMessages=0 表示持续运行，直到在任务中心手动取消；MaxMessages>0 时每次运行最多按可用账号数发送，每个账号最多 1 条。目标支持群组、频道和 Bot 用户名/链接；每条消息规则支持多段文字、图片字典、{time} 和文本字典变量。"
+        title="MaxMessages=0 表示持续运行，直到在任务中心手动取消；MaxMessages>0 时每次运行最多按可用账号数发送，每个账号最多 1 条。目标支持固定群组/频道/Bot 用户名/链接，也支持单个文本字典变量（如 {groups}）；每条消息规则支持多段文字、图片字典、{time} 和文本字典变量。"
         type="info"
         :closable="false"
         class="mb-3"
@@ -26,19 +26,19 @@
         </el-col>
         <el-col v-else :xs="24" :sm="16">
           <el-form-item label="账号编号">
-            <el-input v-model="forms.userChatActive.accountNumbersText" type="textarea" :rows="2" placeholder="支持 1、2、#3；一行或用逗号分隔" />
+            <el-input v-model="forms.userChatActive.accountNumbersText" type="textarea" :rows="2" :placeholder="accountNumbersPlaceholder" />
             <div class="form-hint no-offset">账号编号是账号列表里的「编号」，删除账号后可复用。</div>
           </el-form-item>
         </el-col>
       </el-row>
-
       <el-form-item label="目标">
-        <el-input v-model="forms.userChatActive.targetsText" type="textarea" :rows="5" placeholder="每行一个群组/频道/Bot 链接、用户名或 ID" />
+        <el-input v-model="forms.userChatActive.targetsText" type="textarea" :rows="5" placeholder="每行一个固定目标，或单独填写一个文本字典变量，例如 {groups}" />
+        <div class="form-hint no-offset">支持文本字典变量：{{ targetVariableHint }}。字典内容可放 t.me 链接、@用户名、频道 ID、Bot 用户名/链接；字典项内可用换行、空格或逗号分隔多个目标。</div>
       </el-form-item>
       <el-form-item label="发送动作">
         <el-radio-group v-model="forms.userChatActive.messageActionMode">
-          <el-radio-button label="send_generated_text">发送消息规则</el-radio-button>
-          <el-radio-button label="forward_url">转发消息链接</el-radio-button>
+          <el-radio-button value="send_generated_text">发送消息规则</el-radio-button>
+          <el-radio-button value="forward_url">转发消息链接</el-radio-button>
         </el-radio-group>
         <div class="form-hint no-offset">发送消息规则可选回复指定消息；转发模式会把来源消息转发到目标，支持保留或隐藏引用来源。</div>
       </el-form-item>
@@ -55,8 +55,8 @@
         </el-form-item>
         <el-form-item label="转发方式">
           <el-radio-group v-model="forms.userChatActive.forwardMode">
-            <el-radio-button label="with_attribution">带引用转发</el-radio-button>
-            <el-radio-button label="hide_attribution">不带引用转发</el-radio-button>
+            <el-radio-button value="with_attribution">带引用转发</el-radio-button>
+            <el-radio-button value="hide_attribution">不带引用转发</el-radio-button>
           </el-radio-group>
         </el-form-item>
       </template>
@@ -165,9 +165,9 @@
         </el-form-item>
         <el-form-item label="匹配方式">
           <el-radio-group v-model="forms.userChatActive.verificationMatchMode">
-            <el-radio-button label="mention_or_reply">仅 @账号 / 回复</el-radio-button>
-            <el-radio-button label="keyword">关键词</el-radio-button>
-            <el-radio-button label="regex">正则</el-radio-button>
+            <el-radio-button value="mention_or_reply">仅 @账号 / 回复</el-radio-button>
+            <el-radio-button value="keyword">关键词</el-radio-button>
+            <el-radio-button value="regex">正则</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="指定机器人">
@@ -206,16 +206,15 @@
         </el-col>
         <el-col v-else :xs="24" :sm="16">
           <el-form-item label="账号编号">
-            <el-input v-model="forms.privateCreate.accountNumbersText" type="textarea" :rows="2" placeholder="支持 1、2、#3；一行或用逗号分隔" />
+            <el-input v-model="forms.privateCreate.accountNumbersText" type="textarea" :rows="2" :placeholder="accountNumbersPlaceholder" />
             <div class="form-hint no-offset">账号编号是账号列表里的「编号」，删除账号后可复用。</div>
           </el-form-item>
         </el-col>
       </el-row>
-
       <el-form-item label="创建对象">
         <el-radio-group v-model="forms.privateCreate.createType">
-          <el-radio-button label="channel">频道</el-radio-button>
-          <el-radio-button label="group">群组</el-radio-button>
+          <el-radio-button value="channel">频道</el-radio-button>
+          <el-radio-button value="group">群组</el-radio-button>
         </el-radio-group>
       </el-form-item>
       <el-form-item v-if="forms.privateCreate.createType === 'channel'" label="频道分组">
@@ -290,16 +289,15 @@
         </el-col>
         <el-col v-else :xs="24" :sm="16">
           <el-form-item label="账号编号">
-            <el-input v-model="forms.publicize.accountNumbersText" type="textarea" :rows="2" placeholder="支持 1、2、#3；一行或用逗号分隔" />
+            <el-input v-model="forms.publicize.accountNumbersText" type="textarea" :rows="2" :placeholder="accountNumbersPlaceholder" />
             <div class="form-hint no-offset">账号编号是账号列表里的「编号」，删除账号后可复用。</div>
           </el-form-item>
         </el-col>
       </el-row>
-
       <el-form-item label="处理对象">
         <el-radio-group v-model="forms.publicize.targetType">
-          <el-radio-button label="channel">频道</el-radio-button>
-          <el-radio-button label="group">群组</el-radio-button>
+          <el-radio-button value="channel">频道</el-radio-button>
+          <el-radio-button value="group">群组</el-radio-button>
         </el-radio-group>
       </el-form-item>
       <el-form-item v-if="forms.publicize.targetType === 'channel'" label="来源分组">
@@ -381,6 +379,43 @@
       />
     </template>
 
+    <template v-else-if="taskType === 'fragment_username_monitor'">
+      <el-alert
+        title="任务中心内直接创建和编辑 Fragment 用户名监控；模块页仍保留为独立入口。保存后只更新任务配置，不跳转到模块页面。"
+        type="info"
+        :closable="false"
+        class="mb-3"
+      />
+      <el-form-item label="监控用户名">
+        <el-input v-model="forms.fragmentUsername.usernamesText" type="textarea" :rows="5" placeholder="每行一个用户名，例如：example1" />
+        <div class="form-hint no-offset">不需要填写 @；只接受 Telegram 公开用户名格式，重复项会自动去重。</div>
+      </el-form-item>
+      <el-form-item label="目标频道分类">
+        <el-select v-model="forms.fragmentUsername.targetGroupIds" multiple collapse-tags collapse-tags-tooltip class="full" placeholder="请选择私密频道所在分类">
+          <el-option v-for="item in channelGroups" :key="item.id" :label="item.name" :value="item.id" />
+        </el-select>
+        <div class="form-hint no-offset">用户名可注册时，系统会从所选分类下由账号创建、且没有公开用户名的私密频道池中挑选频道。</div>
+      </el-form-item>
+      <el-row :gutter="12">
+        <el-col :span="8">
+          <el-form-item label="检查间隔(秒)">
+            <el-input-number v-model="forms.fragmentUsername.checkIntervalSeconds" :min="60" :max="3600" :step="30" class="full" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
+          <el-form-item label="查询延迟(ms)">
+            <el-input-number v-model="forms.fragmentUsername.queryDelayMs" :min="500" :max="5000" :step="100" class="full" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
+          <el-form-item label="运行时长(小时)">
+            <el-input-number v-model="forms.fragmentUsername.durationHours" :min="0" :max="720" class="full" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <div class="form-hint">运行时长填 0 表示持续运行；保存会重置本任务的运行态字段，避免沿用旧的抢注结果或错误状态。</div>
+    </template>
+
     <template v-else-if="taskType === 'auto_change_login_email'">
       <el-alert
         title="默认只处理匹配 777000 登录邮箱重置通知的账号；强制执行仅用于人工确认后的补救场景。Cloud Mail URL/Token 使用系统设置页配置。"
@@ -405,12 +440,11 @@
         </el-col>
         <el-col v-else :xs="24" :sm="16">
           <el-form-item label="账号编号">
-            <el-input v-model="forms.autoLoginEmail.accountNumbersText" type="textarea" :rows="2" placeholder="支持 1、2、#3；一行或用逗号分隔" />
+            <el-input v-model="forms.autoLoginEmail.accountNumbersText" type="textarea" :rows="2" :placeholder="accountNumbersPlaceholder" />
             <div class="form-hint no-offset">账号编号是账号列表里的「编号」，删除账号后可复用。</div>
           </el-form-item>
         </el-col>
       </el-row>
-
       <el-form-item label="邮箱域名">
         <el-input v-model="forms.autoLoginEmail.domain" placeholder="example.com" />
         <div class="form-hint no-offset">将生成 手机号数字@域名；留空时使用系统 CloudMail:Domain。</div>
@@ -478,6 +512,7 @@ type AccountSourceMode = 'category' | 'number'
 type AutomationKind = 'privateCreate' | 'publicize'
 type UserChatActiveMessageActionMode = 'send_generated_text' | 'forward_url'
 type UserChatActiveForwardMode = 'with_attribution' | 'hide_attribution'
+type FragmentUsernameForm = ReturnType<typeof defaultFragmentUsernameForm>
 
 export interface TaskConfigDraft {
   total: number
@@ -500,6 +535,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'draft-changed': [draft: TaskConfigDraft]
 }>()
+
+const accountNumbersPlaceholder = '可选：每行一个，或用英文逗号、中文逗号、顿号分隔；如 #1,#2、#3'
 
 const loading = ref(false)
 const accountCategories = ref<AccountCategory[]>([])
@@ -527,6 +564,7 @@ const forms = reactive({
   userChatActive: defaultUserChatActiveForm(),
   privateCreate: defaultPrivateCreateForm(),
   publicize: defaultPublicizeForm(),
+  fragmentUsername: defaultFragmentUsernameForm() as FragmentUsernameForm,
   autoLoginEmail: defaultAutoLoginEmailForm(),
 })
 
@@ -547,6 +585,12 @@ const imageDictionaryNames = computed(() =>
 const textVariableHint = computed(() => {
   const names = ['{time}', ...textDictionaryNames.value.map((x) => `{${x}}`)]
   return names.join('、')
+})
+
+const targetVariableHint = computed(() => {
+  return textDictionaryNames.value.length > 0
+    ? textDictionaryNames.value.map((x) => `{${x}}`).join('、')
+    : '暂无可用文本字典'
 })
 
 const globalAiModelLabel = computed(() => {
@@ -603,6 +647,7 @@ function resetForms() {
   Object.assign(forms.userChatActive, defaultUserChatActiveForm())
   Object.assign(forms.privateCreate, defaultPrivateCreateForm())
   Object.assign(forms.publicize, defaultPublicizeForm())
+  Object.assign(forms.fragmentUsername, defaultFragmentUsernameForm())
   Object.assign(forms.autoLoginEmail, defaultAutoLoginEmailForm())
 }
 
@@ -706,6 +751,16 @@ function applyInitialConfig() {
     form.assetScopeId = readString(cfg.asset_scope_id) || newScopeId()
     return
   }
+  if (props.taskType === 'fragment_username_monitor') {
+    const form = forms.fragmentUsername
+    form.usernamesText = readStringArray(cfg.Usernames ?? cfg.usernames).join('\n')
+    form.targetGroupIds = normalizeIds(cfg.TargetGroupIds ?? cfg.targetGroupIds)
+    form.checkIntervalSeconds = clamp(readNumber(cfg.CheckIntervalSeconds ?? cfg.checkIntervalSeconds, 300), 60, 3600)
+    form.queryDelayMs = clamp(readNumber(cfg.QueryDelayMs ?? cfg.queryDelayMs, 1500), 500, 5000)
+    form.durationHours = clamp(readNumber(cfg.DurationHours ?? cfg.durationHours, 0), 0, 720)
+    return
+  }
+
   if (props.taskType === 'auto_change_login_email') {
     const form = forms.autoLoginEmail
     const categoryIds = normalizeIds(cfg.category_ids)
@@ -738,6 +793,8 @@ function pushDraft() {
       next = buildPrivateCreateDraft()
     } else if (props.taskType === 'channel_group_publicize') {
       next = buildPublicizeDraft()
+    } else if (props.taskType === 'fragment_username_monitor') {
+      next = buildFragmentUsernameDraft()
     } else if (props.taskType === 'auto_change_login_email') {
       next = buildAutoLoginEmailDraft()
     } else {
@@ -768,6 +825,7 @@ function buildUserChatActiveDraft(): TaskConfigDraft {
   const effectiveMessageMode = form.messageActionMode === 'send_generated_text' ? form.messageMode : 'random'
 
   if (targets.length === 0) throw new Error('请至少填写一个目标群组/频道/Bot')
+  validateUserChatActiveTargetDictionaries(targets)
   if (form.messageActionMode === 'forward_url') {
     if (forwardSourceUrls.length === 0) throw new Error('请至少填写一个转发来源消息链接')
   } else {
@@ -922,6 +980,31 @@ function buildPublicizeDraft(): TaskConfigDraft {
   }
 
   return validDraft(automationTotal(categoryIds, accountNumbers, form.perAccountBatchSize), config)
+}
+
+function buildFragmentUsernameDraft(): TaskConfigDraft {
+  const form = forms.fragmentUsername
+  const { usernames, invalidUsernames } = normalizeFragmentUsernames(form.usernamesText)
+  if (invalidUsernames.length > 0) throw new Error(`用户名格式不合法：${invalidUsernames.slice(0, 5).join('、')}`)
+  if (usernames.length === 0) throw new Error('请至少填写一个监控用户名')
+
+  const targetGroupIds = normalizedSelectedIds(form.targetGroupIds)
+  if (targetGroupIds.length === 0) throw new Error('请至少选择一个目标频道分类')
+
+  const config = {
+    Usernames: usernames,
+    TargetGroupIds: targetGroupIds,
+    CheckIntervalSeconds: clamp(Math.trunc(form.checkIntervalSeconds), 60, 3600),
+    QueryDelayMs: clamp(Math.trunc(form.queryDelayMs), 500, 5000),
+    DurationHours: clamp(Math.trunc(form.durationHours), 0, 720),
+    StartedAtUtc: null,
+    AssignedUsernames: [],
+    LastCheckTime: null,
+    Error: null,
+    Canceled: false,
+  }
+
+  return validDraft(usernames.length, config)
 }
 
 function buildAutoLoginEmailDraft(): TaskConfigDraft {
@@ -1204,6 +1287,16 @@ function defaultPublicizeForm() {
   }
 }
 
+function defaultFragmentUsernameForm() {
+  return {
+    usernamesText: '',
+    targetGroupIds: [] as number[],
+    checkIntervalSeconds: 300,
+    queryDelayMs: 1500,
+    durationHours: 0,
+  }
+}
+
 function defaultAutoLoginEmailForm() {
   return {
     accountSourceMode: 'category' as AccountSourceMode,
@@ -1249,6 +1342,21 @@ function normalizeUserChatActiveMessageRules(rules: UserChatActiveMessageRuleFor
     .filter((rule) => rule.text || rule.imageDictionaryName)
 }
 
+function validateUserChatActiveTargetDictionaries(targets: string[]) {
+  const available = new Set(textDictionaryNames.value.map((x) => x.toLowerCase()))
+  for (const target of targets) {
+    const tokenName = extractSingleDictionaryTokenName(target)
+    if (!tokenName) continue
+    if (tokenName.toLowerCase() === 'time') throw new Error('目标字典不能使用内置时间变量 {time}')
+    if (!available.has(tokenName.toLowerCase())) throw new Error(`目标字典无效：{${tokenName}} 不是已启用且有内容的文本字典`)
+  }
+}
+
+function extractSingleDictionaryTokenName(value: string) {
+  const match = value.trim().match(/^\{([a-zA-Z0-9_]+)\}$/)
+  return match ? match[1] : ''
+}
+
 function sharedRuleImageDictionaryName(rules: Array<{ imageDictionaryName: string }>) {
   const names = Array.from(new Set(rules.map((x) => x.imageDictionaryName.trim())))
   return names.length === 1 && names[0] ? names[0] : ''
@@ -1256,6 +1364,27 @@ function sharedRuleImageDictionaryName(rules: Array<{ imageDictionaryName: strin
 
 function normalizeMultilineText(value: string) {
   return value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+}
+
+function normalizeFragmentUsernames(value: string) {
+  const usernames: string[] = []
+  const invalidUsernames: string[] = []
+  const seen = new Set<string>()
+
+  for (const raw of value.split(/[\s,，;；]+/)) {
+    const username = raw.trim().replace(/^@+/, '').toLowerCase()
+    if (!username) continue
+    if (!/^[a-z][a-z0-9_]{4,31}$/.test(username)) {
+      invalidUsernames.push(username)
+      continue
+    }
+    if (!seen.has(username)) {
+      seen.add(username)
+      usernames.push(username)
+    }
+  }
+
+  return { usernames, invalidUsernames }
 }
 
 
@@ -1275,7 +1404,7 @@ function normalizedSelectedIds(values: number[]) {
 function parseAccountNumbers(value: string) {
   return Array.from(new Set(
     value
-      .split(/[\s,，;；]+/)
+      .split(/[\s,，、;；]+/)
       .map((x) => x.trim().replace(/^#+/, ''))
       .filter(Boolean)
       .map((x) => Number(x))
