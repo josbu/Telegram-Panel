@@ -1514,7 +1514,8 @@ public static class PanelAdminApiEndpoints
 
                     if (string.IsNullOrWhiteSpace(pendingCode))
                     {
-                        messages.Add($"找回邮箱失败：邮箱待确认但收码超时（{pollTimeoutSeconds}s）：{err}");
+                        var diag = await BuildCloudMailReceiveDiagAsync(cloudMail, cloudMailBaseUrl, cloudMailToken, email, cancellationToken);
+                        messages.Add($"找回邮箱失败：邮箱待确认但收码超时（{pollTimeoutSeconds}s）：{err}{(string.IsNullOrWhiteSpace(diag) ? string.Empty : "；" + diag)}");
                     }
                     else
                     {
@@ -1529,7 +1530,43 @@ public static class PanelAdminApiEndpoints
                         }
                         else
                         {
-                            messages.Add($"找回邮箱确认失败：{pendingConfirmErr}");
+                            if ((pendingConfirmErr ?? string.Empty).Contains("CODE_INVALID", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _ = await accountTools.ResendTwoFactorRecoveryEmailAsync(account.Id, cancellationToken);
+                                var retryCode = await WaitTelegramMailCodeAsync(
+                                    cloudMail,
+                                    cloudMailBaseUrl,
+                                    cloudMailToken,
+                                    email,
+                                    DateTimeOffset.UtcNow,
+                                    pollIntervalSeconds,
+                                    pollTimeoutSeconds,
+                                    sendEmailFilter,
+                                    subjectFilter,
+                                    TelegramMailCodePurpose.RecoveryEmail,
+                                    allowOlder: true,
+                                    cancellationToken);
+
+                                if (!string.IsNullOrWhiteSpace(retryCode))
+                                {
+                                    var (retryOk, retryErr) = await accountTools.ConfirmTwoFactorRecoveryEmailAsync(
+                                        account.Id,
+                                        retryCode,
+                                        cancellationToken);
+                                    if (retryOk)
+                                    {
+                                        okRecovery = true;
+                                        messages.Add("找回邮箱已确认绑定（之前存在待确认邮箱，重发后重试成功）");
+                                    }
+                                    else
+                                    {
+                                        messages.Add($"找回邮箱确认失败：{retryErr}");
+                                    }
+                                }
+                            }
+
+                            if (!okRecovery)
+                                messages.Add($"找回邮箱确认失败：{pendingConfirmErr}");
                         }
                     }
                 }
@@ -1565,7 +1602,8 @@ public static class PanelAdminApiEndpoints
                 if (string.IsNullOrWhiteSpace(code))
                 {
                     okRecovery = false;
-                    messages.Add($"找回邮箱收码超时（{pollTimeoutSeconds}s）");
+                    var diag = await BuildCloudMailReceiveDiagAsync(cloudMail, cloudMailBaseUrl, cloudMailToken, email, cancellationToken);
+                    messages.Add($"找回邮箱收码超时（{pollTimeoutSeconds}s）{(string.IsNullOrWhiteSpace(diag) ? string.Empty : "：" + diag)}");
                 }
                 else
                 {
@@ -1577,7 +1615,40 @@ public static class PanelAdminApiEndpoints
                     else
                     {
                         okRecovery = false;
-                        messages.Add($"找回邮箱确认失败：{confirmErr}");
+                        if ((confirmErr ?? string.Empty).Contains("CODE_INVALID", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _ = await accountTools.ResendTwoFactorRecoveryEmailAsync(account.Id, cancellationToken);
+                            var retryCode = await WaitTelegramMailCodeAsync(
+                                cloudMail,
+                                cloudMailBaseUrl,
+                                cloudMailToken,
+                                email,
+                                DateTimeOffset.UtcNow,
+                                pollIntervalSeconds,
+                                pollTimeoutSeconds,
+                                sendEmailFilter,
+                                subjectFilter,
+                                TelegramMailCodePurpose.RecoveryEmail,
+                                allowOlder: true,
+                                cancellationToken);
+
+                            if (!string.IsNullOrWhiteSpace(retryCode))
+                            {
+                                var (retryOk, retryErr) = await accountTools.ConfirmTwoFactorRecoveryEmailAsync(account.Id, retryCode, cancellationToken);
+                                if (retryOk)
+                                {
+                                    okRecovery = true;
+                                    messages.Add("找回邮箱已确认绑定（重发后重试成功）");
+                                }
+                                else
+                                {
+                                    messages.Add($"找回邮箱确认失败：{retryErr}");
+                                }
+                            }
+                        }
+
+                        if (!okRecovery)
+                            messages.Add($"找回邮箱确认失败：{confirmErr}");
                     }
                 }
             }
@@ -1640,7 +1711,8 @@ public static class PanelAdminApiEndpoints
                     {
                         okLogin = false;
                         loginKind = BatchEmailResultKind.Failed;
-                        messages.Add($"登录邮箱收码超时（{pollTimeoutSeconds}s）");
+                        var diag = await BuildCloudMailReceiveDiagAsync(cloudMail, cloudMailBaseUrl, cloudMailToken, email, cancellationToken);
+                        messages.Add($"登录邮箱收码超时（{pollTimeoutSeconds}s）{(string.IsNullOrWhiteSpace(diag) ? string.Empty : "：" + diag)}");
                     }
                     else
                     {
@@ -1653,7 +1725,42 @@ public static class PanelAdminApiEndpoints
                         {
                             okLogin = false;
                             loginKind = BatchEmailResultKind.Failed;
-                            messages.Add($"登录邮箱确认失败：{confirmErr}");
+                            if ((confirmErr ?? string.Empty).Contains("CODE_INVALID", StringComparison.OrdinalIgnoreCase)
+                                || (confirmErr ?? string.Empty).Contains("EMAIL_TOKEN_INVALID", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _ = await accountTools.SetLoginEmailAsync(account.Id, email, cancellationToken);
+                                var retryCode = await WaitTelegramMailCodeAsync(
+                                    cloudMail,
+                                    cloudMailBaseUrl,
+                                    cloudMailToken,
+                                    email,
+                                    DateTimeOffset.UtcNow,
+                                    pollIntervalSeconds,
+                                    pollTimeoutSeconds,
+                                    sendEmailFilter,
+                                    subjectFilter,
+                                    TelegramMailCodePurpose.LoginEmail,
+                                    allowOlder: true,
+                                    cancellationToken);
+
+                                if (!string.IsNullOrWhiteSpace(retryCode))
+                                {
+                                    var (retryOk, retryErr) = await accountTools.ConfirmLoginEmailAsync(account.Id, retryCode, cancellationToken);
+                                    if (retryOk)
+                                    {
+                                        okLogin = true;
+                                        loginKind = BatchEmailResultKind.Success;
+                                        messages.Add("登录邮箱已确认（重发后重试成功）");
+                                    }
+                                    else
+                                    {
+                                        messages.Add($"登录邮箱确认失败：{retryErr}");
+                                    }
+                                }
+                            }
+
+                            if (!okLogin)
+                                messages.Add($"登录邮箱确认失败：{confirmErr}");
                         }
                     }
                 }
@@ -7217,6 +7324,10 @@ public static class PanelAdminApiEndpoints
                 if (emails.Count == 0)
                     emails = await cloudMail.GetEmailListAsync(cloudMailBaseUrl, cloudMailToken, BuildRequest(null) with { SendEmail = null, Subject = null }, cancellationToken);
             }
+            catch (UnauthorizedAccessException)
+            {
+                throw;
+            }
             catch
             {
                 await Task.Delay(interval, cancellationToken);
@@ -7247,6 +7358,47 @@ public static class PanelAdminApiEndpoints
         }
 
         return null;
+    }
+
+    private static async Task<string?> BuildCloudMailReceiveDiagAsync(
+        CloudMailClient cloudMail,
+        string cloudMailBaseUrl,
+        string cloudMailToken,
+        string toEmail,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var request = new CloudMailEmailListRequest
+            {
+                ToEmail = null,
+                SendEmail = null,
+                Subject = null,
+                TimeSort = "desc",
+                Type = null,
+                IsDel = null,
+                Num = 1,
+                Size = 10
+            };
+
+            var all = await cloudMail.GetEmailListAsync(cloudMailBaseUrl, cloudMailToken, request, cancellationToken);
+            var matched = FilterCloudMailRecipients(all, toEmail).ToList();
+            if (matched.Count > 0)
+            {
+                var top = matched[0];
+                return $"Cloud Mail 已拉到 {matched.Count} 封匹配邮件（最近主题：{(top.Subject ?? string.Empty).Trim()}，时间：{(top.CreateTime ?? string.Empty).Trim()}），但未能解析出验证码";
+            }
+
+            var any = all.FirstOrDefault();
+            if (any == null)
+                return "Cloud Mail emailList 返回空列表（可能是 Token/权限/收件箱同步问题）";
+
+            return $"Cloud Mail 拉到 {all.Count} 封最近邮件，但未匹配到收件人 {toEmail}（最近一封收件人：{(any.ToEmail ?? string.Empty).Trim()}）";
+        }
+        catch (Exception ex)
+        {
+            return $"收码诊断失败：{ex.Message}";
+        }
     }
 
     private static IEnumerable<CloudMailEmail> FilterCloudMailRecipients(IEnumerable<CloudMailEmail> emails, string toEmail)
