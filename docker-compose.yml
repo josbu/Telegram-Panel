@@ -4,6 +4,8 @@ services:
     pull_policy: always
     container_name: telegram-panel
     restart: unless-stopped
+    # 使用轻量 init 回收健康检查等外部子进程，避免长期运行积累僵尸进程。
+    init: true
     ports:
       - "5000:5000"
     volumes:

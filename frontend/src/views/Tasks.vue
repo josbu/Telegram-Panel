@@ -1405,7 +1405,16 @@ function buildAccountSyncDetails(obj: Record<string, any>) {
     const result = obj.result as Record<string, any>
     lines.push(`同步结果: 频道 ${formatNumberValue(result.totalChannelsSynced, 0)}，群组 ${formatNumberValue(result.totalGroupsSynced, 0)}`)
   }
-  if (Array.isArray(obj.failures) && obj.failures.length > 0) lines.push(`失败记录: ${obj.failures.length} 条`)
+  if (Array.isArray(obj.failures) && obj.failures.length > 0) {
+    lines.push(`失败记录: ${obj.failures.length} 条`, '失败账号:')
+    lines.push(...obj.failures.slice(-80).map((item: any) => {
+      const accountId = Number(item?.accountId || item?.account_id || 0)
+      const phone = String(item?.phone || '').trim() || '-'
+      const error = String(item?.error || '').trim() || '失败'
+      return `账号 #${accountId || '-'} ${phone}：${error}`
+    }))
+    if (obj.failures.length > 80) lines.push(`... 仅展示最后 80 项（共 ${obj.failures.length} 项）`)
+  }
   if (obj.error) lines.push(`错误: ${formatConfigValue(obj.error)}`)
   return lines
 }
