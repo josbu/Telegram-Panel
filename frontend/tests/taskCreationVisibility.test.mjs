@@ -108,7 +108,6 @@ test('账号持续活跃目标字段说明并校验文本字典变量', () => {
   assert.match(taskConfigFormSource, /不是已启用且有内容的文本字典/)
   assert.match(taskConfigFormSource, /validateUserChatActiveTargetDictionaries\(targets\)/)
 })
-
 test('任务弹窗在手机端收窄并纵向排版', () => {
   assert.match(tasksSource, /width="min\(760px, calc\(100vw - 24px\)\)"/)
   assert.match(tasksSource, /width="min\(720px, calc\(100vw - 24px\)\)"/)
