@@ -242,9 +242,9 @@
         </el-form-item>
         <el-form-item label="执行账号来源">
           <el-radio-group v-model="inviteDialog.accountMode">
-            <el-radio-button label="auto">自动</el-radio-button>
-            <el-radio-button label="account">单账号</el-radio-button>
-            <el-radio-button label="category">账号分组轮询</el-radio-button>
+            <el-radio-button value="auto">自动</el-radio-button>
+            <el-radio-button value="account">单账号</el-radio-button>
+            <el-radio-button value="category">账号分组轮询</el-radio-button>
           </el-radio-group>
           <div v-if="inviteDialog.accountMode === 'auto'" class="muted mt-2">自动模式会按 Bot 频道管理员匹配可执行账号。</div>
         </el-form-item>
@@ -406,8 +406,8 @@
       <el-form label-position="top">
         <el-form-item label="执行方式">
           <el-radio-group v-model="banDialog.executeMode">
-            <el-radio-button label="bot">机器人执行（按用户 ID）</el-radio-button>
-            <el-radio-button label="account">账号执行（支持 @username）</el-radio-button>
+            <el-radio-button value="bot">机器人执行（按用户 ID）</el-radio-button>
+            <el-radio-button value="account">账号执行（支持 @username）</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item :label="banDialog.executeMode === 'bot' ? '用户 ID' : '目标用户'">
@@ -454,7 +454,7 @@
           <el-tag size="small" type="info">已选 {{ deleteBindings.selectedBotIds.length }} / {{ deleteBindings.bots.length }}</el-tag>
         </div>
         <el-checkbox-group v-model="deleteBindings.selectedBotIds" class="delete-bot-list">
-          <el-checkbox v-for="bot in deleteBindings.bots" :key="bot.id" :label="bot.id">
+          <el-checkbox v-for="bot in deleteBindings.bots" :key="bot.id" :value="bot.id">
             {{ botLabel(bot) }}
           </el-checkbox>
         </el-checkbox-group>

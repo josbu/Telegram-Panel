@@ -89,6 +89,8 @@ public sealed class CloudMailClient
             ? msgEl.GetString()
             : null;
 
+        if (code == 401)
+            throw new UnauthorizedAccessException("Cloud Mail Token 无效或已失效，请重新生成并保存 Token");
         if (code != 200)
             throw new InvalidOperationException($"Cloud Mail 返回失败：code={code} message={(string.IsNullOrWhiteSpace(message) ? "未知错误" : message.Trim())}");
 

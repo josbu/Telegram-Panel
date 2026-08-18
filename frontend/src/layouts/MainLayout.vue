@@ -135,9 +135,9 @@
             :disabled="versionDialog.modeSaving"
             @change="saveUpdateMode"
           >
-            <el-radio-button label="auto">自动选择</el-radio-button>
-            <el-radio-button label="image">Docker 镜像</el-radio-button>
-            <el-radio-button label="binary">容器内二进制</el-radio-button>
+            <el-radio-button value="auto">自动选择</el-radio-button>
+            <el-radio-button value="image">Docker 镜像</el-radio-button>
+            <el-radio-button value="binary">容器内二进制</el-radio-button>
           </el-radio-group>
         </el-descriptions-item>
       </el-descriptions>

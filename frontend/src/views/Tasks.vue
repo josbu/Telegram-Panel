@@ -208,7 +208,27 @@
         class="mb-3"
       />
       <el-form :label-position="isTaskDialogCompact ? 'top' : 'right'" :label-width="isTaskDialogCompact ? 'auto' : '96px'">
-        <el-row :gutter="12">
+        <template v-if="createDialog.sourceTaskId > 0">
+          <el-alert
+            :title="`已复制 ${createDialog.sourceDescription} 的配置；确认任务名称、提交方式和配置后再提交，不会修改原任务。`"
+            type="success"
+            :closable="false"
+            class="mb-3"
+          />
+          <el-row :gutter="12">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="来源任务">
+                <el-input :model-value="createDialog.sourceDescription" disabled />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="任务类型">
+                <el-input :model-value="taskName(createDialog.form.taskType)" disabled />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </template>
+        <el-row v-else :gutter="12">
           <el-col :xs="24" :sm="12">
             <el-form-item label="任务分类">
               <el-select v-model="createDialog.form.category" class="full" @change="ensureTaskType">
@@ -226,8 +246,8 @@
         </el-row>
         <el-form-item label="提交方式">
           <el-radio-group v-model="createDialog.form.mode" @change="onCreateModeChanged">
-            <el-radio-button label="once">立即执行</el-radio-button>
-            <el-radio-button label="scheduled">Cron 计划</el-radio-button>
+            <el-radio-button value="once">立即执行</el-radio-button>
+            <el-radio-button value="scheduled">Cron 计划</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-alert v-if="currentCreateDefinition?.description" :title="currentCreateDefinition.description" type="info" :closable="false" class="mb-3" />
@@ -280,7 +300,7 @@
             </el-button>
           </el-form-item>
         </template>
-        <el-collapse v-if="!currentCreateTarget && !hasTaskConfigForm(createDialog.form.taskType)" class="mb-3">
+        <el-collapse v-if="!currentCreateTarget && !hasTaskConfigForm(createDialog.form.taskType)" :model-value="createDialog.sourceTaskId > 0 ? ['json'] : []" class="mb-3">
           <el-collapse-item title="高级 JSON 配置" name="json">
             <el-alert
               title="该任务没有专用表单时，可填写通用 JSON 配置；模块后台会按任务类型解析。无需配置可留空。"
@@ -396,8 +416,8 @@
         </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="editScheduledDialog.form.status">
-            <el-radio-button label="enabled">启用</el-radio-button>
-            <el-radio-button label="paused">暂停</el-radio-button>
+            <el-radio-button value="enabled">启用</el-radio-button>
+            <el-radio-button value="paused">暂停</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <TaskConfigForm
@@ -469,6 +489,7 @@ const createDialog = ref({
   visible: false,
   saving: false,
   sourceTaskId: 0,
+  sourceDescription: '',
   form: {
     category: '',
     taskType: '',
@@ -528,7 +549,7 @@ const availableCategories = computed(() => {
 })
 
 const taskCenterCreateDefinitions = computed(() =>
-  definitions.value.filter((x) => x.canCreate && hasTaskConfigForm(x.taskType) && x.category !== 'system'),
+  definitions.value.filter((x) => hasTaskConfigForm(x.taskType) && (x.canCreate || x.category !== 'system')),
 )
 
 const creatableCategories = computed(() => {
@@ -543,7 +564,12 @@ const creatableDefinitions = computed(() =>
 )
 
 const currentCreateDefinition = computed(() => definitions.value.find((x) => x.taskType === createDialog.value.form.taskType))
-const currentCreateTarget = computed(() => resolveCreateTarget(currentCreateDefinition.value))
+const currentCreateTarget = computed(() => {
+  const definition = currentCreateDefinition.value
+  if (createDialog.value.sourceTaskId > 0) return ''
+  if (!definition || hasTaskConfigForm(definition.taskType)) return ''
+  return resolveCreateTarget(definition)
+})
 
 const categoryFilteredTasks = computed(() =>
   tasks.value.filter((x) => filterCategory.value === 'all' || taskCategory(x.taskType) === filterCategory.value),
@@ -600,6 +626,7 @@ function categoryName(category: string) {
   if (category === 'user') return '用户任务'
   if (category === 'bot') return 'Bot 任务'
   if (category === 'system') return '系统任务'
+  if (category === 'channel') return '频道任务'
   return category || '-'
 }
 
@@ -652,6 +679,14 @@ function canRerun(task: BatchTask) {
   return taskDefinition(task.taskType)?.canRerun && isHistoryStatus(displayStatus(task))
 }
 
+
+function canEdit(task: BatchTask) {
+  const def = taskDefinition(task.taskType)
+  if (!def?.canEdit) return false
+  const status = displayStatus(task)
+  return !['pending', 'running'].includes(status) || def.autoPauseBeforeEdit
+}
+
 function canCopyTask(task: BatchTask) {
   return canCopyDefinition(task.taskType)
 }
@@ -661,15 +696,7 @@ function canCopyScheduled(task: ScheduledTask) {
 }
 
 function canCopyDefinition(taskType: string) {
-  const def = taskDefinition(taskType)
-  return !!def?.canCreate && hasTaskConfigForm(taskType) && taskCategory(taskType) !== 'system' && !resolveCreateTarget(def)
-}
-
-function canEdit(task: BatchTask) {
-  const def = taskDefinition(task.taskType)
-  if (!def?.canEdit) return false
-  const status = displayStatus(task)
-  return !['pending', 'running'].includes(status) || def.autoPauseBeforeEdit
+  return !!taskType.trim() && !!taskDefinition(taskType)
 }
 
 async function load(options: { silent?: boolean } = {}) {
@@ -698,6 +725,8 @@ function openCreateDialog() {
   const firstCategory = creatableCategories.value[0] || 'user'
   createDialog.value.sourceTaskId = 0
   createDraft.value = emptyDraft()
+  createDialog.value.sourceTaskId = 0
+  createDialog.value.sourceDescription = ''
   createDialog.value.form = {
     category: firstCategory,
     taskType: '',
@@ -714,6 +743,7 @@ function openCreateDialog() {
 function ensureTaskType() {
   const first = creatableDefinitions.value[0]
   createDialog.value.sourceTaskId = 0
+  createDialog.value.sourceDescription = ''
   createDialog.value.form.taskType = first?.taskType || ''
   createDialog.value.form.name = ''
   createDialog.value.form.config = ''
@@ -723,6 +753,7 @@ function ensureTaskType() {
 
 function onTaskTypeChanged() {
   createDialog.value.sourceTaskId = 0
+  createDialog.value.sourceDescription = ''
   createDialog.value.form.name = ''
   createDialog.value.form.config = ''
   createDialog.value.form.total = defaultTotalForTask(createDialog.value.form.taskType)
@@ -864,6 +895,7 @@ function hasTaskConfigForm(taskType: string) {
   return taskType === 'user_chat_active'
     || taskType === 'channel_group_private_create'
     || taskType === 'channel_group_publicize'
+    || taskType === 'fragment_username_monitor'
     || taskType === 'auto_change_login_email'
 }
 
@@ -978,66 +1010,6 @@ async function submitEditTask() {
   }
 }
 
-async function copyTask(task: BatchTask) {
-  const fullTask = await loadTaskDetail(task.id)
-  openCopiedCreateDialog({
-    sourceTaskId: fullTask.id,
-    taskType: fullTask.taskType,
-    name: batchTaskName(fullTask),
-    mode: 'once',
-    total: Math.max(0, fullTask.total),
-    config: fullTask.config ? stripRuntimeFields(fullTask.config) : '',
-  })
-  ElMessage.success(`已复制任务 #${fullTask.id} 到新建表单`)
-}
-
-async function copyScheduledTask(task: ScheduledTask) {
-  const fullTask = await loadScheduledTaskDetail(task.id, task)
-  openCopiedCreateDialog({
-    sourceTaskId: fullTask.id,
-    taskType: fullTask.taskType,
-    name: scheduledName(fullTask),
-    mode: 'scheduled',
-    cronExpression: fullTask.cronExpression,
-    total: Math.max(0, fullTask.total),
-    config: fullTask.configJson ? stripRuntimeFields(fullTask.configJson) : '',
-  })
-  ElMessage.success(`已复制计划任务 #${fullTask.id} 到新建表单`)
-}
-
-function openCopiedCreateDialog(options: {
-  sourceTaskId: number
-  taskType: string
-  name: string
-  mode: string
-  total: number
-  config: string
-  cronExpression?: string
-}) {
-  const def = taskDefinition(options.taskType)
-  createDraft.value = emptyDraft()
-  createDialog.value = {
-    visible: true,
-    saving: false,
-    sourceTaskId: options.sourceTaskId,
-    form: {
-      category: def?.category || creatableCategories.value[0] || 'user',
-      taskType: options.taskType,
-      name: copiedTaskName(options.name),
-      mode: options.mode,
-      cronExpression: options.cronExpression || '0 9 * * *',
-      config: options.config,
-      total: Math.max(0, options.total),
-    },
-  }
-}
-
-function copiedTaskName(name: string) {
-  const base = name.trim() || '任务'
-  const suffix = ' 副本'
-  if (base.endsWith(suffix)) return base.slice(0, 100)
-  return `${base.slice(0, 100 - suffix.length)}${suffix}`
-}
 
 async function deleteTask(task: BatchTask) {
   const isActive = isActiveStatus(displayStatus(task))
@@ -1056,9 +1028,69 @@ async function rerunTask(task: BatchTask) {
     taskType: fullTask.taskType,
     name: fullTask.name?.trim() || null,
     total: Math.max(0, fullTask.total),
-    config: fullTask.config ? stripRuntimeFields(fullTask.config) : null,
+    config: fullTask.config ? stripRuntimeFields(fullTask.taskType, fullTask.config) : null,
   })
   await load()
+}
+
+async function copyTask(task: BatchTask) {
+  const fullTask = await loadTaskDetail(task.id)
+  openCopiedCreateDialog({
+    sourceTaskId: fullTask.id,
+    sourceDescription: `执行任务 #${fullTask.id}`,
+    taskType: fullTask.taskType,
+    name: fullTask.name?.trim() || '',
+    mode: 'once',
+    cronExpression: '0 9 * * *',
+    total: Math.max(0, fullTask.total),
+    config: fullTask.config ? stripRuntimeFields(fullTask.taskType, fullTask.config) : '',
+  })
+}
+
+async function copyScheduledTask(task: ScheduledTask) {
+  const fullTask = await loadScheduledTaskDetail(task.id, task)
+  openCopiedCreateDialog({
+    sourceTaskId: fullTask.id,
+    sourceDescription: `计划任务 #${fullTask.id}`,
+    taskType: fullTask.taskType,
+    name: scheduledName(fullTask),
+    mode: 'scheduled',
+    cronExpression: fullTask.cronExpression,
+    total: Math.max(0, fullTask.total),
+    config: fullTask.configJson ? stripRuntimeFields(fullTask.taskType, fullTask.configJson) : '',
+  })
+}
+
+function openCopiedCreateDialog(draft: {
+  sourceTaskId: number
+  sourceDescription: string
+  taskType: string
+  name: string
+  mode: string
+  cronExpression: string
+  total: number
+  config: string
+}) {
+  const def = taskDefinition(draft.taskType)
+  if (!def) {
+    ElMessage.warning('该任务类型当前未安装或不可识别，无法复制')
+    return
+  }
+
+  createDraft.value = emptyDraft()
+  moduleWindow.value.visible = false
+  createDialog.value.sourceTaskId = draft.sourceTaskId
+  createDialog.value.sourceDescription = draft.sourceDescription
+  createDialog.value.form = {
+    category: def.category || '',
+    taskType: draft.taskType,
+    name: draft.name,
+    mode: draft.mode,
+    cronExpression: draft.cronExpression || '0 9 * * *',
+    config: draft.config,
+    total: Math.max(0, draft.total),
+  }
+  createDialog.value.visible = true
 }
 
 async function runScheduledNow(task: ScheduledTask) {
@@ -1238,12 +1270,15 @@ function parseJsonObject(config: string): Record<string, any> | null {
   }
 }
 
-function stripRuntimeFields(config: string) {
+function stripRuntimeFields(taskType: string, config: string) {
   const obj = parseJsonObject(config)
   if (!obj) return config
   delete obj.items
   delete obj.recent_failures
   delete obj.failures
+  if (taskType === 'fragment_username_monitor') {
+    for (const key of ['StartedAtUtc', 'AssignedUsernames', 'LastCheckTime', 'Error', 'Canceled']) delete obj[key]
+  }
   return JSON.stringify(obj, null, 2)
 }
 
@@ -1255,10 +1290,49 @@ function buildReadableConfigDetails(taskType: string, config: string) {
   if (taskType === 'channel_group_publicize') return buildPublicizeDetails(obj)
   if (taskType === 'account_auto_sync') return buildAccountSyncDetails(obj)
   if (taskType === 'auto_change_login_email') return buildAutoLoginEmailDetails(obj)
+  if (taskType === 'fragment_username_monitor') return buildFragmentUsernameDetails(obj)
+
 
   if (taskType === 'user_join_subscribe') return buildUserJoinSubscribeDetails(obj)
 
   return buildGenericConfigDetails(obj)
+}
+
+function buildFragmentUsernameDetails(obj: Record<string, any>) {
+  const usernames = readConfigArray(obj, 'Usernames', 'usernames')
+  const targetGroupIds = readConfigArray(obj, 'TargetGroupIds', 'targetGroupIds')
+  const assignedUsernames = readConfigArray(obj, 'AssignedUsernames', 'assignedUsernames')
+  const durationHours = readConfigNumber(obj, 0, 'DurationHours', 'durationHours')
+  const lines = [
+    `监控用户名数: ${usernames.length}`,
+    `目标频道分类: ${targetGroupIds.length > 0 ? targetGroupIds.map((x) => `#${x}`).join(', ') : '-'}`,
+    `检查间隔: ${readConfigNumber(obj, 300, 'CheckIntervalSeconds', 'checkIntervalSeconds')} 秒`,
+    `查询延迟: ${readConfigNumber(obj, 1500, 'QueryDelayMs', 'queryDelayMs')} ms`,
+    `运行时长: ${durationHours <= 0 ? '持续运行' : `${durationHours} 小时`}`,
+  ]
+  if (assignedUsernames.length > 0) lines.push(`已抢注: ${assignedUsernames.join(', ')}`)
+  const lastCheckTime = String(obj.LastCheckTime || obj.lastCheckTime || '').trim()
+  if (lastCheckTime) lines.push(`上次检查: ${formatTime(lastCheckTime)}`)
+  const error = String(obj.Error || obj.error || '').trim()
+  if (error) lines.push(`错误: ${error}`)
+  if (obj.Canceled === true || obj.canceled === true) lines.push('取消标记: 是')
+  return lines
+}
+
+function readConfigArray(obj: Record<string, any>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = obj[key]
+    if (Array.isArray(value)) return value.map((x) => String(x ?? '').trim()).filter(Boolean)
+  }
+  return []
+}
+
+function readConfigNumber(obj: Record<string, any>, fallback: number, ...keys: string[]) {
+  for (const key of keys) {
+    const value = Number(obj[key])
+    if (Number.isFinite(value)) return value
+  }
+  return fallback
 }
 
 function buildPrivateCreateDetails(obj: Record<string, any>) {

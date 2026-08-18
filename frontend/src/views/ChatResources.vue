@@ -381,9 +381,9 @@
         </div>
         <el-form-item label="执行账号来源">
           <el-radio-group v-model="channelInvite.accountMode">
-            <el-radio-button label="auto">自动</el-radio-button>
-            <el-radio-button label="account">单账号</el-radio-button>
-            <el-radio-button label="category">账号分组轮询</el-radio-button>
+            <el-radio-button value="auto">自动</el-radio-button>
+            <el-radio-button value="account">单账号</el-radio-button>
+            <el-radio-button value="category">账号分组轮询</el-radio-button>
           </el-radio-group>
           <div v-if="channelInvite.accountMode === 'auto'" class="muted mt-2">自动模式会按每个{{ kindName }}的创建账号/可执行账号处理。</div>
         </el-form-item>

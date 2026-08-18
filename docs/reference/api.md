@@ -22,6 +22,8 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 - `POST /api/panel/accounts/{id}/telegram-status`：刷新单个账号 Telegram 状态
 - `POST /api/panel/accounts/telegram-status`：批量刷新账号 Telegram 状态
 - `POST /api/panel/accounts/cleanup-waste`：复查并清理明确失效的账号
+- `POST /api/panel/accounts/batch/category`：批量修改已选账号分类；`categoryId=null` 表示改为未分类，只影响请求里的 `accountIds`，不会覆盖分类的全部成员。
+- `POST /api/panel/accounts/batch/recovery-email`：批量换绑 2FA 找回邮箱，可选同时换绑登录邮箱。单个账号可能等待 Telegram 发信和 Cloud Mail 收码；前端会按账号逐个调用该接口并聚合结果，外部自动化调用大量账号时也应拆成单账号或小批次请求，避免长连接被浏览器、Nginx 或网关超时中断。
 - `GET /api/panel/accounts/{id}/devices`：读取账号在线设备
 
 自 v1.31.57 起，账号列表、账号详情、任务账号候选和风控确认中的账号 DTO 都返回
@@ -29,8 +31,7 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 主键，只用于接口路径、权限校验和持久化关联。删除账号后，新账号可以复用空出的
 `displayNumber`，因此外部系统不得把它当作长期不可变主键。成功判据是
 `GET /api/panel/accounts` 与 `GET /api/panel/accounts/{id}` 同时返回正整数
-`displayNumber`，前端任务表单在“账号来源”切到“账号编号填写”后可用 `#编号` 选择账号；该前端入口
-与“账号分类选择”二选一，不再把编号和分类合并执行。回滚到旧版前无需清理数据，但旧前端不会展示该字段。
+`displayNumber`，前端任务表单在“账号来源”切到“账号编号填写”后可用 `#编号` 选择账号；该前端入口与“账号分类选择”二选一，不再把编号和分类合并执行。手工输入支持每行一个，也支持英文逗号 `,`、中文逗号 `，`、顿号 `、` 或分号分隔。回滚到旧版前无需清理数据，但旧前端不会展示该字段。
 
 
 前端会为登录和导入请求明确携带 `proxyStrategy`；自定义调用也必须显式传入。省略策略、
@@ -200,10 +201,14 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 - `GET /api/panel/modules`：模块列表
 - `POST /api/panel/modules/install`：安装模块包
 - `/api/panel/extensions/{module-slug}`：模块自定义后台管理接口约定
+- `GET /api/panel/extensions/fragment-username-checker`：Fragment 用户名监控静态页面初始化数据；可带 `taskId` 读取可编辑任务配置。
+- `POST /api/panel/extensions/fragment-username-checker/tasks`：创建或保存 Fragment 用户名监控任务；请求包含 `usernames`、`targetGroupIds`、`checkIntervalSeconds`、`queryDelayMs`、`durationHours`，编辑时额外传 `taskId`。
+
+- `fragment_username_monitor` 可直接通过 `POST /api/panel/tasks` 或 `PATCH /api/panel/tasks/{id}` 保存配置，前端表单写入的配置键为 `Usernames`、`TargetGroupIds`、`CheckIntervalSeconds`、`QueryDelayMs`、`DurationHours`；保存时会清空 `StartedAtUtc`、`AssignedUsernames`、`LastCheckTime`、`Error`、`Canceled` 等运行态字段。适用条件是宿主前端包含 Fragment 任务中心表单，且已安装提供该任务定义的 Fragment 模块 1.2.9+。
 
 `GET /api/panel/tasks` 和 `GET /api/panel/tasks/{id}` 的 `BatchTaskDto` 包含可空 `name`。普通一次性任务可为空，前端使用“任务类型 #ID”兜底；计划任务触发或手动“立即执行”创建的批量任务会复制计划任务名称，历史任务应优先展示 `name`，并保留任务类型作为辅助说明。自 v1.31.57 起，`POST /api/panel/tasks` 和 `PATCH /api/panel/tasks/{id}` 支持可选 `name`，服务端会去除首尾空白并限制最多 100 个字符；即时任务传空或省略时继续使用兜底显示，编辑任务时省略 `name` 会保留原名称，传空字符串会清空名称。该字段通过 `BatchTasks.Name` 持久化；回滚到旧版需先忽略或删除该列。
 
-自 v1.31.58 起，任务中心操作列提供“复制”入口。复制普通批量任务会读取 `GET /api/panel/tasks/{id}` 的完整配置，清理运行态字段后打开“新建任务”弹窗，并默认以一次性任务提交；复制计划任务会读取 `GET /api/panel/scheduled-tasks/{id}` 的配置和 Cron，打开“新建任务”弹窗并默认选择 Cron 计划。复制不会修改原任务，也不会立即创建新任务，用户必须在弹窗中确认提交；真正落库仍复用既有 `POST /api/panel/tasks` 或 `POST /api/panel/scheduled-tasks`。成功判据是操作列出现“复制”，点击后弹窗显示“已复制任务 #ID 的配置”，专用表单字段按原配置回填，旧配置中的 `items`、`failures`、`recent_failures` 不会带入新任务。
+任务中心“复制”入口对已知 `taskType` 通用：复制执行中/历史 `BatchTask` 会读取 `GET /api/panel/tasks/{id}`，复制 `ScheduledTask` 会读取 `GET /api/panel/scheduled-tasks/{id}`，再用原 `taskType` 和清理运行态后的配置打开“新建任务”弹窗。内置专用表单会按配置回填；模块任务即使有独立 `CreateRoute`，复制时也走通用 JSON 配置区，确认后仍通过 `POST /api/panel/tasks` 或 `POST /api/panel/scheduled-tasks` 创建新记录。复制不会修改原任务，也不会绕过后端 JSON 校验。
 
 自 v1.31.59 起，任务中心的“编辑计划任务”弹窗在窄屏设备上使用 `min(760px, calc(100vw - 24px))` 宽度，并将表单标签切换为顶部布局；Cron、状态、专用任务配置和保存按钮不会依赖横向滚动。成功判据是在手机宽度打开计划任务编辑时，弹窗不超出视口、字段按单列排列且“保存计划任务”可见；回滚到旧版只会恢复固定 760px 弹窗，不涉及接口或数据库迁移。
 自 v1.31.44 起，`channel_group_private_create` 任务会在 `config.recent_failures`
@@ -212,7 +217,7 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 `config.recent_failures` 返回最多 100 条账号活跃失败明细，字段包括 `time_utc`、
 `account_id`、`account`、`target` 和 `reason`；自 v1.31.54 起，`user_chat_active`
 目标支持群组、频道和 Bot 私聊（`@xxxbot`、`t.me/xxxbot?start=...`、
-`tg://resolve?domain=xxxbot`）。
+`tg://resolve?domain=xxxbot`）。目标列表的某一项可以是单个文本字典变量（例如 `{groups}`），执行器会把该字典的全部启用文本项展开成实际目标；字典项内部可用换行、空格或逗号分隔多个目标。目标字典不能使用 `{time}` 或图片字典，未知、停用或空文本字典会导致创建/启动失败。
 
 自 v1.31.55 起，`user_chat_active.config.message_rules` 是消息选择的主合同。它是对象数组，
 每项包含可选的 `text` 和 `image_dictionary_token`：`text` 保留内部换行，可用于多段消息；

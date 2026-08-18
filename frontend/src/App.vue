@@ -15,37 +15,19 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
+import { isBenignRuntimeError, isFatalPromiseError, isHttpClientError, toRuntimeErrorMessage } from '@/utils/runtimeErrors'
 
 const errorMessage = ref('')
 
-function toMessage(error: unknown) {
-  if (error instanceof Error && error.message) return error.message
-  if (typeof error === 'string' && error.trim()) return error
-  return '前端运行时发生异常，请刷新页面重试。'
-}
-
-function isHttpClientError(error: unknown) {
-  if (!error || typeof error !== 'object') return false
-  const value = error as Record<string, unknown>
-  return value.isAxiosError === true || ('response' in value && 'config' in value)
-}
-
-function isFatalPromiseError(error: unknown) {
-  if (isHttpClientError(error)) return false
-
-  const message = toMessage(error)
-  return /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk|dynamically imported module|Script error|Cannot read properties|is not a function/i.test(message)
-}
-
 function onError(event: Event) {
   const custom = event as CustomEvent<unknown>
-  if (isHttpClientError(custom.detail)) return
-  errorMessage.value = toMessage(custom.detail)
+  if (isHttpClientError(custom.detail) || isBenignRuntimeError(custom.detail)) return
+  errorMessage.value = toRuntimeErrorMessage(custom.detail)
 }
 
 function onUnhandledRejection(event: PromiseRejectionEvent) {
   if (!isFatalPromiseError(event.reason)) return
-  errorMessage.value = toMessage(event.reason)
+  errorMessage.value = toRuntimeErrorMessage(event.reason)
 }
 
 function reload() {

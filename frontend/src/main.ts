@@ -12,10 +12,12 @@ import 'element-plus/theme-chalk/dark/css-vars.css'
 import './styles/global.css'
 import App from './App.vue'
 import router from './router'
+import { isBenignRuntimeError } from './utils/runtimeErrors'
 
 const app = createApp(App)
 
 app.config.errorHandler = (error) => {
+  if (isBenignRuntimeError(error)) return
   window.dispatchEvent(new CustomEvent('telegram-panel:error', { detail: error }))
   console.error(error)
 }

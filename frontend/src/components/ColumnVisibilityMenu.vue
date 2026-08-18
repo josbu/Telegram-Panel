@@ -11,7 +11,7 @@
             <el-button link type="primary" @click="emit('reset')">恢复默认</el-button>
           </div>
           <el-checkbox-group v-model="selectedKeys" class="column-menu-list">
-            <el-checkbox v-for="column in columns" :key="column.key" :label="column.key">
+            <el-checkbox v-for="column in columns" :key="column.key" :value="column.key">
               {{ column.label }}
             </el-checkbox>
           </el-checkbox-group>
