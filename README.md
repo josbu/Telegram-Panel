@@ -95,4 +95,4 @@ More screenshots: `screenshot/`
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=moeacgx/Telegram-Panel&type=Date)](https://star-history.com/#moeacgx/Telegram-Panel&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=moeacgx/Telegram-Panel&type=Date)](https://star-history.dera.page/#moeacgx/Telegram-Panel&Date)
