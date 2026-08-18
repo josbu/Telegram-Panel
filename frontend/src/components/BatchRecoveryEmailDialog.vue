@@ -56,13 +56,22 @@
       </div>
 
       <el-alert
-        v-if="running"
+        v-if="running || completed"
         class="mt-3"
-        type="info"
+        :type="failures.length > 0 ? 'warning' : 'success'"
         :closable="false"
         show-icon
         :title="progressText"
       />
+      <div v-if="failures.length > 0" class="failure-list mt-3">
+        <div class="failure-list-title">失败账号（实时）</div>
+        <el-scrollbar max-height="190px">
+          <div v-for="failure in failures" :key="`${failure.accountId}-${failure.summary}-${failure.error || ''}`" class="failure-item">
+            <div class="failure-item-title">账号 #{{ failure.accountId }} {{ failure.phone || '' }} · {{ failure.summary }}</div>
+            <div class="failure-item-error">{{ failure.error || '未提供失败原因' }}</div>
+          </div>
+        </el-scrollbar>
+      </div>
       <el-alert
         class="mt-3"
         type="warning"
@@ -74,7 +83,7 @@
 
     <template #footer>
       <el-button :disabled="running" @click="visible = false">关闭</el-button>
-      <el-button type="primary" :loading="running" :disabled="running" @click="submit">开始批量换绑</el-button>
+      <el-button type="primary" :loading="running" :disabled="running || completed" @click="submit">开始批量换绑</el-button>
     </template>
   </el-dialog>
 </template>
@@ -93,6 +102,8 @@ const visible = ref(false)
 const running = ref(false)
 const accountIds = ref<number[]>([])
 const progressText = ref('')
+const completed = ref(false)
+const failures = ref<AccountOperationItem[]>([])
 
 const form = reactive({
   cloudMailBaseUrl: '',
@@ -116,6 +127,9 @@ async function open(ids: number[]) {
     return
   }
 
+  completed.value = false
+  failures.value = []
+  progressText.value = ''
   visible.value = true
   void loadDefaults()
 }
@@ -133,6 +147,8 @@ async function loadDefaults() {
 
 function resetRuntime() {
   running.value = false
+  completed.value = false
+  failures.value = []
   progressText.value = ''
 }
 
@@ -161,6 +177,8 @@ async function submit() {
   )
 
   running.value = true
+  completed.value = false
+  progressText.value = `准备处理 ${accountIds.value.length} 个账号`
   try {
     const result = await runAccountsSequentially({
       accountIds: [],
@@ -177,11 +195,13 @@ async function submit() {
       sendEmailFilter: form.sendEmailFilter || null,
       subjectFilter: form.subjectFilter || null,
     })
-    visible.value = false
+    completed.value = true
+    progressText.value = result.failed > 0
+      ? `处理完成：成功 ${result.success} 个，失败 ${result.failed} 个`
+      : `处理完成：${result.success} 个账号全部成功`
     emit('completed', result)
   } finally {
     running.value = false
-    progressText.value = ''
   }
 }
 
@@ -189,38 +209,39 @@ async function runAccountsSequentially(basePayload: BatchChangeRecoveryEmailRequ
   const ids = [...accountIds.value]
   const items: AccountOperationItem[] = []
 
+  const recordItems = (nextItems: AccountOperationItem[]) => {
+    items.push(...nextItems)
+    failures.value.push(...nextItems.filter((item) => !item.success))
+  }
+
   for (let index = 0; index < ids.length; index += 1) {
     const accountId = ids[index]
-    progressText.value = `正在处理 ${index + 1}/${ids.length}：账号 #${accountId}`
+    progressText.value = `正在处理 ${index + 1}/${ids.length}：账号 #${accountId}；失败 ${failures.value.length}`
 
     try {
       const result = await panelApi.batchChangeRecoveryEmail({
         ...basePayload,
         accountIds: [accountId],
       })
-      if (result.items.length > 0) {
-        items.push(...result.items)
-      } else {
-        items.push({
-          accountId,
-          phone: `#${accountId}`,
-          success: result.failed === 0,
-          summary: result.failed === 0 ? '已处理' : '处理失败',
-          error: result.failed === 0 ? null : '接口未返回账号明细',
-        })
-      }
+      recordItems(result.items.length > 0 ? result.items : [{
+        accountId,
+        phone: `#${accountId}`,
+        success: result.failed === 0,
+        summary: result.failed === 0 ? '已处理' : '处理失败',
+        error: result.failed === 0 ? null : '接口未返回账号明细',
+      }])
     } catch (error) {
       const message = toRequestErrorMessage(error)
-      items.push({
+      const interruptedItems: AccountOperationItem[] = [{
         accountId,
         phone: `#${accountId}`,
         success: false,
         summary: '请求中断',
         error: `单账号请求失败：${message}`,
-      })
+      }]
 
       for (const remainingId of ids.slice(index + 1)) {
-        items.push({
+        interruptedItems.push({
           accountId: remainingId,
           phone: `#${remainingId}`,
           success: false,
@@ -228,6 +249,8 @@ async function runAccountsSequentially(basePayload: BatchChangeRecoveryEmailRequ
           error: '已停止：前一个账号请求中断，避免重复并发操作',
         })
       }
+      recordItems(interruptedItems)
+      progressText.value = `处理在账号 #${accountId} 处中断；失败 ${failures.value.length}`
       break
     }
   }
@@ -238,6 +261,7 @@ async function runAccountsSequentially(basePayload: BatchChangeRecoveryEmailRequ
     items,
   }
 }
+
 
 function toRequestErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message
@@ -258,6 +282,36 @@ defineExpose({ open })
   display: grid;
   gap: 8px;
   margin-bottom: 12px;
+}
+.failure-list {
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--el-color-warning-light-9);
+}
+
+.failure-list-title {
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--el-color-warning-dark-2);
+}
+
+.failure-item + .failure-item {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.failure-item-title {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.failure-item-error {
+  margin-top: 4px;
+  color: var(--el-text-color-regular);
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 @media (max-width: 720px) {

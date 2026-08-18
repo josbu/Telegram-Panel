@@ -959,8 +959,7 @@ function openBatchRecoveryEmail() {
   batchRecoveryEmailRef.value?.open(selectedIds.value)
 }
 
-function onBatchRecoveryEmailCompleted(result: AccountBatchOperationResult) {
-  showBatchResult('批量换绑邮箱完成', result)
+function onBatchRecoveryEmailCompleted() {
   load()
 }
 
