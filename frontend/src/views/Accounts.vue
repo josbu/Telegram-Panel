@@ -334,6 +334,7 @@
               value="warp_per_account"
               :disabled="!warpAvailable || proxyDialog.accountIds.length > 10"
             >每账号独立 WARP</el-radio-button>
+            <el-radio-button value="proxy_per_account">批量代理一对一</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="proxyDialog.strategy === 'existing'" label="选择代理">
@@ -346,6 +347,16 @@
               :disabled="!proxy.isEnabled"
             />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="proxyDialog.strategy === 'proxy_per_account'" label="逐账号代理">
+          <el-input
+            v-model="proxyDialog.proxyText"
+            type="textarea"
+            :rows="8"
+            resize="vertical"
+            placeholder="每行一个 HTTP 或 SOCKS5 代理，例如 http://user:pass@host:port 或 socks5://host:port"
+          />
+          <div class="form-hint no-offset">有效代理 {{ proxyDialogProxyCount }} / {{ proxyDialog.accountIds.length }} 条；空行和 # 注释不计数，顺序按当前已选账号顺序逐一绑定。</div>
         </el-form-item>
         <el-alert
           v-if="!proxyDialog.strategy"
@@ -875,7 +886,9 @@ const proxyDialog = reactive({
   strategy: '' as AccountProxyStrategy | '',
   proxyId: null as number | null,
   expectedProxyId: null as number | null,
+  proxyText: '',
 })
+const proxyDialogProxyCount = computed(() => countEffectiveProxyLines(proxyDialog.proxyText))
 let accountProxyOperationToken = 0
 const warpAvailable = computed(() => Boolean(
   warpStatus.value?.platformSupported
@@ -1509,6 +1522,7 @@ function openAccountProxy(accountIds: number[], row?: Row) {
     ? row.proxy ? 'existing' : row.useGlobalProxy ? 'global' : 'direct'
     : ''
   proxyDialog.proxyId = row?.proxy?.id ?? null
+  proxyDialog.proxyText = ''
   proxyDialog.visible = true
 }
 
@@ -1540,6 +1554,22 @@ async function saveAccountProxy() {
     ElMessage.warning('逐账号创建 WARP 单次最多处理 10 个账号')
     return
   }
+  if (strategy === 'proxy_per_account') {
+    const proxyCount = countEffectiveProxyLines(proxyDialog.proxyText)
+    if (proxyCount === 0) {
+      ElMessage.warning('请填写逐账号代理，每行一个代理地址')
+      return
+    }
+    if (proxyCount > 100) {
+      ElMessage.warning('逐账号批量代理单次最多处理 100 条代理')
+      return
+    }
+    if (proxyCount !== accountIds.length) {
+      ElMessage.warning(`账号与代理数量不一致：已选 ${accountIds.length} 个账号，代理文本识别到 ${proxyCount} 条有效代理`)
+      return
+    }
+  }
+
 
   const operationToken = ++accountProxyOperationToken
   proxyDialog.running = true
@@ -1547,8 +1577,9 @@ async function saveAccountProxy() {
     const payload = {
       strategy,
       proxyId: strategy === 'existing' ? proxyId : null,
+      proxyText: strategy === 'proxy_per_account' ? proxyDialog.proxyText : null,
     }
-    if (accountIds.length === 1) {
+    if (accountIds.length === 1 && strategy !== 'proxy_per_account') {
       const result = await panelApi.setAccountProxy(accountIds[0], {
         ...payload,
         expectedProxyId,
@@ -1573,6 +1604,14 @@ async function saveAccountProxy() {
   } finally {
     if (operationToken === accountProxyOperationToken) proxyDialog.running = false
   }
+}
+
+function countEffectiveProxyLines(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    .length
 }
 
 async function checkAccountProxyEgress(row: Row) {

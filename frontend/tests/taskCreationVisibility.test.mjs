@@ -96,6 +96,9 @@ test('账号持续活跃支持回复消息与转发来源配置', () => {
   assert.match(taskConfigFormSource, /v-if="forms\.userChatActive\.messageActionMode === 'send_generated_text'" :span="8"/)
   assert.match(taskConfigFormSource, /message_mode: effectiveMessageMode/)
   assert.match(tasksSource, /\.\.\.\(isForwardMode \? \[\] : \[`内容模式:/)
+  assert.match(taskConfigFormSource, /也可单独填写一个文本字典变量，例如 \{forward_sources\}/)
+  assert.match(taskConfigFormSource, /validateUserChatActiveForwardSourceDictionaries\(forwardSourceUrls\)/)
+  assert.match(taskConfigFormSource, /account_queue_cursor: Math\.max\(0, form\.accountQueueCursor\)/)
 
 })
 

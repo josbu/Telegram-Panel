@@ -22,6 +22,50 @@ public sealed partial class ProxyManagementService
     {
         if (expectedCount <= 0)
             throw new AccountImportProxyBatchException("压缩包内没有可匹配的账号");
+
+        var assignments = await PrepareAccountProxyAssignmentsCoreAsync(
+            text,
+            expectedCount,
+            $"压缩包识别到 {expectedCount} 个账号",
+            cancellationToken);
+        return assignments
+            .Select(item => new PreparedAccountImportProxy(
+                item.Slot,
+                item.SourceLine,
+                item.ProxyId,
+                item.ProxyName,
+                item.EgressIp,
+                item.ExpectedConnection))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// 为已选择账号准备逐账号代理。全部代理先完成解析和出口检测，
+    /// 只有全部成功后才会一次性新增或复用代理记录。
+    /// </summary>
+    public async Task<IReadOnlyList<PreparedAccountProxyAssignment>>
+        PrepareAccountProxyAssignmentsAsync(
+            string? text,
+            int expectedCount,
+            CancellationToken cancellationToken = default)
+    {
+        if (expectedCount <= 0)
+            throw new AccountImportProxyBatchException("请选择账号");
+
+        return await PrepareAccountProxyAssignmentsCoreAsync(
+            text,
+            expectedCount,
+            $"已选择 {expectedCount} 个账号",
+            cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<PreparedAccountProxyAssignment>>
+        PrepareAccountProxyAssignmentsCoreAsync(
+            string? text,
+            int expectedCount,
+            string expectedCountDescription,
+            CancellationToken cancellationToken)
+    {
         if (expectedCount > MaxPerAccountProxyBatchSize)
         {
             throw new AccountImportProxyBatchException(
@@ -32,7 +76,7 @@ public sealed partial class ProxyManagementService
         if (orderedInputs.Count != expectedCount)
         {
             throw new AccountImportProxyBatchException(
-                $"账号与代理数量不一致：压缩包识别到 {expectedCount} 个账号，代理文本识别到 {orderedInputs.Count} 条有效代理");
+                $"账号与代理数量不一致：{expectedCountDescription}，代理文本识别到 {orderedInputs.Count} 条有效代理");
         }
 
         EnsureNoCredentialConflicts(orderedInputs);
@@ -87,7 +131,7 @@ public sealed partial class ProxyManagementService
             .Select((item, index) =>
             {
                 var proxy = proxyByConnection[item.ConnectionKey];
-                return new PreparedAccountImportProxy(
+                return new PreparedAccountProxyAssignment(
                     index + 1,
                     item.SourceLine,
                     proxy.Id,

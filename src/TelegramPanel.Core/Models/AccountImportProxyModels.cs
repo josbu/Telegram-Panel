@@ -11,6 +11,18 @@ public sealed class AccountImportProxyBatchException : ArgumentException
 }
 
 /// <summary>
+/// 已完成出口检测并持久化的逐账号代理槽位。重复输入仍保留独立槽位，
+/// 但可以安全复用同一条代理记录。
+/// </summary>
+public sealed record PreparedAccountProxyAssignment(
+    int Slot,
+    int SourceLine,
+    int ProxyId,
+    string ProxyName,
+    string? EgressIp,
+    ProxyConnectionOptions ExpectedConnection);
+
+/// <summary>
 /// 已完成出口检测并持久化的单个代理槽位。重复输入仍保留独立槽位，
 /// 但可以安全复用同一条代理记录。
 /// </summary>

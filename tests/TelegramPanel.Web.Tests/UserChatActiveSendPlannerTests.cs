@@ -53,6 +53,30 @@ public sealed class UserChatActiveSendPlannerTests
     }
 
     [Fact]
+    public void 队列账号游标会让下一次有限运行接续账号()
+    {
+        var firstRun = UserChatActiveSendPlanner.BuildFiniteRunPlan(
+            eligibleAccountCount: 2,
+            requestedMessageCount: 1,
+            dictionaryCount: 1,
+            accountMode: UserChatActiveTaskModes.Queue,
+            messageMode: UserChatActiveTaskModes.Queue,
+            accountQueueCursor: 0);
+        var nextCursor = UserChatActiveSendPlanner.AdvanceQueueCursor(0, 2);
+
+        var secondRun = UserChatActiveSendPlanner.BuildFiniteRunPlan(
+            eligibleAccountCount: 2,
+            requestedMessageCount: 1,
+            dictionaryCount: 1,
+            accountMode: UserChatActiveTaskModes.Queue,
+            messageMode: UserChatActiveTaskModes.Queue,
+            accountQueueCursor: nextCursor);
+
+        Assert.Equal(0, Assert.Single(firstRun).AccountIndex);
+        Assert.Equal(1, Assert.Single(secondRun).AccountIndex);
+    }
+
+    [Fact]
     public void 消息规则保留多行段落并支持每条独立图片字典()
     {
         var config = new UserChatActiveTaskConfig
