@@ -294,7 +294,7 @@ export interface TelegramSystemMessage {
 }
 
 export interface TelegramAuthorization {
-  hash: number
+  hash: string
   current: boolean
   apiId: number
   appName?: string | null

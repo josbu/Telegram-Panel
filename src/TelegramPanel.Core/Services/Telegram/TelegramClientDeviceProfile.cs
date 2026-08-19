@@ -37,6 +37,22 @@ public readonly record struct TelegramClientDeviceProfile(
         return PickProfile(profiles, stableKey);
     }
 
+    public static TelegramClientDeviceProfile ForCurrentAuthorization(
+        int apiId,
+        string stableKey,
+        string? appVersion,
+        string? deviceModel,
+        string? systemVersion)
+    {
+        var fallback = ForStableKey(apiId, stableKey);
+        return fallback with
+        {
+            AppVersion = string.IsNullOrWhiteSpace(appVersion) ? fallback.AppVersion : appVersion.Trim(),
+            DeviceModel = string.IsNullOrWhiteSpace(deviceModel) ? fallback.DeviceModel : deviceModel.Trim(),
+            SystemVersion = string.IsNullOrWhiteSpace(systemVersion) ? fallback.SystemVersion : systemVersion.Trim()
+        };
+    }
+
     public static TelegramClientDeviceProfile ForStableKey(string stableKey) => PickProfile(AndroidProfiles, stableKey);
 
     private static TelegramClientDeviceProfile[] GetProfilesForApiId(int apiId) => apiId switch

@@ -24,7 +24,9 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 - `POST /api/panel/accounts/cleanup-waste`：复查并清理明确失效的账号
 - `POST /api/panel/accounts/batch/category`：批量修改已选账号分类；`categoryId=null` 表示改为未分类，只影响请求里的 `accountIds`，不会覆盖分类的全部成员。
 - `POST /api/panel/accounts/batch/recovery-email`：批量换绑 2FA 找回邮箱，可选同时换绑登录邮箱。单个账号可能等待 Telegram 发信和 Cloud Mail 收码；前端会按账号逐个调用该接口并聚合结果，外部自动化调用大量账号时也应拆成单账号或小批次请求，避免长连接被浏览器、Nginx 或网关超时中断。
-- `GET /api/panel/accounts/{id}/devices`：读取账号在线设备
+- `GET /api/panel/accounts/{id}/devices`：读取账号在线设备；返回的 `hash` 始终是十进制字符串，避免 JavaScript 处理 Telegram 64 位授权哈希时丢失精度。
+- `POST /api/panel/accounts/{id}/devices/{hash}/kick`：踢出指定非当前设备；`hash` 使用上述字符串原样放入 URL。
+- `POST /api/panel/accounts/{id}/devices/kick-all`：踢出所有其他设备并保留当前授权。
 
 自 v1.31.57 起，账号列表、账号详情、任务账号候选和风控确认中的账号 DTO 都返回
 `displayNumber`。这是面向用户展示和手工填写任务账号范围的账号编号；`id` 仍是内部数据库
@@ -73,14 +75,13 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 服务端会清理该账号的缓存客户端，重新解析当前代理并重试一次；不会为账号创建独立 WARP 容器。
 Telegram 的限流、权限和 Session 等业务错误不会重试，避免扩大限流。
 
-成功时返回 `200` 和设备数组；数组中的 `lastActiveAtUtc` 是 Telegram 返回的服务端时间，刷新
-页面会重新请求 Telegram，但该字段的更新粒度由 Telegram 决定。自动恢复后仍失败时返回 `502`，
-响应包含可直接展示的中文 `message` 和 `code=TELEGRAM_DEVICE_QUERY_FAILED`。此时先在代理管理中
-检测账号当前出口，再检查 Session 是否仍有效；不需要通过“切换代理再应用”手工清理客户端。
+成功时返回 `200` 和设备数组；数组中的 `hash` 是十进制字符串，`lastActiveAtUtc` 是 Telegram 返回的服务端时间，刷新页面会重新请求 Telegram，但该字段的更新粒度由 Telegram 决定。设备踢出接口返回 `success=false` 时，前端必须展示失败原因，不得把 HTTP 200 当作业务成功。
+设备踢出成功后，页面先移除已确认的设备，再延迟刷新一次设备列表，以覆盖 Telegram 授权列表的短暂传播延迟。
+自动恢复后仍失败时返回 `502`，响应包含可直接展示的中文 `message` 和 `code=TELEGRAM_DEVICE_QUERY_FAILED`。此时先在代理管理中检测账号当前出口，再检查 Session 是否仍有效；不需要通过“切换代理再应用”手工清理客户端。
 成功判据是代理出口短暂变化后再次打开“在线设备”仍返回 `200`，日志至多记录一次客户端重建。
 
 在线设备响应会同时返回 `apiFamily`、`apiDisplayName`、`apiDescription` 和 `deviceDisplayName`，前端不得只根据 `ApiId` 自行猜测未知状态。`ApiId=2040` 是官方 Telegram Desktop API，属于正常官方桌面端会话；异常排查应结合 `appName/platform/deviceModel/ip` 和最近活跃时间判断。
-如需回滚，恢复到 v1.31.42；本改动不包含数据库迁移，也不会改变账号代理绑定。
+如需回滚，恢复到 v1.31.65；本改动不包含数据库迁移，设备哈希响应从数字改为字符串，调用方需按字符串传回踢出接口。
 
 ### 账号状态恢复与安全清理（v1.31.46 及以上）
 
