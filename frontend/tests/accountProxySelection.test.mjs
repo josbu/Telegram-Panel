@@ -6,7 +6,7 @@ const sourceUrl = new URL('../src/views/Accounts.vue', import.meta.url)
 const source = await readFile(sourceUrl, 'utf8')
 
 test('批量切换账号代理时不默认选择直连', () => {
-  assert.match(source, /strategy: '' as AccountProxyStrategy \| ''/)
+  assert.match(source, /strategy: '' as AccountProxyBatchStrategy \| ''/)
   assert.match(
     source,
     /proxyDialog\.strategy = row[\s\S]*\? row\.proxy \? 'existing'[\s\S]*: ''/,
