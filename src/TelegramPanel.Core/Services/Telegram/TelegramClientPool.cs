@@ -67,6 +67,7 @@ public class TelegramClientPool : ITelegramClientPool, IDisposable
             sessionKey,
             phoneNumber,
             userId,
+            deviceProfileKey: null,
             proxyOverride: null);
     }
 
@@ -89,6 +90,53 @@ public class TelegramClientPool : ITelegramClientPool, IDisposable
             sessionKey,
             phoneNumber,
             userId,
+            deviceProfileKey: null,
+            proxyResolution);
+    }
+
+    public Task<Client> GetOrCreateClientAsync(
+        int accountId,
+        int apiId,
+        string apiHash,
+        string sessionPath,
+        string? sessionKey,
+        string? phoneNumber,
+        long? userId,
+        string? deviceProfileKey)
+    {
+        return GetOrCreateClientCoreAsync(
+            accountId,
+            apiId,
+            apiHash,
+            sessionPath,
+            sessionKey,
+            phoneNumber,
+            userId,
+            deviceProfileKey,
+            proxyOverride: null);
+    }
+
+    public Task<Client> GetOrCreateClientAsync(
+        int accountId,
+        int apiId,
+        string apiHash,
+        string sessionPath,
+        string? sessionKey,
+        string? phoneNumber,
+        long? userId,
+        AccountProxyResolution proxyResolution,
+        string? deviceProfileKey = null)
+    {
+        ArgumentNullException.ThrowIfNull(proxyResolution);
+        return GetOrCreateClientCoreAsync(
+            accountId,
+            apiId,
+            apiHash,
+            sessionPath,
+            sessionKey,
+            phoneNumber,
+            userId,
+            deviceProfileKey,
             proxyResolution);
     }
 
@@ -100,6 +148,7 @@ public class TelegramClientPool : ITelegramClientPool, IDisposable
         string? sessionKey,
         string? phoneNumber,
         long? userId,
+        string? deviceProfileKey,
         AccountProxyResolution? proxyOverride)
     {
         sessionPath = _sessionPathResolver.Resolve(sessionPath);
@@ -154,9 +203,13 @@ public class TelegramClientPool : ITelegramClientPool, IDisposable
                                        "全局代理路由未在客户端创建前解析，已阻止降级为直连；旧出口客户端不会被复用")
                                    : null);
 
-            // 使用 config 回调设置 session 路径
+            // 使用配置的账号画像；没有账号专属选择时回退到系统默认画像。
             phoneNumber = NormalizePhone(phoneNumber);
-            var deviceProfile = TelegramClientDeviceProfile.ForStableKey(apiId, $"{apiId}:{phoneNumber}:{sessionPath}");
+            var deviceProfile = TelegramDeviceProfileCatalog.ResolveClientProfile(
+                _configuration,
+                apiId,
+                deviceProfileKey,
+                $"{apiId}:{phoneNumber}:{sessionPath}");
             string Config(string what)
             {
                 return what switch

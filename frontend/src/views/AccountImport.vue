@@ -89,6 +89,23 @@
         <el-option v-for="category in categories" :key="category.id" :label="category.name" :value="category.id" />
       </el-select>
     </section>
+    <section class="import-category-bar" aria-label="导入账号设备指纹设置">
+      <div class="import-proxy-heading">
+        <span class="material-icons">fingerprint</span>
+        <div>
+          <div class="cell-main">导入后设备指纹</div>
+          <div class="cell-sub">保存到账号，后续 Telegram 客户端按此画像连接</div>
+        </div>
+      </div>
+      <el-select v-model="deviceProfileKey" class="category-select" filterable :disabled="busy">
+        <el-option
+          v-for="profile in deviceProfiles"
+          :key="profile.key"
+          :label="`${profile.name} · ${profile.family}`"
+          :value="profile.key"
+        />
+      </el-select>
+    </section>
 
     <el-card shadow="never" class="page-card import-card import-card-primary">
       <template #header>
@@ -377,6 +394,7 @@ import type {
   ImportAccountsResponse,
   ImportResult,
   OutboundProxy,
+  TelegramDeviceProfile,
   WarpRuntimeStatus,
   ZipImportProxyStrategy,
 } from '@/api/types'
@@ -411,6 +429,8 @@ const telegramApiConfigured = ref(true)
 const effectiveApiId = ref('')
 const warpStatus = ref<WarpRuntimeStatus | null>(null)
 const importCategoryId = ref<number | null>(null)
+const deviceProfiles = ref<TelegramDeviceProfile[]>([])
+const deviceProfileKey = ref('')
 let importOperationToken = 0
 
 const busy = computed(() => importingZip.value || importingSessions.value || importingString.value)
@@ -566,6 +586,7 @@ async function importZip() {
   form.append('file', selectedZip)
   form.append('twoFactorPassword', selectedPassword)
   if (importCategoryId.value) form.append('categoryId', String(importCategoryId.value))
+  if (deviceProfileKey.value) form.append('deviceProfileKey', deviceProfileKey.value)
   appendZipProxyFields(form, selectedStrategy, selectedProxyId, selectedProxyText)
 
   const operationToken = ++importOperationToken
@@ -614,6 +635,7 @@ async function importSessionFiles() {
   const selectedProxyId = proxyId.value
   appendProxyFields(form, selectedStrategy, selectedProxyId)
   if (importCategoryId.value) form.append('categoryId', String(importCategoryId.value))
+  if (deviceProfileKey.value) form.append('deviceProfileKey', deviceProfileKey.value)
 
   const operationToken = ++importOperationToken
   importingSessions.value = true
@@ -650,6 +672,7 @@ async function importStringSession() {
       proxyStrategy: selectedStrategy,
       proxyId: selectedStrategy === 'existing' ? selectedProxyId : null,
       categoryId: importCategoryId.value,
+      deviceProfileKey: deviceProfileKey.value || null,
     })
     if (operationToken !== importOperationToken) return
     applyImportResponse(response)
@@ -698,7 +721,6 @@ async function loadCategories() {
   categories.value = await panelApi.accountCategories()
 }
 
-
 async function loadProxies() {
   proxies.value = await panelApi.proxies()
 }
@@ -714,6 +736,8 @@ async function loadWarpStatus() {
 async function loadTelegramApiStatus() {
   try {
     const settings = await panelApi.settings()
+    deviceProfiles.value = settings.telegram.deviceProfiles || []
+    deviceProfileKey.value = settings.telegram.defaultDeviceProfileKey || deviceProfiles.value[0]?.key || ''
     const apiId = (settings.telegram.apiId || '').trim()
     const apiHash = (settings.telegram.apiHash || '').trim()
     const enabledProfile = (settings.telegram.profiles || []).find((profile) => {

@@ -57,6 +57,13 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 ```
 
 `profiles` 省略时保留当前配置池；传空数组表示清空配置池。默认 `apiId/apiHash` 可留空，但此时必须至少有一个启用的 profile。服务端会校验每个 ApiHash 为 32 位十六进制字符串，名称不可重复，`weight` 规范到 `1-1000`。新账号登录和不自带 API 的导入入口使用启用 profile 做最少使用量分配；已有账号继续使用数据库中保存的 `ApiId/ApiHash`。
+### Telegram 设备画像
+
+`GET /api/panel/settings` 在 `telegram.deviceProfiles` 返回启用画像，在 `telegram.defaultDeviceProfileKey` 返回默认 key；`GET /api/panel/settings/device-profiles` 返回同一目录的 `{ items, defaultKey }`。`POST /api/panel/settings/telegram-api` 接收 `defaultDeviceProfileKey` 并持久化到 `Telegram:DefaultDeviceProfileKey`。
+
+`PUT /api/panel/accounts/{id}` 的请求可携带 `deviceProfileKey`：传画像 key 表示绑定该账号，传空字符串表示清除绑定并跟随系统默认。`GET /api/panel/accounts/{id}` 返回 `deviceProfileKey`。`POST /api/panel/accounts/import/zip`、`POST /api/panel/accounts/import/session-files` 的 multipart 字段名为 `deviceProfileKey`；StringSession JSON 请求同名字段。未知或停用 key 返回 `400`，不会修改账号。
+
+成功判据是保存后重新读取账号详情仍返回该 key，清空后返回 `null`；画像只影响客户端设备字段，不改变 API 凭据、代理策略或 Session 文件格式。数据库列由 `20260818090000_AddAccountDeviceProfileKey` 迁移创建。
 `POST /api/panel/settings/username` 的以下合同适用于 v1.31.42 及以上版本。调用方必须
 已经通过管理员 Cookie 认证，请求 JSON 必须提供 `currentPassword` 和 `newUsername`。
 新用户名要求 4-32 位，只包含字母、数字、下划线、短横线或点，且不能使用 `admin`、

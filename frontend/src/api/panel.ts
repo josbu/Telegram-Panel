@@ -73,8 +73,9 @@ import type {
   TaskAssetUploadResult,
   TelegramAuthorization,
   TelegramApiSettings,
-  TelegramSystemMessage,
+  TelegramDeviceProfile,
   TelegramStatus,
+  TelegramSystemMessage,
   TimeZoneSettings,
   TwoFactorRecoveryEmailStatus,
   VersionApplyResult,
@@ -158,7 +159,7 @@ export const panelApi = {
   accountProxyEgress: (id: number) =>
     api.get<AccountProxyEgress>(`/accounts/${id}/proxy/egress`, { timeout: 60_000 }).then((r) => r.data),
   account: (id: number) => api.get<AccountDetail>(`/accounts/${id}`).then((r) => r.data),
-  updateAccount: (id: number, payload: { remark?: string | null; twoFactorPassword?: string | null; categoryId?: number | null }) =>
+  updateAccount: (id: number, payload: { remark?: string | null; twoFactorPassword?: string | null; categoryId?: number | null; deviceProfileKey?: string | null }) =>
     api.put<AccountDetail>(`/accounts/${id}`, payload).then((r) => r.data),
   setAccountActive: (id: number, isActive: boolean) =>
     api.patch<OperationResult>(`/accounts/${id}/active`, { isActive }).then((r) => r.data),
@@ -268,6 +269,7 @@ export const panelApi = {
     categoryId?: number | null
     proxyStrategy: AccountImportProxyStrategy
     proxyId?: number | null
+    deviceProfileKey?: string | null
   }) =>
     api.post<ImportAccountsResponse>('/accounts/import/string-session', payload, { timeout: 900_000 }).then((r) => r.data),
   startAccountLogin: (payload: {
@@ -301,6 +303,7 @@ export const panelApi = {
   settings: () => api.get<SettingsPayload>('/settings').then((r) => r.data),
   saveTelegramApiSettings: (payload: TelegramApiSettings) =>
     api.post<OperationResult>('/settings/telegram-api', payload).then((r) => r.data),
+  deviceProfiles: () => api.get<{ items: TelegramDeviceProfile[]; defaultKey: string }>('/settings/device-profiles').then((r) => r.data),
   globalProxySettings: () =>
     api.get<GlobalProxySettings>('/settings/global-proxy').then((r) => r.data),
   saveGlobalProxySettings: (payload: SaveGlobalProxySettingsRequest) =>

@@ -273,6 +273,7 @@ export interface AccountDetail {
   sessionPath: string
   twoFactorPassword?: string | null
   categoryId?: number | null
+  deviceProfileKey?: string | null
   isActive: boolean
   createdAt: string
   estimatedRegistrationAt?: string | null
@@ -416,6 +417,8 @@ export interface TelegramApiSettings {
   apiId: string
   apiHash: string
   profiles?: TelegramApiProfile[] | null
+  deviceProfiles?: TelegramDeviceProfile[] | null
+  defaultDeviceProfileKey?: string | null
 }
 
 export interface TelegramApiProfile {
@@ -426,6 +429,20 @@ export interface TelegramApiProfile {
   weight: number
   notes?: string | null
 }
+
+export interface TelegramDeviceProfile {
+  key: string
+  name: string
+  family: string
+  appVersion: string
+  deviceModel: string
+  systemVersion: string
+  systemLangCode: string
+  langCode: string
+  builtIn: boolean
+  notes?: string | null
+}
+
 
 export interface GlobalProxySettings {
   enabled: boolean

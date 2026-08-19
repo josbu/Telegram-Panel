@@ -39,6 +39,10 @@ public class Account
     public string SessionPath { get; set; } = null!;
     public int ApiId { get; set; }
     public string ApiHash { get; set; } = null!;
+    /// <summary>
+    /// 账号使用的设备画像键；为空时跟随系统默认兜底画像。
+    /// </summary>
+    public string? DeviceProfileKey { get; set; }
     public bool IsActive { get; set; } = true;
     public int? CategoryId { get; set; }
     public int? ProxyId { get; set; }

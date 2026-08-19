@@ -62,6 +62,25 @@ internal interface IDeferredSessionImporter
         string? sessionKey = null,
         ProxyConnectionOptions? proxy = null,
         CancellationToken cancellationToken = default);
+    Task<ImportResult> ImportFromSessionFileDeferredAsync(
+        string filePath,
+        int apiId,
+        string apiHash,
+        long? userId,
+        string? phoneHint,
+        string? sessionKey,
+        ProxyConnectionOptions? proxy,
+        CancellationToken cancellationToken,
+        string? deviceProfileKey) =>
+        ImportFromSessionFileDeferredAsync(
+            filePath,
+            apiId,
+            apiHash,
+            userId,
+            phoneHint,
+            sessionKey,
+            proxy,
+            cancellationToken);
 
     Task<ImportResult> ImportFromStringSessionDeferredAsync(
         string sessionString,
@@ -69,6 +88,20 @@ internal interface IDeferredSessionImporter
         string apiHash,
         ProxyConnectionOptions? proxy = null,
         CancellationToken cancellationToken = default);
+
+    Task<ImportResult> ImportFromStringSessionDeferredAsync(
+        string sessionString,
+        int apiId,
+        string apiHash,
+        ProxyConnectionOptions? proxy,
+        CancellationToken cancellationToken,
+        string? deviceProfileKey) =>
+        ImportFromStringSessionDeferredAsync(
+            sessionString,
+            apiId,
+            apiHash,
+            proxy,
+            cancellationToken);
 }
 
 /// <summary>

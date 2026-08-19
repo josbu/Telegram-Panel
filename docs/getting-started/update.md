@@ -58,6 +58,11 @@ Cloudflare R2 预签名 `PUT` URL 若返回 `Missing x-amz-content-sha256`，升
    成功判据：容器正常启动，`/api/panel/auth/me` 可访问，后台能登录，账号列表存在，抽查账号 Session 可读取。若恢复后异常，停止容器，把 `docker-data.before-restore-$ts` 改回 `docker-data` 后再启动，即可回到恢复前状态。
 
 备份 ZIP 包含账号 Session 和后台凭据。下载、解压和临时目录都应只允许管理员访问；恢复完成后按需删除服务器上的 ZIP 和 `/tmp/telegram-panel-restore-*` 临时目录。
+## 设备指纹迁移验收
+
+包含设备指纹功能的版本会执行 `20260818090000_AddAccountDeviceProfileKey`，只向 `Accounts` 增加可空的 `DeviceProfileKey` 文本列，不改写现有 Session。升级前备份 `docker-data/telegram-panel.db` 和 `docker-data/appsettings.local.json`。
+
+启动后验收：容器状态为 running；`/api/panel/auth/me` 返回 200；系统设置能看到“默认设备指纹”；账号详情能保存并清空单账号画像；导入页能提交所选画像。若迁移失败，保留容器日志和数据库备份，不要手工删列或删除 `__EFMigrationsHistory`；先停止容器并恢复升级前快照，再回滚到旧镜像。
 
 ## 更新策略
 

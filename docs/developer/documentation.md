@@ -63,6 +63,16 @@ uv run mkdocs build
 - 在线设备 DTO 的授权 `hash` 必须序列化为十进制字符串。Telegram 哈希是 64 位整数，Vue/JavaScript 不得用 `number` 保存或拼接该值。
 - 踢出接口必须检查 Telegram 返回的业务 `success`；成功后允许前端先移除行并延迟刷新，避免 Telegram 授权列表传播延迟造成“已踢出但仍显示”。
 - 验证至少包括：当前授权画像覆盖测试、长哈希 JSON 字符串测试、前端 86 个测试、`vue-tsc`、前端构建和 .NET Release 构建。回滚到 v1.31.65；无数据库迁移。
+## Telegram 设备指纹合同
+
+适用版本：包含 `Account.DeviceProfileKey` 与迁移 `20260818090000_AddAccountDeviceProfileKey` 的版本。
+
+- `TelegramDeviceProfileCatalog` 是唯一画像解析入口；未知、停用或空 key 必须回退系统默认画像，不得在各服务中复制默认值。
+- `TelegramClientPool`、Session 导入验证、账号导出和账号登录必须在创建 `WTelegram.Client` 前解析画像；代理解析与画像解析相互独立，画像不得改变连接出口。
+- 新登录/导入成功入库时保存画像 key；账号详情更新允许清空 key，表示跟随系统默认。更新画像不改写现有 Session，客户端缓存清理后在下一次创建客户端时生效。
+- API 端点：`GET /api/panel/settings` 返回 `telegram.deviceProfiles` 和 `telegram.defaultDeviceProfileKey`；`POST /api/panel/settings/telegram-api` 保存默认 key；账号 `PUT /api/panel/accounts/{id}` 接受 `deviceProfileKey`。
+
+验证：运行 .NET Release 构建和完整 Web 测试；运行前端 `vue-tsc`/build 与 86 个前端测试；手工检查系统设置保存、导入页选择、账号详情清空/保存及新客户端创建。失败排查先检查迁移、画像 key 和本地配置文件权限。回滚需先备份数据库和 `appsettings.local.json`，再恢复旧程序；旧程序不会使用画像字段，但不应删除迁移历史。
 
 ## GitHub Pages 发布
 
