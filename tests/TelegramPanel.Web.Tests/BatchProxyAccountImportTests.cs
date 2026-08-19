@@ -225,6 +225,60 @@ public sealed class BatchProxyAccountImportTests
     }
 
     [Fact]
+    public async Task 账号列表逐账号代理按选择顺序逐一绑定()
+    {
+        await using var fixture = await BatchImportFixture.CreateAsync();
+        var accounts = new[]
+        {
+            new Account
+            {
+                DisplayNumber = 10,
+                Phone = "8613800001501",
+                UserId = 1501,
+                SessionPath = "sessions/8613800001501.session",
+                ApiId = 12345,
+                ApiHash = ApiHash,
+                IsActive = true
+            },
+            new Account
+            {
+                DisplayNumber = 11,
+                Phone = "8613800001502",
+                UserId = 1502,
+                SessionPath = "sessions/8613800001502.session",
+                ApiId = 12345,
+                ApiHash = ApiHash,
+                IsActive = true
+            }
+        };
+        fixture.Db.Accounts.AddRange(accounts);
+        await fixture.Db.SaveChangesAsync();
+
+        var assignments = await fixture.ProxyManagement.PrepareAccountProxyAssignmentsAsync(
+            "http://first.account-proxy.test:8151\n"
+            + "socks5://second.account-proxy.test:8152",
+            accounts.Length);
+
+        for (var index = 0; index < accounts.Length; index++)
+        {
+            var assignment = assignments[index];
+            var result = await fixture.ProxyManagement.BindAccountsAsync(
+                new[] { accounts[index].Id },
+                new AccountProxyBindingInput(
+                    "existing",
+                    assignment.ProxyId,
+                    ExpectedConnection: assignment.ExpectedConnection));
+            Assert.Equal(1, result.Success);
+        }
+
+        var reloaded = await fixture.Db.Accounts.AsNoTracking()
+            .OrderBy(x => x.DisplayNumber)
+            .ToListAsync();
+        Assert.Equal(assignments.Select(x => x.ProxyId), reloaded.Select(x => x.ProxyId!.Value));
+        Assert.Equal(2, fixture.Probe.CallCount);
+    }
+
+    [Fact]
     public async Task 已有启用代理会复用原记录并刷新检测信息()
     {
         await using var fixture = await BatchImportFixture.CreateAsync();

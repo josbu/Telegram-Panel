@@ -497,6 +497,57 @@ public static class ProxyApiEndpoints
     {
         try
         {
+            if (string.Equals(request.Strategy, "proxy_per_account", StringComparison.OrdinalIgnoreCase))
+            {
+                var ids = (request.AccountIds ?? Array.Empty<int>())
+                    .Where(x => x > 0)
+                    .Distinct()
+                    .ToArray();
+                var assignments = await service.PrepareAccountProxyAssignmentsAsync(
+                    request.ProxyText,
+                    ids.Length,
+                    cancellationToken);
+                var items = new List<AccountProxyOperationResult>(ids.Length);
+                for (var index = 0; index < ids.Length; index++)
+                {
+                    var accountId = ids[index];
+                    var assignment = assignments[index];
+                    try
+                    {
+                        var item = (await service.BindAccountsAsync(
+                                new[] { accountId },
+                                new AccountProxyBindingInput(
+                                    "existing",
+                                    assignment.ProxyId,
+                                    ExpectedConnection: assignment.ExpectedConnection),
+                                cancellationToken))
+                            .Items
+                            .Single();
+                        items.Add(item with
+                        {
+                            Summary = item.Success
+                                ? $"已绑定第 {assignment.SourceLine} 行代理 {assignment.ProxyName}"
+                                : item.Summary
+                        });
+                    }
+                    catch (Exception ex) when (IsClientError(ex))
+                    {
+                        items.Add(new AccountProxyOperationResult(
+                            accountId,
+                            null,
+                            false,
+                            "逐账号代理绑定失败",
+                            ex.Message,
+                            assignment.ProxyId));
+                    }
+                }
+
+                return Results.Ok(new AccountProxyBatchResult(
+                    items.Count(x => x.Success),
+                    items.Count(x => !x.Success),
+                    items));
+            }
+
             var result = await service.BindAccountsAsync(
                 request.AccountIds ?? Array.Empty<int>(),
                 new AccountProxyBindingInput(
@@ -680,7 +731,8 @@ public sealed record AccountProxyBindingRequestDto(
 public sealed record BatchAccountProxyBindingRequestDto(
     IReadOnlyList<int>? AccountIds,
     string? Strategy,
-    int? ProxyId);
+    int? ProxyId,
+    string? ProxyText);
 
 public sealed record ProxyCategorySaveRequestDto(
     string? Name,

@@ -23,13 +23,14 @@ internal static class UserChatActiveSendPlanner
         int requestedMessageCount,
         int dictionaryCount,
         string? accountMode,
-        string? messageMode)
+        string? messageMode,
+        int accountQueueCursor = 0)
     {
         if (eligibleAccountCount <= 0 || requestedMessageCount <= 0 || dictionaryCount <= 0)
             return Array.Empty<UserChatActivePlannedSend>();
 
         var effectiveMessageCount = Math.Min(requestedMessageCount, eligibleAccountCount);
-        var accountIndexes = BuildAccountIndexes(eligibleAccountCount, accountMode);
+        var accountIndexes = BuildAccountIndexes(eligibleAccountCount, accountMode, accountQueueCursor);
         var plannedSends = new List<UserChatActivePlannedSend>(effectiveMessageCount);
         var messageQueueIndex = 0;
 
@@ -47,12 +48,33 @@ internal static class UserChatActiveSendPlanner
         return Math.Max(0, completedMessageCount) + Math.Max(0, plannedSendCount);
     }
 
+    public static int NormalizeQueueCursor(int cursor, int count)
+    {
+        if (count <= 1)
+            return 0;
 
-    private static List<int> BuildAccountIndexes(int count, string? mode)
+        var normalized = cursor % count;
+        return normalized < 0 ? normalized + count : normalized;
+    }
+
+    public static int AdvanceQueueCursor(int cursor, int count)
+    {
+        if (count <= 1)
+            return 0;
+
+        return (NormalizeQueueCursor(cursor, count) + 1) % count;
+    }
+
+    private static List<int> BuildAccountIndexes(int count, string? mode, int accountQueueCursor)
     {
         var indexes = Enumerable.Range(0, count).ToList();
         if (string.Equals(mode, UserChatActiveTaskModes.Queue, StringComparison.OrdinalIgnoreCase))
-            return indexes;
+        {
+            var start = NormalizeQueueCursor(accountQueueCursor, count);
+            return start == 0
+                ? indexes
+                : indexes.Skip(start).Concat(indexes.Take(start)).ToList();
+        }
 
         for (var i = indexes.Count - 1; i > 0; i--)
         {
@@ -168,12 +190,19 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         var verificationFailures = new ConcurrentQueue<VerificationFailure>();
         var verificationTasks = new ConcurrentDictionary<Guid, Task>();
         using var verificationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var accountQueueIndex = 0;
+        var accountQueueIndex = UserChatActiveSendPlanner.NormalizeQueueCursor(
+            config.AccountQueueCursor,
+            accountSlots.Count);
         var messageQueueIndex = 0;
         var targetQueueIndexByAccountId = new Dictionary<int, int>();
         var lastProgressPersistAt = DateTime.UtcNow;
         var useForwardSource = IsForwardSourceMode(config);
-        var contentItemCount = ResolveContentItemCount(config);
+        var expandedForwardSources = useForwardSource
+            ? await ExpandForwardSourceUrlsAsync(config.ForwardSourceUrls, templateRendering, cancellationToken)
+            : ExpandForwardSourceUrlsResult.Ok(new List<string>());
+        if (!expandedForwardSources.Success)
+            throw new InvalidOperationException(expandedForwardSources.Error ?? "转发来源消息链接配置无效");
+        var contentItemCount = useForwardSource ? expandedForwardSources.SourceUrls.Count : ResolveContentItemCount(config);
         var replyToMessageId = useForwardSource ? null : ResolveReplyToMessageId(config);
         var finiteSendPlan = config.MaxMessages > 0
             ? UserChatActiveSendPlanner.BuildFiniteRunPlan(
@@ -181,7 +210,8 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                 Math.Max(0, config.MaxMessages - progress.Completed),
                 contentItemCount,
                 config.AccountMode,
-                config.MessageMode)
+                config.MessageMode,
+                config.AccountQueueCursor)
             : null;
         if (finiteSendPlan is not null)
         {
@@ -261,6 +291,13 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                     ? plannedSend.AccountIndex
                     : SelectIndex(config.AccountMode, accountSlots.Count, ref accountQueueIndex);
                 var accountSlot = accountSlots[accountIdx];
+                if (IsQueueMode(config.AccountMode))
+                {
+                    config.AccountQueueCursor = finiteSendPlan is not null
+                        ? UserChatActiveSendPlanner.AdvanceQueueCursor(config.AccountQueueCursor, accountSlots.Count)
+                        : accountQueueIndex;
+                }
+
 
                 if (!targetQueueIndexByAccountId.ContainsKey(accountSlot.Account.Id))
                     targetQueueIndexByAccountId[accountSlot.Account.Id] = 0;
@@ -281,7 +318,7 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
                     break;
                 }
 
-                var forwardSourceUrl = useForwardSource ? config.ForwardSourceUrls[contentIdx] : string.Empty;
+                var forwardSourceUrl = useForwardSource ? expandedForwardSources.SourceUrls[contentIdx] : string.Empty;
                 var messageRule = useForwardSource ? null : config.MessageRules[contentIdx];
                 var textTemplate = messageRule?.Text ?? string.Empty;
                 var text = string.Empty;
@@ -713,6 +750,9 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
 
             foreach (var sourceUrl in config.ForwardSourceUrls)
             {
+                if (IsSingleDictionaryToken(sourceUrl))
+                    continue;
+
                 if (!AccountTelegramToolsService.TryParseTelegramMessageReference(sourceUrl, out _, out var error))
                     throw new InvalidOperationException($"转发消息链接无效：{error ?? sourceUrl}");
             }
@@ -740,6 +780,7 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
         config.AccountMode = NormalizeMode(config.AccountMode);
         config.TargetMode = NormalizeMode(config.TargetMode);
         config.MessageMode = NormalizeMode(config.MessageMode);
+        config.AccountQueueCursor = Math.Max(0, config.AccountQueueCursor);
 
         config.VerificationMatchMode = UserChatActiveAiVerificationMatchModes.Normalize(config.VerificationMatchMode);
         config.VerificationKeywords = NormalizeVerificationItems(config.VerificationKeywords);
@@ -832,10 +873,16 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
             : UserChatActiveTaskModes.Random;
     }
 
+    private static bool IsQueueMode(string? mode) =>
+        string.Equals((mode ?? string.Empty).Trim(), UserChatActiveTaskModes.Queue, StringComparison.OrdinalIgnoreCase);
+
     private static bool IsForwardSourceMode(UserChatActiveTaskConfig config) =>
         string.Equals(config.MessageActionMode, UserChatActiveMessageActionModes.ForwardUrl, StringComparison.Ordinal);
 
     private static bool IsGeneratedMessageMode(UserChatActiveTaskConfig config) => !IsForwardSourceMode(config);
+
+    private static bool IsSingleDictionaryToken(string? value) =>
+        Regex.IsMatch((value ?? string.Empty).Trim(), "^\\{[a-zA-Z0-9_]+\\}$");
 
     private static int ResolveContentItemCount(UserChatActiveTaskConfig config) =>
         IsForwardSourceMode(config) ? config.ForwardSourceUrls.Count : config.MessageRules.Count;
@@ -854,6 +901,55 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
             .Where(x => x.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static async Task<ExpandForwardSourceUrlsResult> ExpandForwardSourceUrlsAsync(
+        IEnumerable<string>? rawSources,
+        TemplateRenderingService templateRendering,
+        CancellationToken cancellationToken)
+    {
+        var sourceUrls = new List<string>();
+        foreach (var raw in rawSources ?? Array.Empty<string>())
+        {
+            var value = (raw ?? string.Empty).Trim();
+            if (value.Length == 0)
+                continue;
+
+            if (IsSingleDictionaryToken(value))
+            {
+                IReadOnlyList<string> dictionaryValues;
+                try
+                {
+                    dictionaryValues = await templateRendering.ResolveTextDictionaryValuesAsync(value, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    return ExpandForwardSourceUrlsResult.Failed($"转发来源字典解析失败：{ex.Message}");
+                }
+
+                sourceUrls.AddRange(dictionaryValues.SelectMany(SplitTargetValues));
+                continue;
+            }
+
+            sourceUrls.AddRange(SplitTargetValues(value));
+        }
+
+        sourceUrls = sourceUrls
+            .Select(x => (x ?? string.Empty).Trim())
+            .Where(x => x.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (sourceUrls.Count == 0)
+            return ExpandForwardSourceUrlsResult.Failed("转发模式缺少消息链接");
+
+        foreach (var sourceUrl in sourceUrls)
+        {
+            if (!AccountTelegramToolsService.TryParseTelegramMessageReference(sourceUrl, out _, out var error))
+                return ExpandForwardSourceUrlsResult.Failed($"转发消息链接无效：{error ?? sourceUrl}");
+        }
+
+        return ExpandForwardSourceUrlsResult.Ok(sourceUrls);
     }
 
     private static int? ResolveReplyToMessageId(UserChatActiveTaskConfig config)
@@ -1324,6 +1420,18 @@ public sealed class UserChatActiveTaskHandler : IModuleTaskHandler
             new(true, null, targets);
 
         public static ExpandTargetsResult Failed(string error) =>
+            new(false, error, new List<string>());
+    }
+
+    private sealed record ExpandForwardSourceUrlsResult(
+        bool Success,
+        string? Error,
+        List<string> SourceUrls)
+    {
+        public static ExpandForwardSourceUrlsResult Ok(List<string> sourceUrls) =>
+            new(true, null, sourceUrls);
+
+        public static ExpandForwardSourceUrlsResult Failed(string error) =>
             new(false, error, new List<string>());
     }
 

@@ -52,6 +52,7 @@
       <template v-else>
         <el-form-item label="转发来源消息链接">
           <el-input v-model="forms.userChatActive.forwardSourceUrlsText" type="textarea" :rows="4" placeholder="每行一个 Telegram 消息链接，例如 https://t.me/channel/123 或 https://t.me/c/1234567890/123" />
+          <div class="form-hint no-offset">也可单独填写一个文本字典变量，例如 {forward_sources}；字典内容可放多条 Telegram 消息链接。</div>
         </el-form-item>
         <el-form-item label="转发方式">
           <el-radio-group v-model="forms.userChatActive.forwardMode">
@@ -685,6 +686,7 @@ function applyInitialConfig() {
     form.maxMessages = readNumber(cfg.max_messages, 0)
     form.accountMode = normalizeMode(readString(cfg.account_mode, 'random'))
     form.targetMode = normalizeMode(readString(cfg.target_mode, 'queue'))
+    form.accountQueueCursor = Math.max(0, readNumber(cfg.account_queue_cursor, 0))
     form.messageMode = normalizeMode(readString(cfg.message_mode, 'random'))
     form.enableAiVerification = readBoolean(cfg.enable_ai_verification)
     form.aiModel = readString(cfg.ai_model)
@@ -828,6 +830,7 @@ function buildUserChatActiveDraft(): TaskConfigDraft {
   validateUserChatActiveTargetDictionaries(targets)
   if (form.messageActionMode === 'forward_url') {
     if (forwardSourceUrls.length === 0) throw new Error('请至少填写一个转发来源消息链接')
+    validateUserChatActiveForwardSourceDictionaries(forwardSourceUrls)
   } else {
     if (messageRules.length === 0) throw new Error('请至少添加一条消息规则')
     for (const rule of messageRules) {
@@ -882,6 +885,7 @@ function buildUserChatActiveDraft(): TaskConfigDraft {
     delay_min_ms: secondsToMilliseconds(form.delayMinSeconds),
     delay_max_ms: secondsToMilliseconds(form.delayMaxSeconds),
     account_mode: form.accountMode,
+    account_queue_cursor: Math.max(0, form.accountQueueCursor),
     message_mode: effectiveMessageMode,
     target_mode: form.targetMode,
     max_messages: Math.max(0, form.maxMessages),
@@ -1183,6 +1187,7 @@ function defaultUserChatActiveForm() {
     delayMinSeconds: 15,
     delayMaxSeconds: 45,
     maxMessages: 0,
+    accountQueueCursor: 0,
     accountMode: 'random',
     targetMode: 'queue',
     messageMode: 'random',
@@ -1349,6 +1354,16 @@ function validateUserChatActiveTargetDictionaries(targets: string[]) {
     if (!tokenName) continue
     if (tokenName.toLowerCase() === 'time') throw new Error('目标字典不能使用内置时间变量 {time}')
     if (!available.has(tokenName.toLowerCase())) throw new Error(`目标字典无效：{${tokenName}} 不是已启用且有内容的文本字典`)
+  }
+}
+
+function validateUserChatActiveForwardSourceDictionaries(sourceUrls: string[]) {
+  const available = new Set(textDictionaryNames.value.map((x) => x.toLowerCase()))
+  for (const sourceUrl of sourceUrls) {
+    const tokenName = extractSingleDictionaryTokenName(sourceUrl)
+    if (!tokenName) continue
+    if (tokenName.toLowerCase() === 'time') throw new Error('转发来源字典不能使用内置时间变量 {time}')
+    if (!available.has(tokenName.toLowerCase())) throw new Error(`转发来源字典无效：{${tokenName}} 不是已启用且有内容的文本字典`)
   }
 }
 
