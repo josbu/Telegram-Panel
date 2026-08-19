@@ -106,10 +106,12 @@ Docker 下常用环境变量（见 `docker-compose.yml`）：
 
 新手机号登录、二维码登录、Session 文件导入、StringSession 导入和纯 TData 导入会在启用配置中按账号已保存的 `ApiId/ApiHash` 使用量选择最少的一项；`Weight` 越大可承载的相对账号数越多。禁用项不会被分配。Telethon Zip 内自带 `api_id/api_hash` 的账号继续使用包内配置。已有账号操作优先使用账号表中保存的 `ApiId/ApiHash`，只有账号缺少这两个字段时才回退全局单 API，因此保存配置池不会迁移或改写已有账号。
 
-如果配置池为空或所有项禁用，系统会继续使用 `Telegram:ApiId` / `Telegram:ApiHash`，保持单 API 部署兼容。保存 Telegram API 设置会清理客户端缓存；正在使用旧 Session 的账号不会被批量改写，如需切换 API 请重新登录或重新导入对应账号。
+如果没有配置 `Telegram:ApiId`/`Telegram:ApiHash`，且没有启用 API 配置池，系统内置 Telegram 官方 Android API 作为默认：ApiId `6`。如需使用自建 API 或其他 API，进入侧栏“Telegram 设置 → Telegram API”配置；已有账号不会被自动改写。
+
+如果配置池为空或所有项禁用，系统会继续使用 `Telegram:ApiId` / `Telegram:ApiHash`，未配置时按上述官方 Android API 回退。保存 Telegram API 设置会清理客户端缓存；正在使用旧 Session 的账号不会被批量改写，如需切换 API 请重新登录或重新导入对应账号。
 ### Telegram 设备指纹画像
 
-适用版本：包含 `20260818090000_AddAccountDeviceProfileKey` 迁移的版本。面板内置四个可选画像：`android-default`、`ios-default`、`macos-default`、`windows-default`；也可在 `Telegram:DeviceProfiles` 中按同样字段覆盖或增加画像。
+适用版本：包含 `20260818090000_AddAccountDeviceProfileKey` 迁移的版本。通过侧栏“Telegram 设置 → 设备指纹”管理默认画像；面板内置四个可选画像：`android-default`、`ios-default`、`macos-default`、`windows-default`；也可在 `Telegram:DeviceProfiles` 中按同样字段覆盖或增加画像。
 
 ```json
 {

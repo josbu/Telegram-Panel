@@ -73,6 +73,19 @@ public sealed class TelegramApiProfilePoolTests
     }
 
     [Fact]
+    public void SelectForNewAccount_UsesBuiltInOfficialAndroidApiWhenUnset()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+        var pool = new TelegramApiProfilePool(configuration);
+
+        var selected = pool.SelectForNewAccount(Array.Empty<Account>());
+
+        Assert.Equal(TelegramApiProfilePool.OfficialAndroidApiId, selected.ApiId);
+        Assert.Equal(TelegramApiProfilePool.OfficialAndroidApiHash, selected.ApiHash);
+        Assert.Equal(TelegramApiProfilePool.OfficialAndroidApiName, selected.ProfileName);
+    }
+
+    [Fact]
     public void NormalizeTelegramApiDefaultInput_TreatsZeroWithoutHashAsProfileOnly()
     {
         var result = PanelAdminApiEndpoints.NormalizeTelegramApiDefaultInput("0", " ");

@@ -1181,7 +1181,7 @@ async function saveDetails() {
       remark: details.form.remark,
       twoFactorPassword: details.form.twoFactorPassword,
       categoryId: details.account.categoryId ?? null,
-      deviceProfileKey: details.form.deviceProfileKey || null,
+      deviceProfileKey: details.form.deviceProfileKey,
     })
     ElMessage.success('账号详情已保存')
     details.visible = false
