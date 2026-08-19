@@ -13,9 +13,10 @@ function sourceSection(startMarker, endMarker) {
   return source.slice(start, end)
 }
 
-test('逐账号批量代理在导入类型中仅扩展 Zip 导入策略', () => {
-  assert.match(typesSource, /export type AccountProxyStrategy = 'direct' \| 'global' \| 'existing' \| 'warp_per_account' \| 'warp_pool' \| 'proxy_per_account'/)
-  assert.match(typesSource, /export type AccountImportProxyStrategy = Exclude<AccountProxyStrategy, 'proxy_per_account'>/)
+test('逐账号批量代理仅扩展 Zip 导入与账号批量绑定策略', () => {
+  assert.match(typesSource, /export type AccountProxyStrategy = 'direct' \| 'global' \| 'existing' \| 'warp_per_account' \| 'warp_pool'/)
+  assert.match(typesSource, /export type AccountProxyBatchStrategy = AccountProxyStrategy \| 'proxy_per_account'/)
+  assert.match(typesSource, /export type AccountImportProxyStrategy = AccountProxyStrategy/)
   assert.match(typesSource, /export type ZipImportProxyStrategy = AccountImportProxyStrategy \| 'proxy_per_account'/)
   assert.match(source, /value="proxy_per_account">批量代理一对一/)
   assert.match(source, /批量代理一对一仅适用于 Zip 导入/)
