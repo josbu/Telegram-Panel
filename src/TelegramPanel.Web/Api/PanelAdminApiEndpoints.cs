@@ -2389,8 +2389,8 @@ public static class PanelAdminApiEndpoints
             LocalConfigPath: localPath,
             LocalConfigExists: File.Exists(localPath),
             Telegram: new TelegramApiSettingsDto(
-                configuration["Telegram:ApiId"] ?? "",
-                configuration["Telegram:ApiHash"] ?? "",
+                ReadEffectiveTelegramApiId(configuration),
+                ReadEffectiveTelegramApiHash(configuration),
                 ReadTelegramApiProfiles(configuration),
                 TelegramDeviceProfileCatalog.ReadProfiles(configuration).Select(ToDto).ToList(),
                 TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration)),
@@ -2418,7 +2418,7 @@ public static class PanelAdminApiEndpoints
                 configuration.GetValue("TelegramStatus:AutoRefreshDelayMs", 5000)),
             Logging: new LoggingSettingsDto(configuration.GetValue("Serilog:Enabled", false), configuration["Serilog:MinimumLevel:Default"] ?? "Information", configuration.GetValue("Serilog:RetainedFileCountLimit", 30)),
             TimeZone: new TimeZoneSettingsDto(configuration["System:TimeZoneId"] ?? "", $"{tz.Id}（UTC{offset}）"),
-            System: new SystemInfoSettingsDto(VersionService.Version, ".NET 8.0", "SQLite", configuration["Telegram:ApiId"] ?? ""));
+            System: new SystemInfoSettingsDto(VersionService.Version, ".NET 8.0", "SQLite", ReadEffectiveTelegramApiId(configuration)));
 
         return Task.FromResult<IResult>(Results.Ok(dto));
     }
@@ -2545,6 +2545,26 @@ public static class PanelAdminApiEndpoints
                 profile.Weight,
                 profile.Notes))
             .ToList();
+
+    private static string ReadEffectiveTelegramApiId(IConfiguration configuration)
+    {
+        if (TelegramApiProfilePool.GetEnabledProfiles(configuration).Count > 0)
+            return configuration["Telegram:ApiId"] ?? string.Empty;
+
+        return TelegramApiProfilePool.TryGetGlobalFallback(configuration, out var credentials)
+            ? credentials.ApiId.ToString(CultureInfo.InvariantCulture)
+            : configuration["Telegram:ApiId"] ?? string.Empty;
+    }
+
+    private static string ReadEffectiveTelegramApiHash(IConfiguration configuration)
+    {
+        if (TelegramApiProfilePool.ReadConfiguredProfiles(configuration).Count > 0)
+            return configuration["Telegram:ApiHash"] ?? string.Empty;
+
+        return TelegramApiProfilePool.TryGetGlobalFallback(configuration, out var credentials)
+            ? credentials.ApiHash
+            : configuration["Telegram:ApiHash"] ?? string.Empty;
+    }
 
     private static IReadOnlyList<TelegramApiProfile> NormalizeTelegramApiProfiles(
         IReadOnlyList<TelegramApiProfileDto>? profiles,

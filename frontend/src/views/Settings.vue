@@ -7,84 +7,17 @@
       show-icon
       :title="`写入位置：${settings?.localConfigPath || '-'}`"
     />
+    <el-alert
+      class="mb-4"
+      type="info"
+      :closable="false"
+      show-icon
+      title="Telegram API 配置和设备指纹已拆到侧栏的 Telegram 设置 / 设备指纹 页面。"
+    />
+
 
     <div class="settings-columns">
       <div class="settings-column">
-        <el-card shadow="never" class="page-card">
-          <template #header>Telegram API 配置</template>
-          <el-form label-position="top">
-            <el-form-item label="默认 API ID">
-              <el-input v-model="telegram.apiId" />
-              <div class="muted mt-2">从 https://my.telegram.org 获取。</div>
-            </el-form-item>
-            <el-form-item label="默认 API Hash">
-              <el-input v-model="telegram.apiHash" />
-              <div class="muted mt-2">兼容旧配置；未启用 API 配置池时用于新账号登录和导入。</div>
-            </el-form-item>
-            <el-divider />
-            <div class="section-title">API 配置池</div>
-            <el-alert type="info" :closable="false" show-icon class="mb-3">
-              <template #title>新账号登录、Session 文件、StringSession 和 tdata 导入会在启用的配置间按已保存账号数均衡分配；Zip 内自带 api_id/api_hash 的账号保持包内配置。</template>
-            </el-alert>
-            <div v-for="(profile, index) in telegram.profiles" :key="index" class="api-profile-row">
-              <el-row :gutter="8">
-                <el-col :xs="24" :sm="6">
-                  <el-form-item label="名称">
-                    <el-input v-model="profile.name" placeholder="主 API" />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :sm="5">
-                  <el-form-item label="ApiId">
-                    <el-input v-model="profile.apiId" />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :sm="6">
-                  <el-form-item label="ApiHash">
-                    <el-input v-model="profile.apiHash" />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="12" :sm="4">
-                  <el-form-item label="权重">
-                    <el-input-number v-model="profile.weight" :min="1" :max="1000" :controls="false" class="full" />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="12" :sm="3">
-                  <el-form-item label="启用">
-                    <el-switch v-model="profile.enabled" />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-              <el-form-item label="备注">
-                <el-input v-model="profile.notes" placeholder="可选" />
-              </el-form-item>
-              <el-button text type="danger" @click="removeApiProfile(index)">删除此配置</el-button>
-            </div>
-            <el-button plain @click="addApiProfile">添加 API 配置</el-button>
-            <el-divider />
-            <div class="section-title">默认设备指纹</div>
-            <el-form-item label="新登录、导入和账号连接默认使用的设备画像">
-              <el-select v-model="telegram.defaultDeviceProfileKey" class="full" filterable>
-                <el-option
-                  v-for="profile in telegram.deviceProfiles || []"
-                  :key="profile.key"
-                  :label="`${profile.name} · ${profile.family}`"
-                  :value="profile.key"
-                />
-              </el-select>
-              <div v-if="selectedDeviceProfile" class="muted mt-2">
-                {{ selectedDeviceProfile.deviceModel }} · {{ selectedDeviceProfile.systemVersion }} · App {{ selectedDeviceProfile.appVersion }}
-              </div>
-              <div class="muted mt-2">这是 Telegram 客户端设备画像，不会修改 API ID/Hash；已保存账号仍可单独绑定画像。</div>
-            </el-form-item>
-          </el-form>
-          <el-alert type="info" :closable="false" show-icon class="mb-3">
-            <template #title>Telegram API 状态</template>
-            <div>写入位置：{{ settings?.localConfigPath || '-' }}</div>
-            <div>文件存在：{{ settings?.localConfigExists ? '是' : '否' }}</div>
-            <div>当前生效 ApiId：{{ settings?.system.effectiveApiId || '（未配置）' }}</div>
-          </el-alert>
-          <el-button type="primary" :loading="saving.telegram" @click="saveTelegram">保存配置</el-button>
-        </el-card>
 
         <el-card shadow="never" class="page-card">
           <template #header>
@@ -337,17 +270,10 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { panelApi } from '@/api/panel'
-import type { SettingsPayload, TelegramApiSettings, TelegramApiProfile, TelegramDeviceProfile } from '@/api/types'
+import type { SettingsPayload } from '@/api/types'
 
 const router = useRouter()
 const settings = ref<SettingsPayload | null>(null)
-const telegram = reactive({
-  apiId: '',
-  apiHash: '',
-  profiles: [] as TelegramApiProfile[],
-  deviceProfiles: [] as TelegramDeviceProfile[],
-  defaultDeviceProfileKey: '',
-})
 const cloudMail = reactive({ baseUrl: '', domain: '', token: '' })
 const cloudToken = reactive({ adminEmail: '', adminPassword: '' })
 const ai = reactive({ endpoint: '', apiKey: '', defaultModel: '', presetModels: [] as string[], retryCount: 2 })
@@ -365,7 +291,6 @@ const presetModelsText = computed({
   },
 })
 const saving = reactive({
-  telegram: false,
   cloudMail: false,
   cloudToken: false,
   ai: false,
@@ -386,28 +311,10 @@ function assign<T extends object>(target: T, source: Partial<T>) {
   Object.assign(target, source)
 }
 
-function normalizeTelegramSettings(source: TelegramApiSettings) {
-  telegram.apiId = source.apiId || ''
-  telegram.apiHash = source.apiHash || ''
-  telegram.deviceProfiles = source.deviceProfiles || []
-  telegram.defaultDeviceProfileKey = source.defaultDeviceProfileKey || telegram.deviceProfiles[0]?.key || ''
-  const profiles = source.profiles || []
-  telegram.profiles = profiles.map((profile) => ({
-    name: profile.name || '',
-    apiId: profile.apiId || '',
-    apiHash: profile.apiHash || '',
-    enabled: profile.enabled !== false,
-    weight: profile.weight || 1,
-    notes: profile.notes || '',
-  }))
-}
-
-const selectedDeviceProfile = computed(() => telegram.deviceProfiles.find((profile) => profile.key === telegram.defaultDeviceProfileKey))
 
 async function load() {
   const data = await panelApi.settings()
   settings.value = data
-  normalizeTelegramSettings(data.telegram)
   assign(cloudMail, data.cloudMail)
   assign(ai, data.ai)
   assign(batch, data.batch)
@@ -431,17 +338,6 @@ async function run(key: keyof typeof saving, action: () => Promise<{ message?: s
   }
 }
 
-function addApiProfile() {
-  telegram.profiles.push({ name: '', apiId: '', apiHash: '', enabled: true, weight: 1, notes: '' })
-}
-
-function removeApiProfile(index: number) {
-  telegram.profiles.splice(index, 1)
-}
-
-function saveTelegram() {
-  return run('telegram', () => panelApi.saveTelegramApiSettings({ ...telegram }))
-}
 
 function saveCloudMail() {
   return run('cloudMail', () => panelApi.saveCloudMailSettings({ ...cloudMail }))
