@@ -24,7 +24,7 @@ public sealed class BatchProxyAccountImportTests
     private const string ApiHash = "0123456789abcdef0123456789abcdef";
 
     [Fact]
-    public async Task 纯Tdata缺少全局Api时不会检测或保存代理也不会连接Telegram()
+    public async Task 纯Tdata使用内置官方Api时解析失败仍无副作用()
     {
         await using var fixture = await BatchImportFixture.CreateAsync();
         await using var zip = CreateTdataZip();
@@ -36,11 +36,11 @@ public sealed class BatchProxyAccountImportTests
 
         var result = Assert.Single(results);
         Assert.False(result.Success);
-        Assert.Contains("未配置全局 Telegram API", result.Error);
-        Assert.Equal(0, fixture.Probe.CallCount);
+        Assert.Contains("tdata 解析失败", result.Error);
+        Assert.Equal(1, fixture.Probe.CallCount);
         Assert.Equal(0, fixture.Importer.ImportCount);
         Assert.Equal(0, fixture.ClientPool.GetOrCreateCount);
-        Assert.Empty(await fixture.Db.OutboundProxies.AsNoTracking().ToListAsync());
+        Assert.Single(await fixture.Db.OutboundProxies.AsNoTracking().ToListAsync());
     }
 
     [Fact]

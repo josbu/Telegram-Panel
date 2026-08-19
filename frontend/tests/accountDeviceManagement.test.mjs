@@ -20,6 +20,12 @@ test('踢出设备失败时显示失败结果，成功后立即移除并刷新�
   assert.match(accountsSource, /await refreshDevicesAfterKick\(removedHashes\)/)
 })
 
+test('账号详情清空设备画像时提交空字符串', () => {
+  assert.match(accountsSource, /<el-option label="跟随系统默认" value="" \/>/)
+  assert.match(accountsSource, /deviceProfileKey: details\.form\.deviceProfileKey,/)
+  assert.doesNotMatch(accountsSource, /deviceProfileKey: details\.form\.deviceProfileKey \|\| null/)
+})
+
 test('导出独立 session 注入当前授权的设备画像', () => {
   assert.match(exportSource, /Account_GetAuthorizations\(\)/)
   assert.match(exportSource, /Authorization\.Flags\.current/)

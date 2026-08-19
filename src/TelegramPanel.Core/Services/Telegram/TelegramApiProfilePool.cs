@@ -17,6 +17,10 @@ public sealed record TelegramApiProfile(
 
 public sealed class TelegramApiProfilePool
 {
+    public const int OfficialAndroidApiId = 6;
+    public const string OfficialAndroidApiHash = "eb06d4abfb49dc3eeb1aeb98ae0f581e";
+    public const string OfficialAndroidApiName = "Telegram 官方 Android API";
+
     private const int MaxWeight = 1000;
     private readonly IConfiguration _configuration;
 
@@ -144,10 +148,16 @@ public sealed class TelegramApiProfilePool
     public static bool TryGetGlobalFallback(IConfiguration configuration, out TelegramApiCredentials credentials)
     {
         credentials = default!;
-        if (!int.TryParse(configuration["Telegram:ApiId"], out var apiId))
-            return false;
+        var apiIdText = (configuration["Telegram:ApiId"] ?? string.Empty).Trim();
+        var apiHashText = (configuration["Telegram:ApiHash"] ?? string.Empty).Trim();
+        if ((string.IsNullOrWhiteSpace(apiIdText) || apiIdText == "0") && string.IsNullOrWhiteSpace(apiHashText))
+        {
+            credentials = new TelegramApiCredentials(OfficialAndroidApiId, OfficialAndroidApiHash, OfficialAndroidApiName);
+            return true;
+        }
 
-        if (!TryNormalizeCredentials(apiId, configuration["Telegram:ApiHash"], out var apiHash, out _))
+        if (!int.TryParse(apiIdText, out var apiId)
+            || !TryNormalizeCredentials(apiId, apiHashText, out var apiHash, out _))
             return false;
 
         credentials = new TelegramApiCredentials(apiId, apiHash, "默认 API");
