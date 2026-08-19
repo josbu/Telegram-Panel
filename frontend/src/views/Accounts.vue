@@ -1967,9 +1967,16 @@ async function kickDevice(device: TelegramAuthorization) {
     confirmButtonText: '踢出',
     cancelButtonText: '取消',
   })
-  await panelApi.kickDevice(listDialog.accountId, device.hash)
-  ElMessage.success('已踢出该设备')
-  listDialog.devices = await panelApi.devices(listDialog.accountId)
+  const result = await panelApi.kickDevice(listDialog.accountId, device.hash)
+  if (!result.success) {
+    ElMessage.error(result.message || '踢出设备失败')
+    return
+  }
+
+  const removedHashes = new Set([device.hash])
+  listDialog.devices = listDialog.devices.filter((item) => !removedHashes.has(item.hash))
+  ElMessage.success(result.message || '已踢出该设备')
+  await refreshDevicesAfterKick(removedHashes)
 }
 
 async function kickAllDevicesForDialog() {
@@ -1978,9 +1985,27 @@ async function kickAllDevicesForDialog() {
     confirmButtonText: '踢出',
     cancelButtonText: '取消',
   })
-  await panelApi.kickAllOtherDevices(listDialog.accountId)
-  ElMessage.success('已踢出所有其他设备')
-  listDialog.devices = await panelApi.devices(listDialog.accountId)
+  const removedHashes = new Set(listDialog.devices.filter((device) => !device.current).map((device) => device.hash))
+  const result = await panelApi.kickAllOtherDevices(listDialog.accountId)
+  if (!result.success) {
+    ElMessage.error(result.message || '踢出其他设备失败')
+    return
+  }
+
+  listDialog.devices = listDialog.devices.filter((device) => device.current)
+  ElMessage.success(result.message || '已踢出所有其他设备')
+  await refreshDevicesAfterKick(removedHashes)
+}
+
+async function refreshDevicesAfterKick(removedHashes: ReadonlySet<string>) {
+  if (!listDialog.visible || listDialog.type !== 'devices') return
+  try {
+    await new Promise((resolve) => window.setTimeout(resolve, 300))
+    const devices = await panelApi.devices(listDialog.accountId)
+    listDialog.devices = devices.filter((device) => !removedHashes.has(device.hash))
+  } catch {
+    // Telegram 设备列表可能有短暂传播延迟；保留已确认成功后的本地移除结果。
+  }
 }
 
 function handleBatchCommand(command: string) {

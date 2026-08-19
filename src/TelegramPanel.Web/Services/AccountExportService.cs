@@ -401,13 +401,20 @@ public class AccountExportService
             if (sourceUser == null)
                 return PreparedExportSession.Fail("当前账号 session 无法恢复登录状态，无法生成独立 session");
 
+            var exportDeviceProfile = await ResolveExportDeviceProfileAsync(
+                sourceClient,
+                account,
+                sourceSessionPath,
+                linkedCts.Token);
+
             await using var builder = CreateIndependentExportClient(
                 account,
                 apiHash,
                 tempSessionPath,
                 twoFactorPassword,
                 exportProxy,
-                linkedCts.Token);
+                linkedCts.Token,
+                exportDeviceProfile);
 
             var user = await builder.LoginWithQRCode(
                 qrDisplay: loginUrl =>
@@ -480,6 +487,43 @@ public class AccountExportService
         // AccountProxyResolver 中完成，引用已有代理时禁止读取过期配置快照。
         return GlobalProxyResolver.ResolveLegacyManualRequired(_configuration);
     }
+    private async Task<TelegramClientDeviceProfile> ResolveExportDeviceProfileAsync(
+        Client sourceClient,
+        Account account,
+        string sourceSessionPath,
+        CancellationToken cancellationToken)
+    {
+        var stableKey = $"{account.ApiId}:{account.Phone}:{sourceSessionPath}";
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var authorizations = await sourceClient.Account_GetAuthorizations();
+            var current = authorizations.authorizations.FirstOrDefault(
+                authorization => authorization.flags.HasFlag(Authorization.Flags.current));
+            if (current != null)
+            {
+                _logger.LogInformation(
+                    "Using current Telegram authorization fingerprint for account {AccountId}: apiId={ApiId}, device={DeviceModel}, system={SystemVersion}, app={AppVersion}",
+                    account.Id,
+                    current.api_id,
+                    current.device_model,
+                    current.system_version,
+                    current.app_version);
+                return TelegramClientDeviceProfile.ForCurrentAuthorization(
+                    account.ApiId,
+                    stableKey,
+                    current.app_version,
+                    current.device_model,
+                    current.system_version);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to read current Telegram authorization fingerprint for account {AccountId}; using the account profile fallback", account.Id);
+        }
+
+        return TelegramClientDeviceProfile.ForStableKey(account.ApiId, stableKey);
+    }
 
     internal Client CreateIndependentExportClient(
         Account account,
@@ -487,9 +531,13 @@ public class AccountExportService
         string sessionPath,
         string? twoFactorPassword,
         ProxyConnectionOptions? proxy,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TelegramClientDeviceProfile? deviceProfile = null)
     {
         var normalizedPhone = NormalizePhone(account.Phone);
+        var fingerprint = deviceProfile ?? TelegramClientDeviceProfile.ForStableKey(
+            account.ApiId,
+            $"{account.ApiId}:{account.Phone}:{sessionPath}");
         string Config(string what) => what switch
         {
             "api_id" => account.ApiId.ToString(),
@@ -498,6 +546,7 @@ public class AccountExportService
             "session_key" => apiHash,
             "phone_number" => string.IsNullOrWhiteSpace(normalizedPhone) ? null! : normalizedPhone,
             "password" => string.IsNullOrWhiteSpace(twoFactorPassword) ? null! : twoFactorPassword,
+            "app_version" or "device_model" or "system_version" or "system_lang_code" or "lang_code" => fingerprint.GetConfigValue(what)!,
             _ => null!
         };
 

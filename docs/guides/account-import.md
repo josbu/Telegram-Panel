@@ -70,9 +70,10 @@ Socket 可用，且 WARP Compose 覆盖或 `Proxy:Warp:Enabled=true` 已生效�
 
 ## Telegram 设备参数
 
-面板创建或验证 WTelegram 客户端时，会按账号手机号、Session 路径或导入来源稳定选择一组客户端参数，包括 `app_version`、`device_model`、`system_version`、`system_lang_code` 和 `lang_code`。选择时会先按 `ApiId` 区分官方客户端族：`6` 使用 Telegram Android 参数，`2834` 使用 Telegram macOS 参数，`2040` 使用 Telegram Desktop 参数，其他未知 `ApiId` 默认使用 Android 参数。这样同一账号重复连接保持一致，不同账号不再全部显示为默认 Desktop / Linux 组合，也不会出现 “Telegram macOS + Android 系统” 这种混搭。
+面板创建导出独立 session 时，先读取该账号当前 Telegram 授权的 `app_version`、`device_model` 和 `system_version`，并把这三个值注入导出客户端；因此导出的新授权会沿用当前设备指纹，不再因为 WTelegram 默认值变成 `PC 64bit`。若当前授权读取失败或字段为空，才按账号 ApiId 和 Session 路径使用同客户端族的安全回退画像。
 
-成功判据是在账号详情的“已登录设备”中，当前授权的应用名称、设备型号和系统版本属于同一客户端族。若 Telegram 仍显示旧设备，通常是既有授权未重新创建；重新登录或踢出旧授权后再次连接会使用新参数。回滚方式是恢复默认 WTelegram 配置回调并重新构建，不涉及现有 Session 文件格式迁移。
+前置条件是账号 Session 有效，且面板能读取 `account.getAuthorizations`。成功判据是在账号详情的“在线设备”中，新导出授权的应用、设备型号和系统版本与导出前当前授权一致。失败排查先确认当前设备列表能正常加载，再检查账号代理和 Session；回滚方式是恢复到 v1.31.65，导出将恢复为按 ApiId/Session 稳定选择回退画像，不涉及现有 Session 文件格式迁移。
+
 
 ## Zip 逐账号批量代理
 

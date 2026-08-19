@@ -5944,7 +5944,7 @@ public static class PanelAdminApiEndpoints
 
     private static TelegramAuthorizationDto ToDto(TelegramAuthorizationInfo auth) =>
         new(
-            auth.Hash,
+            auth.Hash.ToString(CultureInfo.InvariantCulture),
             auth.Current,
             auth.ApiId,
             auth.AppName,
@@ -7800,7 +7800,7 @@ public sealed record AccountDetailDto(
 public sealed record TelegramSystemMessageDto(int Id, DateTime? DateUtc, string Text);
 
 public sealed record TelegramAuthorizationDto(
-    long Hash,
+    string Hash,
     bool Current,
     int ApiId,
     string? AppName,

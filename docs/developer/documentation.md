@@ -57,6 +57,13 @@ uv run mkdocs build
 
 后续功能若改变以上行为，必须同时修改对应条目，不得只追加代码或测试。
 
+## 设备授权与账号导出合同（v1.31.66）
+
+- 账号导出必须在生成独立 session 前读取当前 Telegram authorization；导出客户端的 `app_version`、`device_model` 和 `system_version` 优先复用当前授权，缺失时才使用 `TelegramClientDeviceProfile` 的 ApiId 族回退值。
+- 在线设备 DTO 的授权 `hash` 必须序列化为十进制字符串。Telegram 哈希是 64 位整数，Vue/JavaScript 不得用 `number` 保存或拼接该值。
+- 踢出接口必须检查 Telegram 返回的业务 `success`；成功后允许前端先移除行并延迟刷新，避免 Telegram 授权列表传播延迟造成“已踢出但仍显示”。
+- 验证至少包括：当前授权画像覆盖测试、长哈希 JSON 字符串测试、前端 86 个测试、`vue-tsc`、前端构建和 .NET Release 构建。回滚到 v1.31.65；无数据库迁移。
+
 ## GitHub Pages 发布
 
 已内置工作流：`.github/workflows/docs.yml`。
