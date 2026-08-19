@@ -987,6 +987,8 @@ public IEnumerable<ModuleTaskDefinition> GetTasks(ModuleHostContext context)
 
 自 v1.31.56 起，`user_chat_active` 增加发送动作合同：`message_action_mode=send_generated_text|forward_url`。默认 `send_generated_text` 保持原规则发送，并可通过 `reply_to_message_url` 让文字/图片消息回复目标内的指定消息；前端只填写 Telegram 消息链接并从链接提取消息 ID，原始 API 仍兼容 `reply_to_message_id`，但不再作为界面字段展示。`forward_url` 会忽略 `message_rules`、`dictionary`、图片字典和 AI 验证，改用 `forward_source_urls` 作为来源消息链接列表后调用 Telegram 原生转发；前端不展示内容模式，来源选择按默认随机策略保存，API 自动化如需队列选择仍可显式传 `message_mode=queue`。`forward_mode=with_attribution|hide_attribution` 控制是否保留原作者引用。`skip_if_last_message_from_self=true` 时，执行器会在每次发送或转发前读取目标最新普通消息，若该消息仍由当前执行账号发出，则把本轮记为已处理但不发送，用于避免同账号连续刷屏。前置条件是执行账号能访问来源消息和目标会话；成功判据是任务详情显示发送动作、来源数或回复链接，开启去重时同账号连续发言会跳过本轮，实际发送返回 Telegram 消息 ID。失败排查先看 `recent_failures.reason`，常见原因为回复/来源链接无消息 ID、账号无权访问来源、目标无权发言、回复消息在目标中不存在，或开启去重后无法读取目标最新消息。回滚到 v1.31.55 或更早版本前，应把任务改回 `send_generated_text` 并关闭去重，否则旧版只会按空消息规则处理转发配置且不识别去重字段。
 
+自当前开发版起，转发来源 `forward_source_urls` 与目标字段一样支持单个文本字典变量（例如 `{forward_sources}`），执行器在启动阶段展开全部启用文本项并校验每一项都是 Telegram 消息链接；模块或自动化调用方可以只更新数据字典来影响后续任务来源列表。账号队列模式会持久化 `account_queue_cursor`，有限任务本轮只发送 1 条时，下一次运行会从下一个账号继续，而不是每次固定使用第一个账号。调用方不得自行重置该游标，除非明确想让队列从头开始。
+
 ### 3) 使用 `CreateRoute` 提供自定义创建页
 
 当前主后台是 Vue SPA。外部模块需要自定义表单时，应设置 `ModuleTaskDefinition.CreateRoute`，指向模块自带的静态 Vue 页或宿主 Vue 路由：

@@ -173,6 +173,8 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 - `POST /api/panel/accounts/batch/proxy`：批量切换账号路由
 - `GET /api/panel/accounts/{id}/proxy/egress`：检测账号实际出口
 
+`POST /api/panel/accounts/batch/proxy` 支持 `strategy=direct|global|existing|warp_per_account|proxy_per_account`。`proxy_per_account` 仅用于批量切换已存在账号代理，必须提供 `proxyText`，每个有效行一个 HTTP 或 SOCKS5 代理，空行和 `#` 注释不计数，数量必须与 `accountIds` 去重后的数量完全一致。服务端会先解析并检测全部代理出口，全部成功后新增或复用代理记录，再按 `accountIds` 顺序逐账号绑定；任一格式、数量、凭据冲突或出口检测失败会返回 `400`，不会修改账号路由。失败排查先看响应 `items[].error` 或全局错误；回滚方式是重新用原代理、全局代理或直连策略批量切换账号。
+
 `POST /api/panel/settings/global-proxy` 使用 `sourceMode=manual|existing`。`existing` 模式
 必须提供 `proxyId`，服务端只保存引用并在运行时解析代理；不会把 WARP 或 Resin 的连接
 凭据复制到全局配置。
@@ -239,6 +241,8 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 完整表达，回滚前应改为全部规则共用一个图片字典或纯文字规则。
 
 自 v1.31.56 起，`user_chat_active.config` 增加 `message_action_mode`、`reply_to_message_url`、`reply_to_message_id`、`forward_source_urls`、`forward_mode` 和 `skip_if_last_message_from_self`。`message_action_mode` 默认为 `send_generated_text`，继续使用 `message_rules` 发送；前端只展示 `reply_to_message_url`，通过 Telegram 消息链接解析回复消息 ID。`reply_to_message_id` 保留为原始 API 兼容字段，自动化调用可继续大于 0 传入，但与 `reply_to_message_url` 同时存在时必须指向同一条消息。`message_action_mode=forward_url` 时，`forward_source_urls` 必须至少包含一个 Telegram 消息链接，`forward_mode=with_attribution|hide_attribution` 控制原生转发是否保留来源引用；此时前端不展示内容模式，默认按随机来源选择保存，原始 API 仍可用 `message_mode=queue` 改为队列选择。此模式不执行模板渲染、图片字典或 AI 验证。`skip_if_last_message_from_self=true` 时，发送或转发前会读取目标最新普通消息；若它仍由当前执行账号发出，本轮记为已处理但不发送，以避免同账号连续刷屏。成功判据是任务详情配置摘要显示“发送动作”和“去重发送”，且转发模式不再显示内容模式；`recent_failures` 为空或只记录真实 Telegram 访问/权限错误。开启去重但无法读取目标最新消息时，本轮会失败并记录原因。回滚到 v1.31.55 或更早版本前，应把任务重新保存为 `send_generated_text` 并关闭去重，否则旧版不会理解转发来源和去重字段。
+
+自当前开发版起，`user_chat_active.config.forward_source_urls` 的单项也可以是单个文本字典变量（例如 `{forward_sources}`）。执行器启动时会把该字典全部启用内容展开为 Telegram 消息链接，字典内容可用换行、空格或逗号分隔多个来源链接；未知、停用、空文本字典或展开后不是有效 Telegram 消息链接都会启动失败，不会静默跳过。`account_mode=queue` 会维护 `account_queue_cursor`，有限任务多次运行时会从上次使用后的下一个账号继续轮询；回滚到旧版前无需迁移，但旧版会忽略该游标并从第一个账号重新开始。
 
 `user_join_subscribe` 会在 `config.failures` 返回最多 200 条失败明细，字段包括 `accountId`、
 `target` 和 `reason`，并会对 Telegram 瞬时连接错误执行一次客户端重建重试。

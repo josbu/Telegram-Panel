@@ -109,6 +109,9 @@ public sealed class UserChatActiveTaskConfig
     [JsonPropertyName("account_mode")]
     public string AccountMode { get; set; } = UserChatActiveTaskModes.Random;
 
+    [JsonPropertyName("account_queue_cursor")]
+    public int AccountQueueCursor { get; set; }
+
     [JsonPropertyName("message_mode")]
     public string MessageMode { get; set; } = UserChatActiveTaskModes.Random;
 
