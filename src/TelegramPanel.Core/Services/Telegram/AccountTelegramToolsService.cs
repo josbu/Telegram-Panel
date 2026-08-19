@@ -2550,7 +2550,8 @@ public class AccountTelegramToolsService
             sessionPath: absoluteSessionPath,
             sessionKey: sessionKey,
             phoneNumber: account.Phone,
-            userId: account.UserId > 0 ? account.UserId : null);
+            userId: account.UserId > 0 ? account.UserId : null,
+            deviceProfileKey: account.DeviceProfileKey);
 
         try
         {

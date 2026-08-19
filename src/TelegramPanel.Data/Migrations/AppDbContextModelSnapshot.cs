@@ -37,14 +37,12 @@ namespace TelegramPanel.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DeviceProfileKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("EstimatedRegistrationAt")
                         .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("EstimatedRegistrationCheckedAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("DisplayNumber")
-                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");

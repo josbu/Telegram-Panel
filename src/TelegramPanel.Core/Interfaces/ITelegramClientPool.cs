@@ -21,6 +21,17 @@ public interface ITelegramClientPool
         string? phoneNumber = null,
         long? userId = null);
 
+    Task<Client> GetOrCreateClientAsync(
+        int accountId,
+        int apiId,
+        string apiHash,
+        string sessionPath,
+        string? sessionKey,
+        string? phoneNumber,
+        long? userId,
+        string? deviceProfileKey) =>
+        GetOrCreateClientAsync(accountId, apiId, apiHash, sessionPath, sessionKey, phoneNumber, userId);
+
     /// <summary>
     /// 使用调用方已经明确解析的路由获取或创建客户端。
     /// 主要用于账号尚未入库的登录阶段，避免临时登录 ID 因查不到账号而回退为直连。
@@ -35,7 +46,19 @@ public interface ITelegramClientPool
         long? userId,
         AccountProxyResolution proxyResolution) =>
         throw new NotSupportedException(
-            "当前 Telegram 客户端池未实现显式代理路由，已在首次连接前阻止登录");
+            "当前 Telegram 客户端池未实现显式代理路由");
+
+    Task<Client> GetOrCreateClientAsync(
+        int accountId,
+        int apiId,
+        string apiHash,
+        string sessionPath,
+        string? sessionKey,
+        string? phoneNumber,
+        long? userId,
+        AccountProxyResolution proxyResolution,
+        string? deviceProfileKey) =>
+        GetOrCreateClientAsync(accountId, apiId, apiHash, sessionPath, sessionKey, phoneNumber, userId, proxyResolution);
 
     /// <summary>
     /// 获取已存在的客户端

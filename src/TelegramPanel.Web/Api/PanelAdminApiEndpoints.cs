@@ -131,7 +131,7 @@ public static class PanelAdminApiEndpoints
         secured.MapGet("/operation-accounts", GetOperationAccountsAsync);
 
         secured.MapGet("/settings", GetSettingsAsync);
-        secured.MapGet("/version-info", GetVersionInfoAsync);
+        secured.MapGet("/settings/device-profiles", GetDeviceProfilesAsync);
         secured.MapPost("/version-info/check", CheckVersionInfoAsync);
         secured.MapPost("/version-info/apply", ApplyVersionUpdateAsync);
         secured.MapPost("/version-info/mode", SaveUpdateModeAsync);
@@ -524,7 +524,8 @@ public static class PanelAdminApiEndpoints
     private static async Task<IResult> UpdateAccountAsync(
         int id,
         UpdateAccountRequestDto request,
-        AccountManagementService accountManagement)
+        AccountManagementService accountManagement,
+        IConfiguration configuration)
     {
         var account = await accountManagement.GetAccountAsync(id);
         if (account == null)
@@ -534,7 +535,14 @@ public static class PanelAdminApiEndpoints
         account.TwoFactorPassword = NormalizeNullable(request.TwoFactorPassword);
         if (request.CategoryId.HasValue)
             account.CategoryId = request.CategoryId.Value <= 0 ? null : request.CategoryId.Value;
-
+        if (request.DeviceProfileKey != null)
+        {
+            var profileKey = NormalizeNullable(request.DeviceProfileKey);
+            if (!string.IsNullOrWhiteSpace(profileKey)
+                && TelegramDeviceProfileCatalog.Find(configuration, profileKey) == null)
+                return Results.BadRequest(new OperationResultDto(false, "设备指纹不存在或已停用"));
+            account.DeviceProfileKey = profileKey;
+        }
         await accountManagement.UpdateAccountAsync(account);
         return Results.Ok(ToDetailDto(account));
     }
@@ -1795,6 +1803,7 @@ public static class PanelAdminApiEndpoints
 
         var categoryId = ParseNullableInt(form["categoryId"]);
         var twoFactorPassword = NormalizeNullable(form["twoFactorPassword"]);
+        var deviceProfileKey = NormalizeNullable(form["deviceProfileKey"]);
         var proxyStrategy = form["proxyStrategy"].ToString().Trim().ToLowerInvariant();
         var usesPerAccountProxyBatch = proxyStrategy == "proxy_per_account";
         var perAccountProxyText = usesPerAccountProxyBatch
@@ -1838,7 +1847,8 @@ public static class PanelAdminApiEndpoints
                 twoFactorPassword,
                 proxyBinding,
                 cancellationToken,
-                perAccountProxyText);
+                perAccountProxyText,
+                deviceProfileKey);
             return Results.Ok(await BuildImportResponseAsync(results, accountManagement));
         }
         catch (AccountImportProxyBatchException ex)
@@ -1866,6 +1876,7 @@ public static class PanelAdminApiEndpoints
             return Results.BadRequest(new OperationResultDto(false, "单个 Session 文件不能超过 10MB"));
 
         var categoryId = ParseNullableInt(form["categoryId"]);
+        var deviceProfileKey = NormalizeNullable(form["deviceProfileKey"]);
         var proxyBinding = ParseImportProxyBinding(form["proxyStrategy"], form["proxyId"]);
         if (proxyBinding == null)
         {
@@ -1891,7 +1902,8 @@ public static class PanelAdminApiEndpoints
                 importFiles,
                 categoryId,
                 proxyBinding,
-                cancellationToken);
+                cancellationToken,
+                deviceProfileKey);
             return Results.Ok(await BuildImportResponseAsync(results, accountManagement));
         }
         finally
@@ -1926,7 +1938,8 @@ public static class PanelAdminApiEndpoints
             sessionString,
             request.CategoryId,
             proxyBinding,
-            cancellationToken);
+            cancellationToken,
+            request.DeviceProfileKey);
         return Results.Ok(await BuildImportResponseAsync(new[] { result }, accountManagement));
     }
 
@@ -2375,7 +2388,12 @@ public static class PanelAdminApiEndpoints
         var dto = new SettingsDto(
             LocalConfigPath: localPath,
             LocalConfigExists: File.Exists(localPath),
-            Telegram: new TelegramApiSettingsDto(configuration["Telegram:ApiId"] ?? "", configuration["Telegram:ApiHash"] ?? "", ReadTelegramApiProfiles(configuration)),
+            Telegram: new TelegramApiSettingsDto(
+                configuration["Telegram:ApiId"] ?? "",
+                configuration["Telegram:ApiHash"] ?? "",
+                ReadTelegramApiProfiles(configuration),
+                TelegramDeviceProfileCatalog.ReadProfiles(configuration).Select(ToDto).ToList(),
+                TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration)),
             GlobalProxy: ReadGlobalProxySettings(configuration),
             CloudMail: new CloudMailSettingsDto(configuration["CloudMail:BaseUrl"] ?? "", configuration["CloudMail:Domain"] ?? "", configuration["CloudMail:Token"] ?? ""),
             Ai: new AiSettingsDto(
@@ -2404,6 +2422,12 @@ public static class PanelAdminApiEndpoints
 
         return Task.FromResult<IResult>(Results.Ok(dto));
     }
+    private static IResult GetDeviceProfilesAsync(IConfiguration configuration) =>
+        Results.Ok(new
+        {
+            items = TelegramDeviceProfileCatalog.ReadProfiles(configuration).Select(ToDto).ToList(),
+            defaultKey = TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration)
+        });
 
     private static async Task<IResult> GetVersionInfoAsync(AppSelfUpdateService selfUpdate, CancellationToken cancellationToken)
     {
@@ -2478,6 +2502,10 @@ public static class PanelAdminApiEndpoints
             telegram["ApiId"] = 0;
             telegram["ApiHash"] = string.Empty;
         }
+        var selectedDeviceProfile = TelegramDeviceProfileCatalog.Find(configuration, request.DefaultDeviceProfileKey);
+        if (!string.IsNullOrWhiteSpace(request.DefaultDeviceProfileKey) && selectedDeviceProfile == null)
+            return Results.BadRequest(new OperationResultDto(false, "默认设备指纹不存在或已停用"));
+        telegram["DefaultDeviceProfileKey"] = selectedDeviceProfile?.Key ?? TelegramDeviceProfileCatalog.DefaultProfileKey;
         var normalizedProfiles = new JsonArray();
         foreach (var profile in profiles)
         {
@@ -5848,6 +5876,18 @@ public static class PanelAdminApiEndpoints
 
     private static AccountCategoryDto ToDto(AccountCategory category) =>
         new(category.Id, category.Name, category.Color, category.Description, category.ExcludeFromOperations, category.Accounts?.Count ?? 0);
+    private static TelegramDeviceProfileDto ToDto(TelegramDeviceProfileDefinition profile) =>
+        new(
+            profile.Key,
+            profile.Name,
+            profile.Family,
+            profile.AppVersion,
+            profile.DeviceModel,
+            profile.SystemVersion,
+            profile.SystemLangCode,
+            profile.LangCode,
+            profile.BuiltIn,
+            profile.Notes);
 
     private static VersionInfoDto ToDto(AppSelfUpdateInfo info) =>
         new(
@@ -5883,6 +5923,7 @@ public static class PanelAdminApiEndpoints
             account.Remark,
             account.UserId,
             account.SessionPath,
+            account.DeviceProfileKey,
             account.TwoFactorPassword,
             account.CategoryId,
             account.IsActive,
@@ -6953,6 +6994,8 @@ public static class PanelAdminApiEndpoints
             existing.IsActive = activate;
             existing.ApiId = apiId;
             existing.ApiHash = apiHash;
+            if (string.IsNullOrWhiteSpace(existing.DeviceProfileKey))
+                existing.DeviceProfileKey = TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration);
             existing.TelegramStatusSummary = "正常";
             existing.TelegramStatusDetails = null;
             existing.TelegramStatusOk = true;
@@ -6974,6 +7017,7 @@ public static class PanelAdminApiEndpoints
             SessionPath = Path.Combine(sessionsPath, $"{phoneDigits}.session"),
             ApiId = apiId,
             ApiHash = apiHash,
+            DeviceProfileKey = TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration),
             IsActive = activate,
             TwoFactorPassword = normalizedTwoFactorPassword,
             CreatedAt = DateTime.UtcNow,
@@ -7789,6 +7833,7 @@ public sealed record AccountDetailDto(
     string? Remark,
     long UserId,
     string SessionPath,
+    string? DeviceProfileKey,
     string? TwoFactorPassword,
     int? CategoryId,
     bool IsActive,
@@ -7930,7 +7975,7 @@ public sealed record SetActiveRequestDto(bool IsActive);
 public sealed record SetEnabledRequestDto(bool IsEnabled);
 public sealed record SaveAccountCategoryRequestDto(string? Name, string? Color, string? Description, bool ExcludeFromOperations);
 public sealed record SaveCategoryAssignmentsRequestDto(IReadOnlyList<int> AccountIds);
-public sealed record UpdateAccountRequestDto(string? Remark, string? TwoFactorPassword, int? CategoryId);
+public sealed record UpdateAccountRequestDto(string? Remark, string? TwoFactorPassword, int? CategoryId, string? DeviceProfileKey);
 public sealed record BatchAccountIdsRequestDto(IReadOnlyList<int> AccountIds, bool? ProbeCreateChannel = null);
 public sealed record RefreshTelegramStatusRequestDto(bool? ProbeCreateChannel);
 public sealed record BatchSetAccountCategoryRequestDto(IReadOnlyList<int> AccountIds, int? CategoryId);
@@ -7984,7 +8029,8 @@ public sealed record ImportStringSessionRequestDto(
     string? SessionString,
     int? CategoryId,
     string? ProxyStrategy,
-    int? ProxyId);
+    int? ProxyId,
+    string? DeviceProfileKey);
 public sealed record StartAccountLoginRequestDto(
     string? Phone,
     int LoginId = 0,
@@ -8201,8 +8247,24 @@ public sealed record VersionApplyResultDto(
 public sealed record UpdateModeRequestDto(string? Mode);
 public sealed record UpdateModeResultDto(bool Success, string Mode, string Message);
 
-public sealed record TelegramApiSettingsDto(string ApiId, string ApiHash, IReadOnlyList<TelegramApiProfileDto>? Profiles = null);
+public sealed record TelegramApiSettingsDto(
+    string ApiId,
+    string ApiHash,
+    IReadOnlyList<TelegramApiProfileDto>? Profiles = null,
+    IReadOnlyList<TelegramDeviceProfileDto>? DeviceProfiles = null,
+    string? DefaultDeviceProfileKey = null);
 public sealed record TelegramApiProfileDto(string? Name, string? ApiId, string? ApiHash, bool Enabled = true, int Weight = 1, string? Notes = null);
+public sealed record TelegramDeviceProfileDto(
+    string Key,
+    string Name,
+    string Family,
+    string AppVersion,
+    string DeviceModel,
+    string SystemVersion,
+    string SystemLangCode,
+    string LangCode,
+    bool BuiltIn,
+    string? Notes);
 public sealed record GlobalProxySettingsDto(
     bool Enabled,
     string? Protocol,
