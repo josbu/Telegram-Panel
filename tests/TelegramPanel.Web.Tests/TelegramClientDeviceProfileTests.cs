@@ -44,4 +44,31 @@ public sealed class TelegramClientDeviceProfileTests
         Assert.Equal("en", profile.GetConfigValue("lang_code"));
         Assert.Null(profile.GetConfigValue("api_id"));
     }
+
+    [Fact]
+    public void CurrentAuthorizationFingerprintOverridesFallbackDeviceFields()
+    {
+        var profile = TelegramClientDeviceProfile.ForCurrentAuthorization(
+            6,
+            "account-session",
+            "12.7.3",
+            "Samsung SM-G991B",
+            "Android 14");
+
+        Assert.Equal("12.7.3", profile.AppVersion);
+        Assert.Equal("Samsung SM-G991B", profile.DeviceModel);
+        Assert.Equal("Android 14", profile.SystemVersion);
+        Assert.Equal("en-US", profile.SystemLangCode);
+        Assert.Equal("en", profile.LangCode);
+    }
+
+    [Fact]
+    public void MissingCurrentAuthorizationFieldsUseApiFamilyFallback()
+    {
+        var profile = TelegramClientDeviceProfile.ForCurrentAuthorization(6, "account-session", null, null, null);
+
+        Assert.StartsWith("Android ", profile.SystemVersion);
+        Assert.False(string.IsNullOrWhiteSpace(profile.DeviceModel));
+        Assert.False(string.IsNullOrWhiteSpace(profile.AppVersion));
+    }
 }

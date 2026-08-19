@@ -185,8 +185,8 @@ export const panelApi = {
   systemMessages: (id: number, limit = 30) =>
     api.get<TelegramSystemMessage[]>(`/accounts/${id}/system-messages`, { params: { limit } }).then((r) => r.data),
   devices: (id: number) => api.get<TelegramAuthorization[]>(`/accounts/${id}/devices`).then((r) => r.data),
-  kickDevice: (id: number, hash: number) =>
-    api.post<OperationResult>(`/accounts/${id}/devices/${hash}/kick`).then((r) => r.data),
+  kickDevice: (id: number, hash: string) =>
+    api.post<OperationResult>(`/accounts/${id}/devices/${encodeURIComponent(hash)}/kick`).then((r) => r.data),
   kickAllOtherDevices: (id: number) =>
     api.post<OperationResult>(`/accounts/${id}/devices/kick-all`).then((r) => r.data),
   accountChannels: (id: number) =>

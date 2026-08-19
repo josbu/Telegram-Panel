@@ -227,6 +227,37 @@ public sealed class TelegramDeviceQueryRetryTests
         Assert.Empty(payload.EnumerateArray());
     }
 
+    [Fact]
+    public async Task 在线设备响应将长授权哈希序列化为字符串()
+    {
+        var context = CreateHttpContext();
+        var result = PanelAdminApiEndpoints.CreateDeviceQuerySuccess(
+            new[]
+            {
+                new TelegramAuthorizationInfo(
+                    Hash: 9007199254740993L,
+                    Current: false,
+                    ApiId: 6,
+                    AppName: "Telegram",
+                    AppVersion: "12.7.3",
+                    DeviceModel: "Samsung SM-G991B",
+                    Platform: "Android",
+                    SystemVersion: "Android 14",
+                    Ip: null,
+                    Country: null,
+                    Region: null,
+                    CreatedAtUtc: null,
+                    LastActiveAtUtc: null)
+            });
+
+        await result.ExecuteAsync(context);
+
+        var payload = await ReadJsonAsync(context);
+        var device = payload[0];
+        Assert.Equal(JsonValueKind.String, device.GetProperty("hash").ValueKind);
+        Assert.Equal("9007199254740993", device.GetProperty("hash").GetString());
+    }
+
     private static DefaultHttpContext CreateHttpContext()
     {
         var services = new ServiceCollection()
