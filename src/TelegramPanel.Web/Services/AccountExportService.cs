@@ -395,7 +395,8 @@ public class AccountExportService
                 sourceSessionPath,
                 sessionKey: apiHash,
                 phoneNumber: account.Phone,
-                userId: account.UserId > 0 ? account.UserId : null);
+                userId: account.UserId > 0 ? account.UserId : null,
+                deviceProfileKey: account.DeviceProfileKey);
 
             var sourceUser = await EnsureSourceClientLoggedInAsync(sourceClient, account, cancellationToken);
             if (sourceUser == null)

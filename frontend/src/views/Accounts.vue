@@ -253,6 +253,18 @@
               </template>
             </el-input>
           </el-form-item>
+          <el-form-item label="设备指纹">
+            <el-select v-model="details.form.deviceProfileKey" class="full" filterable>
+              <el-option label="跟随系统默认" value="" />
+              <el-option
+                v-for="profileOption in deviceProfiles"
+                :key="profileOption.key"
+                :label="`${profileOption.name} · ${profileOption.family}`"
+                :value="profileOption.key"
+              />
+            </el-select>
+            <div class="form-hint no-offset">仅影响该账号后续 Telegram 客户端连接；留空时使用系统默认设备画像。</div>
+          </el-form-item>
         </el-form>
       </template>
       <template #footer>
@@ -753,6 +765,7 @@ import type {
   WarpRuntimeStatus,
   TelegramStatus,
   TelegramAuthorization,
+  TelegramDeviceProfile,
   TelegramSystemMessage,
 } from '@/api/types'
 import { formatTime } from '@/utils/format'
@@ -769,6 +782,7 @@ const rows = ref<Row[]>([])
 const categories = ref<AccountCategory[]>([])
 const dictionaries = ref<DataDictionary[]>([])
 const proxies = ref<OutboundProxy[]>([])
+const deviceProfiles = ref<TelegramDeviceProfile[]>([])
 const warpStatus = ref<WarpRuntimeStatus | null>(null)
 const total = ref(0)
 const page = ref(1)
@@ -853,6 +867,7 @@ const details = reactive({
   form: {
     remark: '',
     twoFactorPassword: '',
+    deviceProfileKey: '',
   },
 })
 
@@ -1006,6 +1021,10 @@ async function reload() {
 async function loadCategories() {
   categories.value = await panelApi.accountCategories()
 }
+async function loadDeviceProfiles() {
+  const settings = await panelApi.settings()
+  deviceProfiles.value = settings.telegram.deviceProfiles || []
+}
 
 async function loadDictionaries() {
   dictionaries.value = await panelApi.dictionaries()
@@ -1147,6 +1166,7 @@ async function openDetails(row: Row) {
     details.account = account
     details.form.remark = account.remark || ''
     details.form.twoFactorPassword = account.twoFactorPassword || ''
+    details.form.deviceProfileKey = account.deviceProfileKey || ''
   } finally {
     details.loading = false
   }
@@ -1161,6 +1181,7 @@ async function saveDetails() {
       remark: details.form.remark,
       twoFactorPassword: details.form.twoFactorPassword,
       categoryId: details.account.categoryId ?? null,
+      deviceProfileKey: details.form.deviceProfileKey || null,
     })
     ElMessage.success('账号详情已保存')
     details.visible = false
@@ -2168,7 +2189,7 @@ watch(filters, () => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadDictionaries(), loadProxies(), loadWarpStatus(), load()])
+  await Promise.all([loadCategories(), loadDictionaries(), loadProxies(), loadWarpStatus(), loadDeviceProfiles(), load()])
 })
 </script>
 

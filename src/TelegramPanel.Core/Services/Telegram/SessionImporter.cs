@@ -39,8 +39,9 @@ public class SessionImporter : ISessionImporter, IDeferredSessionImporter
             phoneHint,
             sessionKey,
             proxy,
+            deviceProfileKey: null,
             deferCommit: false,
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
     async Task<ImportResult> IDeferredSessionImporter.ImportFromSessionFileDeferredAsync(
         string filePath,
@@ -59,8 +60,30 @@ public class SessionImporter : ISessionImporter, IDeferredSessionImporter
             phoneHint,
             sessionKey,
             proxy,
+            deviceProfileKey: null,
             deferCommit: true,
-            cancellationToken);
+            cancellationToken: cancellationToken);
+    async Task<ImportResult> IDeferredSessionImporter.ImportFromSessionFileDeferredAsync(
+        string filePath,
+        int apiId,
+        string apiHash,
+        long? userId,
+        string? phoneHint,
+        string? sessionKey,
+        ProxyConnectionOptions? proxy,
+        CancellationToken cancellationToken,
+        string? deviceProfileKey) =>
+        await ImportFromSessionFileCoreAsync(
+            filePath,
+            apiId,
+            apiHash,
+            userId,
+            phoneHint,
+            sessionKey,
+            proxy,
+            deviceProfileKey,
+            deferCommit: true,
+            cancellationToken: cancellationToken);
 
     private async Task<ImportResult> ImportFromSessionFileCoreAsync(
         string filePath,
@@ -70,6 +93,7 @@ public class SessionImporter : ISessionImporter, IDeferredSessionImporter
         string? phoneHint,
         string? sessionKey,
         ProxyConnectionOptions? proxy,
+        string? deviceProfileKey,
         bool deferCommit,
         CancellationToken cancellationToken)
     {
@@ -105,7 +129,11 @@ public class SessionImporter : ISessionImporter, IDeferredSessionImporter
 
             replacement = AtomicSessionFileReplacement.Create(targetPath);
             File.Copy(filePath, replacement.StagingPath, overwrite: false);
-            var deviceProfile = TelegramClientDeviceProfile.ForStableKey(apiId, $"{apiId}:{targetPath}");
+            var deviceProfile = TelegramDeviceProfileCatalog.ResolveClientProfile(
+                _configuration,
+                apiId,
+                deviceProfileKey,
+                $"{apiId}:{targetPath}");
 
             // 使用 config 回调设置 session 路径
             string Config(string what) => what switch
@@ -206,14 +234,11 @@ public class SessionImporter : ISessionImporter, IDeferredSessionImporter
                 proxy: proxy,
                 cancellationToken: cancellationToken);
             results.Add(result);
-
-            // 短暂延迟避免频繁连接
             await Task.Delay(500, cancellationToken);
         }
 
         var successCount = results.Count(r => r.Success);
         _logger.LogInformation("Batch import completed: {Success}/{Total} successful", successCount, results.Count);
-
         return results;
     }
 
@@ -228,8 +253,9 @@ public class SessionImporter : ISessionImporter, IDeferredSessionImporter
             apiId,
             apiHash,
             proxy,
+            deviceProfileKey: null,
             deferCommit: false,
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
     async Task<ImportResult> IDeferredSessionImporter.ImportFromStringSessionDeferredAsync(
         string sessionString,
@@ -242,14 +268,31 @@ public class SessionImporter : ISessionImporter, IDeferredSessionImporter
             apiId,
             apiHash,
             proxy,
+            deviceProfileKey: null,
             deferCommit: true,
-            cancellationToken);
+            cancellationToken: cancellationToken);
+    async Task<ImportResult> IDeferredSessionImporter.ImportFromStringSessionDeferredAsync(
+        string sessionString,
+        int apiId,
+        string apiHash,
+        ProxyConnectionOptions? proxy,
+        CancellationToken cancellationToken,
+        string? deviceProfileKey) =>
+        await ImportFromStringSessionCoreAsync(
+            sessionString,
+            apiId,
+            apiHash,
+            proxy,
+            deviceProfileKey,
+            deferCommit: true,
+            cancellationToken: cancellationToken);
 
     private async Task<ImportResult> ImportFromStringSessionCoreAsync(
         string sessionString,
         int apiId,
         string apiHash,
         ProxyConnectionOptions? proxy,
+        string? deviceProfileKey,
         bool deferCommit,
         CancellationToken cancellationToken)
     {
@@ -264,7 +307,11 @@ public class SessionImporter : ISessionImporter, IDeferredSessionImporter
             var sessionPath = Path.Combine(sessionsPath, $"{Guid.NewGuid():N}.session");
             using var temporarySession = AtomicSessionFileReplacement.Create(sessionPath);
             await File.WriteAllBytesAsync(temporarySession.StagingPath, sessionData, cancellationToken);
-            var deviceProfile = TelegramClientDeviceProfile.ForStableKey(apiId, $"{apiId}:{sessionString}");
+            var deviceProfile = TelegramDeviceProfileCatalog.ResolveClientProfile(
+                _configuration,
+                apiId,
+                deviceProfileKey,
+                $"{apiId}:{sessionString}");
 
             // 使用 config 回调设置 session 路径
             string Config(string what) => what switch

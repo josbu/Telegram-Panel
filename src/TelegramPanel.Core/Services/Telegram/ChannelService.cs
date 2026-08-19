@@ -1126,7 +1126,7 @@ public class ChannelService : IChannelService
             }
         }
 
-        var client = await _clientPool.GetOrCreateClientAsync(accountId, apiId, apiHash, absoluteSessionPath, sessionKey, account.Phone, account.UserId);
+        var client = await _clientPool.GetOrCreateClientAsync(accountId, apiId, apiHash, absoluteSessionPath, sessionKey, account.Phone, account.UserId, account.DeviceProfileKey);
 
         try
         {

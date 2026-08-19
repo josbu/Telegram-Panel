@@ -71,7 +71,8 @@ public class AccountImportService
         string apiHash,
         int? categoryId = null,
         AccountProxyBindingInput? proxyBinding = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? deviceProfileKey = null)
     {
         var results = new List<ImportResult>();
         if (IsWarpPerAccountStrategy(proxyBinding) && files.Count > MaxWarpPerAccountImportCount)
@@ -89,20 +90,22 @@ public class AccountImportService
                 file.Name,
                 proxyBinding,
                 importedPhones,
-                proxy => ImportFromSessionFileStreamAsync(
-                    file.Name,
-                    upload,
-                    apiId,
-                    apiHash,
-                    proxy,
-                    cancellationToken),
+                    proxy => ImportFromSessionFileStreamAsync(
+                        file.Name,
+                        upload,
+                        apiId,
+                        apiHash,
+                        proxy,
+                        cancellationToken,
+                        deviceProfileKey),
                 cancellationToken,
                 result => PersistImportedSessionAsync(
                     result,
                     apiId,
                     apiHash,
                     categoryId,
-                    twoFactorPassword: null)));
+                    twoFactorPassword: null,
+                    deviceProfileKey)));
             await Task.Delay(500, cancellationToken);
         }
 
@@ -121,7 +124,8 @@ public class AccountImportService
         string apiHash,
         int? categoryId = null,
         AccountProxyBindingInput? proxyBinding = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? deviceProfileKey = null)
     {
         var results = new List<ImportResult>();
         if (IsWarpPerAccountStrategy(proxyBinding) && files.Count > MaxWarpPerAccountImportCount)
@@ -144,14 +148,16 @@ public class AccountImportService
                     apiId,
                     apiHash,
                     proxy,
-                    cancellationToken),
+                    cancellationToken,
+                    deviceProfileKey),
                 cancellationToken,
                 result => PersistImportedSessionAsync(
                     result,
                     apiId,
                     apiHash,
                     categoryId,
-                    twoFactorPassword: null)));
+                    twoFactorPassword: null,
+                    deviceProfileKey)));
             await Task.Delay(500, cancellationToken);
         }
 
@@ -165,7 +171,8 @@ public class AccountImportService
         IReadOnlyList<AccountImportFile> files,
         int? categoryId = null,
         AccountProxyBindingInput? proxyBinding = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? deviceProfileKey = null)
     {
         var results = new List<ImportResult>();
         if (IsWarpPerAccountStrategy(proxyBinding) && files.Count > MaxWarpPerAccountImportCount)
@@ -189,14 +196,16 @@ public class AccountImportService
                     api.ApiId,
                     api.ApiHash,
                     proxy,
-                    cancellationToken),
+                    cancellationToken,
+                    deviceProfileKey),
                 cancellationToken,
                 result => PersistImportedSessionAsync(
                     result,
                     api.ApiId,
                     api.ApiHash,
                     categoryId,
-                    twoFactorPassword: null)));
+                    twoFactorPassword: null,
+                    deviceProfileKey)));
             await Task.Delay(500, cancellationToken);
         }
 
@@ -212,7 +221,8 @@ public class AccountImportService
         int apiId,
         string apiHash,
         ProxyConnectionOptions? proxy,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? deviceProfileKey)
     {
         var safeFileName = Path.GetFileName(fileName);
         if (string.IsNullOrWhiteSpace(safeFileName))
@@ -234,6 +244,7 @@ public class AccountImportService
                 apiId,
                 apiHash,
                 proxy: proxy,
+                deviceProfileKey: deviceProfileKey,
                 cancellationToken: cancellationToken);
             return result;
         }
@@ -265,7 +276,8 @@ public class AccountImportService
         string apiHash,
         int? categoryId = null,
         AccountProxyBindingInput? proxyBinding = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? deviceProfileKey = null)
     {
         return await ExecuteImportWithProxyAsync(
             "string-session",
@@ -278,22 +290,25 @@ public class AccountImportService
                     apiId,
                     apiHash,
                     proxy,
-                    cancellationToken);
+                    cancellationToken,
+                    deviceProfileKey);
             },
             cancellationToken,
             result => PersistImportedSessionAsync(
-                    result,
-                    apiId,
-                    apiHash,
-                    categoryId,
-                    twoFactorPassword: null));
+                result,
+                apiId,
+                apiHash,
+                categoryId,
+                twoFactorPassword: null,
+                deviceProfileKey));
     }
 
     public async Task<ImportResult> ImportFromStringSessionBalancedAsync(
         string sessionString,
         int? categoryId = null,
         AccountProxyBindingInput? proxyBinding = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? deviceProfileKey = null)
     {
         var api = await _apiProfilePool.SelectForNewAccountAsync(_accountManagement);
         return await ImportFromStringSessionAsync(
@@ -302,7 +317,8 @@ public class AccountImportService
             api.ApiHash,
             categoryId,
             proxyBinding,
-            cancellationToken);
+            cancellationToken,
+            deviceProfileKey);
     }
 
     /// <summary>
@@ -314,7 +330,8 @@ public class AccountImportService
         string? twoFactorPassword = null,
         AccountProxyBindingInput? proxyBinding = null,
         CancellationToken cancellationToken = default,
-        string? perAccountProxyText = null)
+        string? perAccountProxyText = null,
+        string? deviceProfileKey = null)
     {
         var results = new List<ImportResult>();
 
@@ -332,7 +349,8 @@ public class AccountImportService
             twoFactorPassword,
             proxyBinding,
             cancellationToken,
-            perAccountProxyText);
+            perAccountProxyText,
+            deviceProfileKey);
     }
 
     /// <summary>
@@ -345,7 +363,8 @@ public class AccountImportService
         string? twoFactorPassword = null,
         AccountProxyBindingInput? proxyBinding = null,
         CancellationToken cancellationToken = default,
-        string? perAccountProxyText = null)
+        string? perAccountProxyText = null,
+        string? deviceProfileKey = null)
     {
         var results = new List<ImportResult>();
 
@@ -426,7 +445,8 @@ public class AccountImportService
                     twoFactorPassword,
                     proxyBinding,
                     proxyAssignments,
-                    cancellationToken));
+                    cancellationToken,
+                    deviceProfileKey));
                 var tdataSuccess = results.Count(r => r.Success);
                 _logger.LogInformation("Tdata import completed: {Success}/{Total} successful", tdataSuccess, results.Count);
                 return results;
@@ -448,7 +468,8 @@ public class AccountImportService
                         twoFactorPassword,
                         importedPhones,
                         proxy,
-                        cancellationToken),
+                        cancellationToken,
+                        deviceProfileKey),
                     cancellationToken);
                 results.Add(AttachZipImportMetadata(
                     result,
@@ -556,7 +577,8 @@ public class AccountImportService
         string? twoFactorPassword,
         HashSet<string>? importedPhones,
         ProxyConnectionOptions? proxy,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? deviceProfileKey)
     {
         var databaseMutationStarted = false;
         try
@@ -688,9 +710,12 @@ public class AccountImportService
                     existing.SessionPath = targetSessionPath;
                     existing.ApiId = apiId;
                     existing.ApiHash = apiHash.Trim();
+                    if (!string.IsNullOrWhiteSpace(deviceProfileKey))
+                        existing.DeviceProfileKey = deviceProfileKey.Trim();
                     // 代理绑定完成前保持停用，避免后台任务在短暂窗口使用旧路由。
                     existing.IsActive = false;
                     existing.LastSyncAt = DateTime.UtcNow;
+
                     // 仅在提供了二级密码时更新，避免覆盖已有密码
                     if (!string.IsNullOrWhiteSpace(effectiveTwoFactorPassword))
                         existing.TwoFactorPassword = effectiveTwoFactorPassword.Trim();
@@ -707,13 +732,13 @@ public class AccountImportService
                         SessionPath = targetSessionPath,
                         ApiId = apiId,
                         ApiHash = apiHash.Trim(),
+                        DeviceProfileKey = string.IsNullOrWhiteSpace(deviceProfileKey) ? null : deviceProfileKey.Trim(),
                         IsActive = false,
                         CategoryId = categoryId,
                         TwoFactorPassword = string.IsNullOrWhiteSpace(effectiveTwoFactorPassword) ? null : effectiveTwoFactorPassword.Trim(),
                         CreatedAt = DateTime.UtcNow,
                         LastSyncAt = DateTime.UtcNow
                     };
-
                     await _accountManagement.CreateAccountAsync(account);
                 }
 
@@ -761,7 +786,8 @@ public class AccountImportService
         string? twoFactorPassword,
         AccountProxyBindingInput? proxyBinding,
         IReadOnlyList<PreparedAccountImportProxy>? proxyAssignments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? deviceProfileKey)
     {
         var results = new List<ImportResult>();
 
@@ -793,14 +819,16 @@ public class AccountImportService
                     api.ApiId,
                     api.ApiHash,
                     proxy,
-                    cancellationToken),
+                    cancellationToken,
+                    deviceProfileKey),
                 cancellationToken,
                 result => PersistImportedSessionAsync(
                     result,
                     api.ApiId,
                     api.ApiHash,
                     categoryId,
-                    twoFactorPassword));
+                    twoFactorPassword,
+                    deviceProfileKey));
             results.Add(AttachZipImportMetadata(
                 result,
                 BuildImportSourceKey(importRoot, tdataDir),
@@ -815,7 +843,8 @@ public class AccountImportService
         int apiId,
         string apiHash,
         ProxyConnectionOptions? proxy,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? deviceProfileKey)
     {
         string? tempSessionPath = null;
         try
@@ -856,7 +885,8 @@ public class AccountImportService
                 phoneHint: phoneSeed,
                 sessionKey: apiHash,
                 proxy: proxy,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken,
+                deviceProfileKey: deviceProfileKey);
             if (!imported.Success)
             {
                 return new ImportResult(
@@ -1436,7 +1466,8 @@ public class AccountImportService
         string? phoneHint = null,
         string? sessionKey = null,
         ProxyConnectionOptions? proxy = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? deviceProfileKey = null)
     {
         return _sessionImporter is IDeferredSessionImporter deferred
             ? deferred.ImportFromSessionFileDeferredAsync(
@@ -1447,7 +1478,8 @@ public class AccountImportService
                 phoneHint,
                 sessionKey,
                 proxy,
-                cancellationToken)
+                cancellationToken,
+                deviceProfileKey)
             : _sessionImporter.ImportFromSessionFileAsync(
                 filePath,
                 apiId,
@@ -1464,7 +1496,8 @@ public class AccountImportService
         int apiId,
         string apiHash,
         ProxyConnectionOptions? proxy = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? deviceProfileKey = null)
     {
         return _sessionImporter is IDeferredSessionImporter deferred
             ? deferred.ImportFromStringSessionDeferredAsync(
@@ -1472,7 +1505,8 @@ public class AccountImportService
                 apiId,
                 apiHash,
                 proxy,
-                cancellationToken)
+                cancellationToken,
+                deviceProfileKey)
             : _sessionImporter.ImportFromStringSessionAsync(
                 sessionString,
                 apiId,
@@ -1623,7 +1657,8 @@ public class AccountImportService
         int apiId,
         string apiHash,
         int? categoryId,
-        string? twoFactorPassword)
+        string? twoFactorPassword,
+        string? deviceProfileKey)
     {
         if (!result.Success)
             return result;
@@ -1668,6 +1703,8 @@ public class AccountImportService
                 existing.SessionPath = result.SessionPath!;
                 existing.ApiId = apiId;
                 existing.ApiHash = apiHash.Trim();
+                if (!string.IsNullOrWhiteSpace(deviceProfileKey))
+                    existing.DeviceProfileKey = deviceProfileKey.Trim();
                 // 路由绑定完成前禁止后台任务选择该账号。
                 existing.IsActive = false;
                 existing.CategoryId = categoryId ?? existing.CategoryId;
@@ -1686,6 +1723,7 @@ public class AccountImportService
                     SessionPath = result.SessionPath!,
                     ApiId = apiId,
                     ApiHash = apiHash.Trim(),
+                    DeviceProfileKey = string.IsNullOrWhiteSpace(deviceProfileKey) ? null : deviceProfileKey.Trim(),
                     IsActive = false,
                     CategoryId = categoryId,
                     TwoFactorPassword = string.IsNullOrWhiteSpace(twoFactorPassword) ? null : twoFactorPassword.Trim(),

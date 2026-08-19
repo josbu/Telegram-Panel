@@ -60,6 +60,22 @@
               <el-button text type="danger" @click="removeApiProfile(index)">删除此配置</el-button>
             </div>
             <el-button plain @click="addApiProfile">添加 API 配置</el-button>
+            <el-divider />
+            <div class="section-title">默认设备指纹</div>
+            <el-form-item label="新登录、导入和账号连接默认使用的设备画像">
+              <el-select v-model="telegram.defaultDeviceProfileKey" class="full" filterable>
+                <el-option
+                  v-for="profile in telegram.deviceProfiles || []"
+                  :key="profile.key"
+                  :label="`${profile.name} · ${profile.family}`"
+                  :value="profile.key"
+                />
+              </el-select>
+              <div v-if="selectedDeviceProfile" class="muted mt-2">
+                {{ selectedDeviceProfile.deviceModel }} · {{ selectedDeviceProfile.systemVersion }} · App {{ selectedDeviceProfile.appVersion }}
+              </div>
+              <div class="muted mt-2">这是 Telegram 客户端设备画像，不会修改 API ID/Hash；已保存账号仍可单独绑定画像。</div>
+            </el-form-item>
           </el-form>
           <el-alert type="info" :closable="false" show-icon class="mb-3">
             <template #title>Telegram API 状态</template>
@@ -321,11 +337,17 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { panelApi } from '@/api/panel'
-import type { SettingsPayload, TelegramApiSettings, TelegramApiProfile } from '@/api/types'
+import type { SettingsPayload, TelegramApiSettings, TelegramApiProfile, TelegramDeviceProfile } from '@/api/types'
 
 const router = useRouter()
 const settings = ref<SettingsPayload | null>(null)
-const telegram = reactive({ apiId: '', apiHash: '', profiles: [] as TelegramApiProfile[] })
+const telegram = reactive({
+  apiId: '',
+  apiHash: '',
+  profiles: [] as TelegramApiProfile[],
+  deviceProfiles: [] as TelegramDeviceProfile[],
+  defaultDeviceProfileKey: '',
+})
 const cloudMail = reactive({ baseUrl: '', domain: '', token: '' })
 const cloudToken = reactive({ adminEmail: '', adminPassword: '' })
 const ai = reactive({ endpoint: '', apiKey: '', defaultModel: '', presetModels: [] as string[], retryCount: 2 })
@@ -367,6 +389,8 @@ function assign<T extends object>(target: T, source: Partial<T>) {
 function normalizeTelegramSettings(source: TelegramApiSettings) {
   telegram.apiId = source.apiId || ''
   telegram.apiHash = source.apiHash || ''
+  telegram.deviceProfiles = source.deviceProfiles || []
+  telegram.defaultDeviceProfileKey = source.defaultDeviceProfileKey || telegram.deviceProfiles[0]?.key || ''
   const profiles = source.profiles || []
   telegram.profiles = profiles.map((profile) => ({
     name: profile.name || '',
@@ -377,6 +401,8 @@ function normalizeTelegramSettings(source: TelegramApiSettings) {
     notes: profile.notes || '',
   }))
 }
+
+const selectedDeviceProfile = computed(() => telegram.deviceProfiles.find((profile) => profile.key === telegram.defaultDeviceProfileKey))
 
 async function load() {
   const data = await panelApi.settings()

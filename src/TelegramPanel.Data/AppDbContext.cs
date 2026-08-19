@@ -138,6 +138,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Phone).IsRequired().HasMaxLength(20);
             entity.Property(e => e.SessionPath).IsRequired().HasMaxLength(500);
             entity.Property(e => e.ApiHash).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.DeviceProfileKey).HasMaxLength(100);
             entity.Property(e => e.Username).HasMaxLength(100);
             entity.Property(e => e.Nickname).HasMaxLength(100);
             entity.Property(e => e.Remark).HasMaxLength(500);
