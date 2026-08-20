@@ -353,6 +353,12 @@ Compose 会映射为 `Proxy:Warp:Network`、`Proxy:Warp:Protocol`、`Proxy:Warp:
 自动恢复会保留原数据卷，只重启容器并重新检测出口。健康出口的周期刷新默认关闭，
 因为它可能改变账号公网 IP；需要与 tokens-pro 相同的 720 分钟刷新行为时再显式开启。
 
+## 计划任务随机延迟
+
+`ScheduledTasks:RandomDelaySeconds` 控制 Cron 计划任务下次运行时间的随机延迟，默认 `300` 秒，`0` 表示禁用，最大 `3600` 秒。该延迟会在创建、编辑、恢复、重算下次运行时间和每次自动触发后写入 `ScheduledTasks.NextRunAtUtc`；实际延迟不会越过下一次 Cron 窗口，例如每分钟任务最多延迟 59 秒。用途是把多个同 Cron 的任务错峰启动，避免整点同时创建大量批量任务。
+
+Docker 环境可设置 `ScheduledTasks__RandomDelaySeconds=300`。成功判据是创建多个 `0 * * * *` 计划任务后，列表里的“下次运行”分散在整点后的随机秒数/分钟内，而不是全部等于整点；回滚时把该值设为 `0` 并重启容器即可恢复精确 Cron 时间，无需数据库迁移。
+
 ## 账号数据同步
 
 `Sync:AutoSyncEnabled` 控制后台账号频道/群组同步，`Sync:IntervalHours` 控制自动同步间隔（1～24 小时）。同步任务会在任务中心记录每个账号的进度和失败原因。

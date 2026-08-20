@@ -224,6 +224,7 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 任务中心“复制”入口对已知 `taskType` 通用：复制执行中/历史 `BatchTask` 会读取 `GET /api/panel/tasks/{id}`，复制 `ScheduledTask` 会读取 `GET /api/panel/scheduled-tasks/{id}`，再用原 `taskType` 和清理运行态后的配置打开“新建任务”弹窗。内置专用表单会按配置回填；模块任务即使有独立 `CreateRoute`，复制时也走通用 JSON 配置区，确认后仍通过 `POST /api/panel/tasks` 或 `POST /api/panel/scheduled-tasks` 创建新记录。复制不会修改原任务，也不会绕过后端 JSON 校验。
 
 自 v1.31.59 起，任务中心的“编辑计划任务”弹窗在窄屏设备上使用 `min(760px, calc(100vw - 24px))` 宽度，并将表单标签切换为顶部布局；Cron、状态、专用任务配置和保存按钮不会依赖横向滚动。成功判据是在手机宽度打开计划任务编辑时，弹窗不超出视口、字段按单列排列且“保存计划任务”可见；回滚到旧版只会恢复固定 760px 弹窗，不涉及接口或数据库迁移。
+自 v1.31.70 起，计划任务保存、恢复、后台补算和每次自动触发后会对 `NextRunAtUtc` 加入 `ScheduledTasks:RandomDelaySeconds` 范围内的随机延迟，默认 300 秒，且不会越过下一次 Cron 窗口。`GET /api/panel/scheduled-tasks` 和 `GET /api/panel/scheduled-tasks/{id}` 返回的是已经持久化的错峰后时间；`POST /api/panel/scheduled-tasks/{id}/run-now` 只立即创建本次执行记录，后续计划仍按 Cron 加随机延迟重算。
 自 v1.31.44 起，`channel_group_private_create` 任务会在 `config.recent_failures`
 返回最近 20 条失败明细。字段包括 `time_utc`、`account_id`、`target_type`、
 `target` 和 `reason`。自 v1.31.48 起，`user_chat_active` 会在
