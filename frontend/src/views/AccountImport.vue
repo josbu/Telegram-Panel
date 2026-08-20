@@ -7,10 +7,10 @@
       show-icon
       class="mb-3"
     >
-      <template #title>未配置全局 Telegram API（ApiId/ApiHash），Session 文件和 StringSession 暂不能导入。</template>
+      <template #title>Telegram API 当前不可用，Session 文件和 StringSession 暂不能导入。</template>
       <div class="import-api-warning">
         <span>当前生效 ApiId：{{ effectiveApiId || '未配置' }}</span>
-        <el-button size="small" type="primary" @click="router.push('/settings')">去系统设置配置</el-button>
+        <el-button size="small" type="primary" @click="router.push('/telegram-api')">去 Telegram API 配置</el-button>
       </div>
     </el-alert>
 
@@ -746,9 +746,11 @@ async function loadTelegramApiStatus() {
       return profile.enabled && !!profileApiId && !!profileApiHash
     })
     const profileApiId = (enabledProfile?.apiId || '').trim()
-    const effectiveApiIdFromSettings = (settings.system.effectiveApiId || '').trim()
+    const effectiveApiIdFromSettings = (settings.telegram.effectiveApiId || settings.system.effectiveApiId || '').trim()
     effectiveApiId.value = ((effectiveApiIdFromSettings !== '0' ? effectiveApiIdFromSettings : '') || (apiId !== '0' ? apiId : '') || profileApiId || '').trim()
-    telegramApiConfigured.value = (!!apiId && apiId !== '0' && !!apiHash) || !!enabledProfile
+    telegramApiConfigured.value = typeof settings.telegram.hasUsableApi === 'boolean'
+      ? settings.telegram.hasUsableApi
+      : ((!!apiId && apiId !== '0' && !!apiHash) || !!enabledProfile)
   } catch {
     telegramApiConfigured.value = true
   } finally {

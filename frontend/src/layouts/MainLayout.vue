@@ -310,15 +310,8 @@ const staticMenuItems: MenuItem[] = [
   { index: '/data-dictionaries', label: '数据字典', icon: 'menu_book' },
   { index: '/modules', label: '模块管理', icon: 'extension' },
   { index: '/apis', label: 'API 管理', icon: 'link' },
-  {
-    index: 'telegram-group',
-    label: 'Telegram 设置',
-    icon: 'tune',
-    children: [
-      { index: '/telegram-api', label: 'Telegram API', icon: 'vpn_key' },
-      { index: '/device-profiles', label: '设备指纹', icon: 'fingerprint' },
-    ],
-  },
+  { index: '/telegram-api', label: 'Telegram API', icon: 'vpn_key' },
+  { index: '/device-profiles', label: '设备指纹', icon: 'fingerprint' },
 
   { index: '/settings', label: '系统设置', icon: 'settings' },
   { index: 'logout', label: '退出登录', icon: 'logout' },

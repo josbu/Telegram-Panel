@@ -15,7 +15,8 @@ public interface IAccountService
         int accountId,
         string phone,
         AccountProxyResolution proxyResolution,
-        TelegramApiCredentials apiCredentials);
+        TelegramApiCredentials apiCredentials,
+        string? deviceProfileKey = null);
 
     /// <summary>
     /// 使用登录前已明确选择的路由发起二维码登录。
@@ -23,7 +24,8 @@ public interface IAccountService
     Task<QrLoginResult> StartQrLoginAsync(
         int loginId,
         AccountProxyResolution proxyResolution,
-        TelegramApiCredentials apiCredentials);
+        TelegramApiCredentials apiCredentials,
+        string? deviceProfileKey = null);
 
     /// <summary>
     /// 查询二维码登录状态。

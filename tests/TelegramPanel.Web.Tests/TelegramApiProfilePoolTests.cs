@@ -86,6 +86,40 @@ public sealed class TelegramApiProfilePoolTests
     }
 
     [Fact]
+    public void ReadTelegramApiRuntimeStatus_ExposesBuiltInOfficialFallback()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+
+        var status = PanelAdminApiEndpoints.ReadTelegramApiRuntimeStatus(configuration);
+
+        Assert.True(status.HasUsableApi);
+        Assert.Equal(TelegramApiProfilePool.OfficialAndroidApiId.ToString(), status.EffectiveApiId);
+        Assert.Equal("built_in_official", status.EffectiveApiSource);
+        Assert.Equal(TelegramApiProfilePool.OfficialAndroidApiName, status.EffectiveApiName);
+    }
+
+    [Fact]
+    public void ReadTelegramApiRuntimeStatus_PrefersEnabledProfileOverBuiltInFallback()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Telegram:ApiProfiles:0:Name"] = "pool-a",
+                ["Telegram:ApiProfiles:0:ApiId"] = "4001",
+                ["Telegram:ApiProfiles:0:ApiHash"] = HashA,
+                ["Telegram:ApiProfiles:0:Enabled"] = "true"
+            })
+            .Build();
+
+        var status = PanelAdminApiEndpoints.ReadTelegramApiRuntimeStatus(configuration);
+
+        Assert.True(status.HasUsableApi);
+        Assert.Equal("4001", status.EffectiveApiId);
+        Assert.Equal("api_profile", status.EffectiveApiSource);
+        Assert.Equal("pool-a", status.EffectiveApiName);
+    }
+
+    [Fact]
     public void NormalizeTelegramApiDefaultInput_TreatsZeroWithoutHashAsProfileOnly()
     {
         var result = PanelAdminApiEndpoints.NormalizeTelegramApiDefaultInput("0", " ");

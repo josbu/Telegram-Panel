@@ -35,17 +35,19 @@ public class AccountService : IAccountService
         int accountId,
         string phone,
         AccountProxyResolution proxyResolution,
-        TelegramApiCredentials apiCredentials)
+        TelegramApiCredentials apiCredentials,
+        string? deviceProfileKey = null)
     {
         ArgumentNullException.ThrowIfNull(proxyResolution);
-        return StartLoginCoreAsync(accountId, phone, proxyResolution, apiCredentials);
+        return StartLoginCoreAsync(accountId, phone, proxyResolution, apiCredentials, deviceProfileKey);
     }
 
     private async Task<LoginResult> StartLoginCoreAsync(
         int accountId,
         string phone,
         AccountProxyResolution proxyOverride,
-        TelegramApiCredentials apiCredentials)
+        TelegramApiCredentials apiCredentials,
+        string? deviceProfileKey)
     {
         if (!TelegramApiProfilePool.TryNormalizeCredentials(apiCredentials.ApiId, apiCredentials.ApiHash, out var apiHash, out var apiHashReason))
         {
@@ -146,22 +148,25 @@ public class AccountService : IAccountService
                 apiHash,
                 normalizedPhone,
                 null,
-                proxyOverride);
+                proxyOverride,
+                deviceProfileKey);
     }
 
     public Task<QrLoginResult> StartQrLoginAsync(
         int loginId,
         AccountProxyResolution proxyResolution,
-        TelegramApiCredentials apiCredentials)
+        TelegramApiCredentials apiCredentials,
+        string? deviceProfileKey = null)
     {
         ArgumentNullException.ThrowIfNull(proxyResolution);
-        return StartQrLoginCoreAsync(loginId, proxyResolution, apiCredentials);
+        return StartQrLoginCoreAsync(loginId, proxyResolution, apiCredentials, deviceProfileKey);
     }
 
     private async Task<QrLoginResult> StartQrLoginCoreAsync(
         int loginId,
         AccountProxyResolution proxyOverride,
-        TelegramApiCredentials apiCredentials)
+        TelegramApiCredentials apiCredentials,
+        string? deviceProfileKey)
     {
         if (loginId <= 0)
             loginId = Random.Shared.Next(1, int.MaxValue);
@@ -178,7 +183,7 @@ public class AccountService : IAccountService
         await CancelQrLoginStrictAsync(loginId);
 
         var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        var session = new QrLoginSession(loginId, tempPath, apiId, apiHash, cts);
+        var session = new QrLoginSession(loginId, tempPath, apiId, apiHash, cts, deviceProfileKey);
         if (!QrLoginSessions.TryAdd(loginId, session))
         {
             cts.Dispose();
@@ -193,7 +198,8 @@ public class AccountService : IAccountService
                 tempPath,
                 apiHash,
                 session.WaitForPassword,
-                proxyOverride);
+                proxyOverride,
+                session.DeviceProfileKey);
             session.LoginTask = RunQrLoginAsync(session);
 
             for (var i = 0; i < 40; i++)
@@ -638,7 +644,8 @@ public class AccountService : IAccountService
         string sessionPath,
         string sessionKey,
         Func<string>? passwordProvider,
-        AccountProxyResolution proxyOverride)
+        AccountProxyResolution proxyOverride,
+        string? deviceProfileKey = null)
     {
         ArgumentNullException.ThrowIfNull(proxyOverride);
         var accountProxy = proxyOverride.Proxy
@@ -646,7 +653,7 @@ public class AccountService : IAccountService
                                ? throw new InvalidOperationException(
                                    "全局代理路由未在首次连接前解析，已阻止降级为直连")
                                : null);
-        var deviceProfile = TelegramClientDeviceProfile.ForStableKey(apiId, $"{apiId}:{sessionPath}");
+        var deviceProfile = TelegramDeviceProfileCatalog.ResolveClientProfile(_configuration, apiId, deviceProfileKey, $"{apiId}:{sessionPath}");
 
         string Config(string what)
         {
@@ -820,13 +827,14 @@ public class AccountService : IAccountService
 
     private sealed class QrLoginSession
     {
-        public QrLoginSession(int loginId, string tempSessionPath, int apiId, string apiHash, CancellationTokenSource cancellation)
+        public QrLoginSession(int loginId, string tempSessionPath, int apiId, string apiHash, CancellationTokenSource cancellation, string? deviceProfileKey)
         {
             LoginId = loginId;
             TempSessionPath = tempSessionPath;
             ApiId = apiId;
             ApiHash = apiHash;
             Cancellation = cancellation;
+            DeviceProfileKey = deviceProfileKey;
             ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(5);
         }
 
@@ -834,6 +842,7 @@ public class AccountService : IAccountService
         public string TempSessionPath { get; }
         public int ApiId { get; }
         public string ApiHash { get; }
+        public string? DeviceProfileKey { get; }
         public CancellationTokenSource Cancellation { get; }
         public SemaphoreSlim LifecycleLock { get; } = new(1, 1);
         public WTelegram.Client? Client { get; set; }
