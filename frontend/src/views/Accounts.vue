@@ -237,6 +237,7 @@
       <template v-else-if="details.account">
         <el-descriptions :column="1" border>
           <el-descriptions-item label="注册时间（估算，非百分百正确）">{{ formatTime(details.account.estimatedRegistrationAt, '-') }}</el-descriptions-item>
+          <el-descriptions-item label="登录邮箱">{{ details.loginEmailStatusText || '-' }}</el-descriptions-item>
           <el-descriptions-item label="导入时间">{{ formatTime(details.account.createdAt) }}</el-descriptions-item>
           <el-descriptions-item label="Session 路径">{{ details.account.sessionPath }}</el-descriptions-item>
         </el-descriptions>
@@ -764,6 +765,7 @@ import type {
   OutboundProxy,
   ProxyKind,
   WarpRuntimeStatus,
+  LoginEmailStatus,
   TelegramStatus,
   TelegramAuthorization,
   TelegramDeviceProfile,
@@ -865,6 +867,7 @@ const details = reactive({
   saving: false,
   showPassword: false,
   account: null as AccountDetail | null,
+  loginEmailStatusText: '',
   form: {
     remark: '',
     twoFactorPassword: '',
@@ -1162,9 +1165,14 @@ async function openDetails(row: Row) {
   details.visible = true
   details.loading = true
   details.account = null
+  details.loginEmailStatusText = ''
   try {
-    const account = await panelApi.account(row.id)
+    const [account, loginEmailStatus] = await Promise.all([
+      panelApi.account(row.id),
+      panelApi.loginEmailStatus(row.id).catch(() => null),
+    ])
     details.account = account
+    details.loginEmailStatusText = formatLoginEmailStatus(loginEmailStatus)
     details.form.remark = account.remark || ''
     details.form.twoFactorPassword = account.twoFactorPassword || ''
     details.form.deviceProfileKey = account.deviceProfileKey || ''
@@ -1172,6 +1180,13 @@ async function openDetails(row: Row) {
     details.loading = false
   }
 }
+function formatLoginEmailStatus(status: LoginEmailStatus | null) {
+  if (!status) return '查询失败'
+  if (!status.success) return status.error || '查询失败'
+  if (status.loginEmailPattern) return `${status.hasLoginEmail ? '已启用' : '未启用'}：${status.loginEmailPattern}`
+  return status.hasLoginEmail ? '已启用' : '未启用'
+}
+
 
 async function saveDetails() {
   if (!details.account) return

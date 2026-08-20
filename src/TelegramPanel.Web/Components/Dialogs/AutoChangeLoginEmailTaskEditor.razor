@@ -16,7 +16,7 @@
     else
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
-            默认只处理 777000 系统通知中匹配“Settings &gt; Privacy &amp; Security &gt; Login Email”的账号；目标邮箱按“手机号数字@@域名”生成，并使用 Cloud Mail 收取验证码确认。
+            默认只处理 777000 系统通知中匹配“Settings &gt; Privacy &amp; Security &gt; Login Email”的账号；目标邮箱按“手机号数字@@域名”生成。填写多个域名时，每个账号会优先随机选择一个不同于当前登录邮箱掩码域名的目标域名。
         </MudAlert>
 
         <MudSelect T="int"
@@ -31,7 +31,7 @@
             }
         </MudSelect>
 
-        <MudTextField @bind-Value="domain" @bind-Value:after="OnInputsChanged" Label="邮箱域名" Variant="Variant.Outlined" HelperText="@DomainHelperText" />
+        <MudTextField @bind-Value="domain" @bind-Value:after="OnInputsChanged" Label="邮箱域名池" Variant="Variant.Outlined" Lines="3" HelperText="@DomainHelperText" />
 
         <MudGrid>
             <MudItem xs="12" md="4">
@@ -70,7 +70,7 @@
     private bool loading = true;
     private List<AccountCategory> categories = new();
     private List<Account> activeAccounts = new();
-    private const string DomainHelperText = "留空时使用 CloudMail:Domain；将生成 手机号数字@域名";
+    private const string DomainHelperText = "留空时使用 CloudMail:Domain；支持换行、空格、逗号或分号分隔多个域名";
 
     private HashSet<int> selectedCategoryIds = new();
     private string domain = string.Empty;
@@ -108,8 +108,12 @@
                 return;
 
             selectedCategoryIds = config.CategoryIds.Where(x => x > 0).ToHashSet();
-            if (!string.IsNullOrWhiteSpace(config.Domain))
-                domain = config.Domain.Trim().TrimStart('@');
+            var configuredDomains = config.Domains ?? new List<string>();
+            var domains = configuredDomains.Count > 0
+                ? configuredDomains
+                : string.IsNullOrWhiteSpace(config.Domain) ? new List<string>() : new List<string> { config.Domain };
+            if (domains.Count > 0)
+                domain = string.Join(Environment.NewLine, AutoChangeLoginEmailTaskHandler.NormalizeDomains(domains));
             triggerDaysAgo = config.TriggerDaysAgo;
             triggerWindowHours = config.TriggerWindowHours;
             maxSystemMessages = config.MaxSystemMessages;
@@ -144,11 +148,13 @@
 
         var selectedAccountCount = activeAccounts.Count(x => x.IsActive && x.CategoryId.HasValue && selectedIds.Contains(x.CategoryId.Value) && x.Category?.ExcludeFromOperations != true);
         var selectedCategoryNames = categories.Where(x => selectedIds.Contains(x.Id)).Select(x => x.Name).ToList();
+        var domains = AutoChangeLoginEmailTaskHandler.NormalizeDomains(new[] { domain });
         var config = new AutoChangeLoginEmailTaskConfig
         {
             CategoryIds = selectedIds,
             CategoryNames = selectedCategoryNames,
-            Domain = (domain ?? string.Empty).Trim().TrimStart('@'),
+            Domain = domains.FirstOrDefault(),
+            Domains = domains,
             TriggerDaysAgo = Math.Clamp(triggerDaysAgo, 0, 30),
             TriggerWindowHours = Math.Clamp(triggerWindowHours, 1, 336),
             MaxSystemMessages = Math.Clamp(maxSystemMessages, 20, 1000),

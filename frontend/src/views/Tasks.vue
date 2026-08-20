@@ -1444,9 +1444,11 @@ function buildUserJoinSubscribeDetails(obj: Record<string, any>) {
 
 function buildAutoLoginEmailDetails(obj: Record<string, any>) {
   const windowHours = Number(obj.trigger_window_hours ?? 24)
+  const domains = Array.isArray(obj.domains) ? obj.domains.map((x: any) => String(x || '').trim()).filter(Boolean) : []
+  const domainText = domains.length > 0 ? domains.join(', ') : formatConfigValue(obj.domain)
   const lines = [
     `账号分类: ${buildSelectedCategorySummary(obj)}`,
-    `邮箱域名: ${formatConfigValue(obj.domain)}`,
+    `邮箱域名池: ${domainText}`,
     `通知窗口: 距今 ${formatNumberValue(obj.trigger_days_ago, 6)} 天，±${Number.isFinite(windowHours) ? windowHours / 2 : 12} 小时`,
     `最多扫描通知: ${formatNumberValue(obj.max_system_messages, 300)}`,
     `强制执行: ${obj.force ? '是' : '否'}`,
@@ -1458,9 +1460,13 @@ function buildAutoLoginEmailDetails(obj: Record<string, any>) {
       const accountId = Number(item?.account_id || 0)
       const phone = String(item?.phone || '').trim() || '-'
       const result = String(item?.result || '').trim() || '-'
+      const email = String(item?.email || '').trim()
+      const previousDomain = String(item?.previous_login_email_domain || '').trim()
       const message = String(item?.message || '').trim() || '-'
       const time = formatTime(item?.time_utc || '', '')
-      return `账号 #${accountId || '-'} ${phone}：${result}，${message}${time ? `（${time}）` : ''}`
+      const emailText = email ? ` -> ${email}` : ''
+      const previousText = previousDomain ? `（原域名 ${previousDomain}）` : ''
+      return `账号 #${accountId || '-'} ${phone}${emailText}：${result}${previousText}，${message}${time ? `（${time}）` : ''}`
     }))
   }
   return lines

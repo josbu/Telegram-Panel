@@ -446,9 +446,9 @@
           </el-form-item>
         </el-col>
       </el-row>
-      <el-form-item label="邮箱域名">
-        <el-input v-model="forms.autoLoginEmail.domain" placeholder="example.com" />
-        <div class="form-hint no-offset">将生成 手机号数字@域名；留空时使用系统 CloudMail:Domain。</div>
+      <el-form-item label="邮箱域名池">
+        <el-input v-model="forms.autoLoginEmail.domain" type="textarea" :rows="3" placeholder="example.com&#10;example.net" />
+        <div class="form-hint no-offset">支持换行、空格、逗号或分号分隔多个域名；留空时使用系统 CloudMail:Domain。多个域名会优先避开账号当前登录邮箱掩码中的原域名。</div>
       </el-form-item>
       <el-row :gutter="12">
         <el-col :span="8">
@@ -636,7 +636,7 @@ async function loadMetadata() {
     globalDefaultAiModel.value = settings.ai.defaultModel || ''
     applyAiModelSelection(forms.userChatActive.aiModel)
     if (!forms.autoLoginEmail.domain.trim()) {
-      forms.autoLoginEmail.domain = (settings.cloudMail.domain || '').replace(/^@+/, '')
+      forms.autoLoginEmail.domain = normalizeEmailDomains(settings.cloudMail.domain || '').join('\n')
     }
   } finally {
     loading.value = false
@@ -771,7 +771,9 @@ function applyInitialConfig() {
     form.accountNumbersText = formatAccountNumbers(accountNumbers)
     form.accountSourceMode = resolveInitialAccountSourceMode(cfg.account_source_mode, categoryIds, accountNumbers)
 
-    form.domain = readString(cfg.domain)
+    const configuredDomains = normalizeEmailDomains(cfg.domains)
+    const domains = configuredDomains.length > 0 ? configuredDomains : normalizeEmailDomains(readString(cfg.domain))
+    form.domain = domains.join('\n')
     form.triggerDaysAgo = clamp(readNumber(cfg.trigger_days_ago, 6), 0, 30)
     form.triggerWindowHours = clamp(readNumber(cfg.trigger_window_hours, 24), 1, 336)
     form.maxSystemMessages = clamp(readNumber(cfg.max_system_messages, 300), 20, 1000)
@@ -1017,13 +1019,15 @@ function buildAutoLoginEmailDraft(): TaskConfigDraft {
   validateAccountSource(form.accountSourceMode, categoryIds, selectedCategories, accountNumbers)
 
   const triggerPhrases = uniqueLines(form.triggerPhrasesText)
+  const domains = normalizeEmailDomains(form.domain)
   const config = {
     account_source_mode: form.accountSourceMode,
     category_ids: categoryIds,
 
     category_names: selectedCategories.map((x) => x.name),
     account_numbers: accountNumbers,
-    domain: form.domain.trim().replace(/^@+/, '') || null,
+    domain: domains[0] || null,
+    domains,
     trigger_days_ago: clamp(form.triggerDaysAgo, 0, 30),
     trigger_window_hours: clamp(form.triggerWindowHours, 1, 336),
     max_system_messages: clamp(form.maxSystemMessages, 20, 1000),
@@ -1135,6 +1139,23 @@ function resolveAiModel() {
   if (form.selectedAiModelOption === '__global__') return null
   if (form.selectedAiModelOption === '__custom__') return form.customAiModel.trim() || null
   return form.selectedAiModelOption.trim() || null
+}
+
+function normalizeEmailDomains(value: unknown) {
+  const input = Array.isArray(value) ? value.join('\n') : String(value ?? '')
+  const result: string[] = []
+  const seen = new Set<string>()
+  for (const raw of input.split(/[\s,，;；]+/)) {
+    let domain = raw.trim().replace(/^@+/, '')
+    if (domain.toLowerCase().startsWith('mailto:')) domain = domain.slice(7)
+    const at = domain.lastIndexOf('@')
+    if (at >= 0) domain = domain.slice(at + 1)
+    domain = domain.trim().replace(/^@+/, '').replace(/\.+$/, '').toLowerCase()
+    if (!domain || seen.has(domain)) continue
+    seen.add(domain)
+    result.push(domain)
+  }
+  return result
 }
 
 function selectedAccountCategories(ids: number[]) {

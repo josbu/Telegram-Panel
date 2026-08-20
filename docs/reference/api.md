@@ -24,6 +24,7 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 - `POST /api/panel/accounts/cleanup-waste`：复查并清理明确失效的账号
 - `POST /api/panel/accounts/batch/category`：批量修改已选账号分类；`categoryId=null` 表示改为未分类，只影响请求里的 `accountIds`，不会覆盖分类的全部成员。
 - `POST /api/panel/accounts/batch/recovery-email`：批量换绑 2FA 找回邮箱，可选同时换绑登录邮箱。单个账号可能等待 Telegram 发信和 Cloud Mail 收码；前端会按账号逐个调用该接口并聚合结果，外部自动化调用大量账号时也应拆成单账号或小批次请求，避免长连接被浏览器、Nginx 或网关超时中断。
+- `GET /api/panel/accounts/{id}/login-email`：读取账号当前登录邮箱状态，返回 `hasLoginEmail` 与 Telegram 返回的掩码 `loginEmailPattern`；账号详情页会展示该状态。该接口不返回完整邮箱地址，调用方只能从掩码中可靠读取域名。
 - `GET /api/panel/accounts/{id}/devices`：读取账号在线设备；返回的 `hash` 始终是十进制字符串，避免 JavaScript 处理 Telegram 64 位授权哈希时丢失精度。
 - `POST /api/panel/accounts/{id}/devices/{hash}/kick`：踢出指定非当前设备；`hash` 使用上述字符串原样放入 URL。
 - `POST /api/panel/accounts/{id}/devices/kick-all`：踢出所有其他设备并保留当前授权。
@@ -269,11 +270,11 @@ proxyText: http://user-a:password-a@proxy-a.example.com:8080
 也不会继续写入新增重试后的失败描述。
 
 `auto_change_login_email` 任务使用 `config.items` 返回最近账号级结果，字段包括 `time_utc`、
-`account_id`、`phone`、`email`、`result`、`message`、`matched_message_id` 和
-`matched_message_date_utc`。`result` 只表示该账号在本轮任务中的处理结果：`success` 表示已发送
-并在开启自动确认时完成登录邮箱验证码确认，`skipped` 表示因 Cloud Mail 配置、目标邮箱或通知匹配
-条件不足而未操作，`failed` 表示 Telegram/Cloud Mail 调用失败或收码确认失败。默认不会删除、停用
-或禁用账号；除非配置 `force=true`，否则没有匹配 777000 登录邮箱重置通知的账号不会被换绑。
+`account_id`、`phone`、`email`、`target_domain`、`previous_login_email_pattern`、
+`previous_login_email_domain`、`result`、`message`、`matched_message_id` 和
+`matched_message_date_utc`。任务配置可使用 `domains` 保存邮箱域名池；运行时会读取账号当前登录邮箱掩码，
+如果域名池里存在多个域名并能识别原域名，会优先随机选择一个不同于原域名的域名生成 `手机号数字@目标域名`。
+`result` 只表示该账号在本轮任务中的处理结果：`success` 表示已发送并在开启自动确认时完成登录邮箱验证码确认，`skipped` 表示因 Cloud Mail 配置、目标邮箱或通知匹配条件不足而未操作，`failed` 表示 Telegram/Cloud Mail 调用失败或收码确认失败。默认不会删除、停用或禁用账号；除非配置 `force=true`，否则没有匹配 777000 登录邮箱重置通知的账号不会被换绑。
 
 需要给外部系统调用时，优先使用模块的 `MapEndpoints` 明确设计鉴权、限流和响应模型，
 不要直接把管理 Cookie 接口暴露到公网。

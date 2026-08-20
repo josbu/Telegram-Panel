@@ -522,8 +522,8 @@ public sealed class MyHandler : IModuleTaskHandler
 内置 `auto_change_login_email` 任务也复用同一服务：处理器先按任务配置扫描 777000 系统通知窗口，
 只在匹配登录邮箱重置提示（默认包含 `Settings > Privacy & Security > Login Email`）或显式
 `force=true` 时调用 `AccountTelegramToolsService.SetLoginEmailAsync`，再通过 Cloud Mail 取码并调用
-`ConfirmLoginEmailAsync`。模块若实现相同场景，应复用这些宿主服务，不要重复创建 Telegram 客户端或
-绕过 Cloud Mail 配置。
+`ConfirmLoginEmailAsync`。任务配置支持 `domains` 域名池；运行时会读取账号当前登录邮箱掩码，
+当域名池有多个域名且能识别原域名时，优先随机选择一个不同于原域名的目标域名。模块若实现相同场景，应复用这些宿主服务，不要重复创建 Telegram 客户端或绕过 Cloud Mail 配置。
 
 ### 调用宿主 AI 服务（推荐给模块复用）
 
