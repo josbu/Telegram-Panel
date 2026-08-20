@@ -243,6 +243,8 @@ await taskManagement.UpdateTaskConfigAsync(
 
 如果模块页面没有走任务中心的“Cron 计划”创建入口，而是自己直接 `CreateTaskAsync(...)`，那它创建出来的就只是普通批量任务，不会自动变成计划任务。
 
+宿主会在计划任务的 `NextRunAtUtc` 上加入全局随机延迟（默认 300 秒，配置键 `ScheduledTasks:RandomDelaySeconds`），用于错开多个相同 Cron 的任务。模块不要依赖计划任务严格在整点触发；如果必须精确到分钟，应在模块自己的配置里声明并让部署方把全局随机延迟设为 `0`。
+
 任务中心创建普通批量任务时可传 `name` 作为用户可读任务名称，宿主会写入 `BatchTasks.Name` 并在执行中/历史任务列表优先展示；名称可空，留空时前端按“任务类型 #ID”兜底。模块或自动化调用编辑已有批量任务时，如果不想改变名称应省略 `name` 字段；传空字符串表示清空名称。名称最长 100 个字符，超过时宿主应返回可展示的校验错误。
 
 任务中心“复制”是宿主通用能力，不依赖模块是否提供任务中心专用表单或 `CreateRoute`。前端会读取原 `BatchTask` / `ScheduledTask` 的完整 `taskType`、`name`、`total`、`config` / `configJson` 和 Cron，清理已知运行态字段后打开“新建任务”弹窗；没有宿主专用表单的模块任务会使用通用 JSON 配置区提交到 `POST /api/panel/tasks` 或 `POST /api/panel/scheduled-tasks`。模块作者必须把可复用配置与运行态结果分开，避免复制任务时把进度、锁、游标或失败明细当作新任务输入。

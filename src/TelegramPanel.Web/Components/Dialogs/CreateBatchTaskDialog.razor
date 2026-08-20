@@ -51,7 +51,7 @@
             @if (IsScheduledMode)
             {
                 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
-                    Cron 按面板时区解析：<b>@TimeZone.Current.Id</b>
+                    Cron 按面板时区解析：<b>@TimeZone.Current.Id</b>；保存后会自动加入随机延迟，避免多个计划任务整点同时启动。
                 </MudAlert>
 
                 <MudTextField @bind-Value="scheduledTaskName"
