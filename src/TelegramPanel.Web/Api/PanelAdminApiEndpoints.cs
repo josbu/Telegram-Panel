@@ -2385,15 +2385,22 @@ public static class PanelAdminApiEndpoints
         var localPath = LocalConfigFile.ResolvePath(configuration, environment);
         var tz = timeZone.Current;
         var offset = tz.BaseUtcOffset >= TimeSpan.Zero ? "+" + tz.BaseUtcOffset.ToString(@"hh\:mm") : "-" + tz.BaseUtcOffset.Duration().ToString(@"hh\:mm");
+        var telegramApiStatus = ReadTelegramApiRuntimeStatus(configuration);
         var dto = new SettingsDto(
             LocalConfigPath: localPath,
             LocalConfigExists: File.Exists(localPath),
             Telegram: new TelegramApiSettingsDto(
-                ReadEffectiveTelegramApiId(configuration),
-                ReadEffectiveTelegramApiHash(configuration),
+                ReadConfiguredTelegramApiId(configuration),
+                ReadConfiguredTelegramApiHash(configuration),
                 ReadTelegramApiProfiles(configuration),
                 TelegramDeviceProfileCatalog.ReadProfiles(configuration).Select(ToDto).ToList(),
-                TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration)),
+                TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration),
+                telegramApiStatus.EffectiveApiId,
+                telegramApiStatus.EffectiveApiSource,
+                telegramApiStatus.EffectiveApiName,
+                TelegramApiProfilePool.OfficialAndroidApiId.ToString(CultureInfo.InvariantCulture),
+                TelegramApiProfilePool.OfficialAndroidApiName,
+                telegramApiStatus.HasUsableApi),
             GlobalProxy: ReadGlobalProxySettings(configuration),
             CloudMail: new CloudMailSettingsDto(configuration["CloudMail:BaseUrl"] ?? "", configuration["CloudMail:Domain"] ?? "", configuration["CloudMail:Token"] ?? ""),
             Ai: new AiSettingsDto(
@@ -2418,7 +2425,7 @@ public static class PanelAdminApiEndpoints
                 configuration.GetValue("TelegramStatus:AutoRefreshDelayMs", 5000)),
             Logging: new LoggingSettingsDto(configuration.GetValue("Serilog:Enabled", false), configuration["Serilog:MinimumLevel:Default"] ?? "Information", configuration.GetValue("Serilog:RetainedFileCountLimit", 30)),
             TimeZone: new TimeZoneSettingsDto(configuration["System:TimeZoneId"] ?? "", $"{tz.Id}（UTC{offset}）"),
-            System: new SystemInfoSettingsDto(VersionService.Version, ".NET 8.0", "SQLite", ReadEffectiveTelegramApiId(configuration)));
+            System: new SystemInfoSettingsDto(VersionService.Version, ".NET 8.0", "SQLite", telegramApiStatus.EffectiveApiId));
 
         return Task.FromResult<IResult>(Results.Ok(dto));
     }
@@ -2486,10 +2493,6 @@ public static class PanelAdminApiEndpoints
                 return Results.BadRequest(new OperationResultDto(false, $"默认 API Hash 无效：{reason}"));
             request = request with { ApiId = apiId.ToString(CultureInfo.InvariantCulture), ApiHash = apiHash };
         }
-        else if (profiles.All(profile => !profile.Enabled))
-        {
-            return Results.BadRequest(new OperationResultDto(false, "请至少配置默认 API 或启用一个 API 配置"));
-        }
         var root = await LoadLocalConfigRootAsync(LocalConfigFile.ResolvePath(configuration, environment));
         var telegram = EnsureObject(root, "Telegram");
         if (hasDefaultApi)
@@ -2546,25 +2549,48 @@ public static class PanelAdminApiEndpoints
                 profile.Notes))
             .ToList();
 
-    private static string ReadEffectiveTelegramApiId(IConfiguration configuration)
-    {
-        if (TelegramApiProfilePool.GetEnabledProfiles(configuration).Count > 0)
-            return configuration["Telegram:ApiId"] ?? string.Empty;
+    internal sealed record TelegramApiRuntimeStatus(
+        string EffectiveApiId,
+        string EffectiveApiSource,
+        string EffectiveApiName,
+        bool HasUsableApi);
 
-        return TelegramApiProfilePool.TryGetGlobalFallback(configuration, out var credentials)
-            ? credentials.ApiId.ToString(CultureInfo.InvariantCulture)
-            : configuration["Telegram:ApiId"] ?? string.Empty;
+    internal static TelegramApiRuntimeStatus ReadTelegramApiRuntimeStatus(IConfiguration configuration)
+    {
+        var profiles = TelegramApiProfilePool.GetEnabledProfiles(configuration);
+        if (profiles.Count > 0)
+        {
+            var profile = profiles[0];
+            return new TelegramApiRuntimeStatus(
+                profile.ApiId.ToString(CultureInfo.InvariantCulture),
+                "api_profile",
+                profile.Name,
+                true);
+        }
+
+        if (TelegramApiProfilePool.TryGetGlobalFallback(configuration, out var credentials))
+        {
+            var isOfficialAndroid = credentials.ApiId == TelegramApiProfilePool.OfficialAndroidApiId
+                && string.Equals(credentials.ApiHash, TelegramApiProfilePool.OfficialAndroidApiHash, StringComparison.OrdinalIgnoreCase);
+            return new TelegramApiRuntimeStatus(
+                credentials.ApiId.ToString(CultureInfo.InvariantCulture),
+                isOfficialAndroid ? "built_in_official" : "custom_default",
+                credentials.ProfileName ?? (isOfficialAndroid ? TelegramApiProfilePool.OfficialAndroidApiName : "默认 API"),
+                true);
+        }
+
+        var configuredApiId = ReadConfiguredTelegramApiId(configuration);
+        return new TelegramApiRuntimeStatus(configuredApiId, "invalid", "不可用", false);
     }
 
-    private static string ReadEffectiveTelegramApiHash(IConfiguration configuration)
+    private static string ReadConfiguredTelegramApiId(IConfiguration configuration)
     {
-        if (TelegramApiProfilePool.ReadConfiguredProfiles(configuration).Count > 0)
-            return configuration["Telegram:ApiHash"] ?? string.Empty;
-
-        return TelegramApiProfilePool.TryGetGlobalFallback(configuration, out var credentials)
-            ? credentials.ApiHash
-            : configuration["Telegram:ApiHash"] ?? string.Empty;
+        var configuredApiId = (configuration["Telegram:ApiId"] ?? string.Empty).Trim();
+        return configuredApiId == "0" ? string.Empty : configuredApiId;
     }
+
+    private static string ReadConfiguredTelegramApiHash(IConfiguration configuration) =>
+        configuration["Telegram:ApiHash"] ?? string.Empty;
 
     private static IReadOnlyList<TelegramApiProfile> NormalizeTelegramApiProfiles(
         IReadOnlyList<TelegramApiProfileDto>? profiles,
@@ -8272,7 +8298,13 @@ public sealed record TelegramApiSettingsDto(
     string ApiHash,
     IReadOnlyList<TelegramApiProfileDto>? Profiles = null,
     IReadOnlyList<TelegramDeviceProfileDto>? DeviceProfiles = null,
-    string? DefaultDeviceProfileKey = null);
+    string? DefaultDeviceProfileKey = null,
+    string? EffectiveApiId = null,
+    string? EffectiveApiSource = null,
+    string? EffectiveApiName = null,
+    string? OfficialApiId = null,
+    string? OfficialApiName = null,
+    bool HasUsableApi = true);
 public sealed record TelegramApiProfileDto(string? Name, string? ApiId, string? ApiHash, bool Enabled = true, int Weight = 1, string? Notes = null);
 public sealed record TelegramDeviceProfileDto(
     string Key,

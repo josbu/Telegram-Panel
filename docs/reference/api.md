@@ -43,7 +43,7 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 
 ### Telegram API 配置池设置
 
-`GET /api/panel/settings` 的 `telegram` 字段包含兼容旧版的 `apiId`、`apiHash`，以及可选 `profiles` 数组。`POST /api/panel/settings/telegram-api` 接收相同结构并写入 `appsettings.local.json`：
+`GET /api/panel/settings` 的 `telegram` 字段包含兼容旧版的已写入自定义 `apiId`、`apiHash`，以及可选 `profiles` 数组；还会返回运行态字段 `effectiveApiId`、`effectiveApiSource`、`effectiveApiName`、`officialApiId`、`officialApiName` 和 `hasUsableApi`，用于前端区分“内置官方 API 回退”和“写入到本地配置的自定义 API”。`POST /api/panel/settings/telegram-api` 接收相同结构并写入 `appsettings.local.json`：
 
 ```json
 {
@@ -56,7 +56,7 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 }
 ```
 
-`profiles` 省略时保留当前 API 配置池；传空数组表示清空配置池。默认 `apiId/apiHash` 可留空，此时没有启用 API 配置池则使用内置 Telegram 官方 Android API（ApiId `6`）；有 API 配置池时按启用项分配。服务端会校验每个 ApiHash 为 32 位十六进制字符串，名称不可重复，`weight` 规范到 `1-1000`。新账号登录和不自带 API 的导入入口使用启用 profile 做最少使用量分配；已有账号继续使用数据库中保存的 `ApiId/ApiHash`。
+`profiles` 省略时保留当前 API 配置池；传空数组表示清空配置池。默认 `apiId/apiHash` 可留空，此时没有启用 API 配置池则使用内置 Telegram 官方 Android API（ApiId `6`，`effectiveApiSource=built_in_official`）；有 API 配置池时按启用项分配。服务端会校验每个 ApiHash 为 32 位十六进制字符串，名称不可重复，`weight` 规范到 `1-1000`。新账号登录和不自带 API 的导入入口使用启用 profile 做最少使用量分配；已有账号继续使用数据库中保存的 `ApiId/ApiHash`。
 ### Telegram 设置与设备画像
 
 侧栏 `/telegram-api` 对应默认 Telegram API 和 API 配置池；侧栏 `/device-profiles` 对应内置/自定义设备画像和默认画像。两页最终都通过 `POST /api/panel/settings/telegram-api` 保存，设备画像请求沿用现有 `deviceProfiles` 与 `defaultDeviceProfileKey` 字段。

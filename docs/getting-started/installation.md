@@ -46,12 +46,11 @@ docker compose up -d
 
 登录后到「修改密码」页面改掉即可。
 
-### 必做配置：Telegram API 凭据
+### 可选配置：自定义 Telegram API 凭据
 
-到 https://my.telegram.org/apps 用任意一个 Telegram 账号申请一次 `api_id` / `api_hash`，然后在面板「系统设置」里保存即可。
+面板内置 Telegram 官方 Android API（ApiId `6`），未填写自定义 `api_id` / `api_hash` 且未启用 API 配置池时可以直接作为运行时默认。
 
-> 说明：不需要每个账号都申请，全站共用这一对即可工作。  
-> 注意：`api_hash` 是 **32 位十六进制字符串（0-9a-f）**，请不要填 Token/用户名/URL 等其它值。
+如果需要自建 API、隔离额度或分散新账号，可到 https://my.telegram.org/apps 用任意一个 Telegram 账号申请 `api_id` / `api_hash`，然后在面板「Telegram 设置 → Telegram API」保存。`api_hash` 是 **32 位十六进制字符串（0-9a-f）**，请不要填 Token/用户名/URL 等其它值。
 
 ### 导入或登录前先选择账号出口
 

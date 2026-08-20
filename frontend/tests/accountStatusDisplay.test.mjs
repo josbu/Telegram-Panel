@@ -6,6 +6,7 @@ const statusSource = await readFile(new URL('../src/utils/telegramStatus.ts', im
 const accountsSource = await readFile(new URL('../src/views/Accounts.vue', import.meta.url), 'utf8')
 const accountImportSource = await readFile(new URL('../src/views/AccountImport.vue', import.meta.url), 'utf8')
 const accountLoginSource = await readFile(new URL('../src/views/AccountLogin.vue', import.meta.url), 'utf8')
+const telegramApiSettingsSource = await readFile(new URL('../src/views/TelegramApiSettings.vue', import.meta.url), 'utf8')
 
 
 test('临时 Telegram 网络错误与账号失效分开展示', () => {
@@ -39,10 +40,17 @@ test('导入页只展示已导入账号并引导去账号列表操作', () => {
   assert.doesNotMatch(accountImportSource, /handleBatchCommand/)
 })
 
-test('导入和登录页把启用的 API 配置池视为可用 Telegram API', () => {
+test('导入和登录页使用服务端有效 API 状态', () => {
   for (const source of [accountImportSource, accountLoginSource]) {
-    assert.match(source, /settings\.telegram\.profiles \|\| \[\]/)
-    assert.match(source, /profile\.enabled && !!profileApiId && !!profileApiHash/)
-    assert.match(source, /telegramApiConfigured\.value = \(!!apiId && apiId !== '0' && !!apiHash\) \|\| !!enabledProfile/)
+    assert.match(source, /settings\.telegram\.effectiveApiId \|\| settings\.system\.effectiveApiId/)
+    assert.match(source, /typeof settings\.telegram\.hasUsableApi === 'boolean'/)
+    assert.match(source, /\? settings\.telegram\.hasUsableApi/)
   }
+})
+
+test('Telegram API 页面明确展示内置官方 API 回退', () => {
+  assert.match(telegramApiSettingsSource, /内置官方 Android API：ApiId/)
+  assert.match(telegramApiSettingsSource, /改用内置官方 API/)
+  assert.match(telegramApiSettingsSource, /effectiveApiSource === 'built_in_official'/)
+  assert.match(telegramApiSettingsSource, /ApiHash 已内置/)
 })

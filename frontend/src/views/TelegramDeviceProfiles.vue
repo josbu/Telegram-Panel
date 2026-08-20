@@ -66,10 +66,11 @@
           <template #header>Telegram API 入口</template>
           <el-alert type="info" :closable="false" show-icon class="mb-3">
             <template #title>默认官方 API 和 API 配置池在独立的 Telegram API 页面管理。</template>
-            <div>这里读取当前默认 ApiId、已启用 API 配置池数量和默认设备指纹，便于你确认这两块是否已经生效。</div>
+            <div>这里读取当前生效 ApiId、API 来源、已启用 API 配置池数量和默认设备指纹，便于你确认这两块是否已经生效。</div>
           </el-alert>
           <el-descriptions :column="1" border size="small">
-            <el-descriptions-item label="当前默认 ApiId">{{ settings?.telegram.apiId || '（未配置）' }}</el-descriptions-item>
+            <el-descriptions-item label="当前生效 ApiId">{{ effectiveApiId || '（不可用）' }}</el-descriptions-item>
+            <el-descriptions-item label="当前 API 来源">{{ effectiveApiSourceLabel }}</el-descriptions-item>
             <el-descriptions-item label="启用中的 API 配置">{{ enabledApiProfiles.length }}</el-descriptions-item>
             <el-descriptions-item label="当前默认设备指纹">
               {{ selectedDeviceProfile ? `${selectedDeviceProfile.name} · ${selectedDeviceProfile.family}` : '（未配置）' }}
@@ -100,6 +101,15 @@ const saving = ref(false)
 
 const selectedDeviceProfile = computed(() => deviceProfiles.value.find((profile) => profile.key === defaultDeviceProfileKey.value))
 const enabledApiProfiles = computed(() => (settings.value?.telegram.profiles || []).filter((profile) => profile.enabled !== false))
+const effectiveApiId = computed(() => settings.value?.telegram.effectiveApiId || settings.value?.system.effectiveApiId || '')
+const effectiveApiSourceLabel = computed(() => {
+  const source = settings.value?.telegram.effectiveApiSource
+  if (source === 'built_in_official') return '内置官方 Android API'
+  if (source === 'api_profile') return settings.value?.telegram.effectiveApiName || 'API 配置池'
+  if (source === 'custom_default') return '自定义默认 API'
+  if (source === 'invalid') return '配置不可用'
+  return settings.value ? '未配置' : '加载中'
+})
 
 function normalizeTelegramSettings(source: TelegramApiSettings) {
   deviceProfiles.value = source.deviceProfiles || []

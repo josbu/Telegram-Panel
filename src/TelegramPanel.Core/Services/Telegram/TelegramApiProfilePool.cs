@@ -60,7 +60,7 @@ public sealed class TelegramApiProfilePool
             if (TryGetGlobalFallback(_configuration, out var fallback))
                 return fallback;
 
-            throw new InvalidOperationException("请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）或至少一个启用的 API 配置");
+            throw new InvalidOperationException("请先在【Telegram 设置 → Telegram API】中配置全局 Telegram API（ApiId/ApiHash）或至少一个启用的 API 配置");
         }
 
         var usage = new int[profiles.Count];
@@ -181,7 +181,7 @@ public sealed class TelegramApiProfilePool
             return true;
         }
 
-        error = "请先在【系统设置】中配置全局 Telegram API（ApiId/ApiHash）或至少一个启用的 API 配置";
+        error = "请先在【Telegram 设置 → Telegram API】中配置全局 Telegram API（ApiId/ApiHash）或至少一个启用的 API 配置";
         return false;
     }
 

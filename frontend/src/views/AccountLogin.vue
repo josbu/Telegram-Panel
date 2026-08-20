@@ -69,10 +69,10 @@
             show-icon
             class="mb-3"
           >
-            <template #title>未配置全局 Telegram API（ApiId/ApiHash），无法登录。</template>
+            <template #title>Telegram API 当前不可用，无法登录。</template>
             <div class="login-api-warning">
               <span>当前生效 ApiId：{{ effectiveApiId || '未配置' }}</span>
-              <el-button size="small" type="primary" @click="router.push('/settings')">去系统设置配置</el-button>
+              <el-button size="small" type="primary" @click="router.push('/telegram-api')">去 Telegram API 配置</el-button>
             </div>
           </el-alert>
 
@@ -187,10 +187,10 @@
             show-icon
             class="mb-3"
           >
-            <template #title>未配置全局 Telegram API（ApiId/ApiHash），无法登录。</template>
+            <template #title>Telegram API 当前不可用，无法登录。</template>
             <div class="login-api-warning">
               <span>当前生效 ApiId：{{ effectiveApiId || '未配置' }}</span>
-              <el-button size="small" type="primary" @click="router.push('/settings')">去系统设置配置</el-button>
+              <el-button size="small" type="primary" @click="router.push('/telegram-api')">去 Telegram API 配置</el-button>
             </div>
           </el-alert>
           <el-alert
@@ -457,7 +457,7 @@ async function loadLoginProxyOptions() {
 async function next() {
   if (logging.value) return
   if (currentStep.value === 'phone' && telegramApiChecked.value && !telegramApiConfigured.value) {
-    ElMessage.warning('请先配置全局 Telegram API')
+    ElMessage.warning('请先检查 Telegram API 配置')
     return
   }
   if (currentStep.value === 'phone' && !ensureProxySelected()) return
@@ -522,9 +522,11 @@ async function loadTelegramApiStatus() {
       return profile.enabled && !!profileApiId && !!profileApiHash
     })
     const profileApiId = (enabledProfile?.apiId || '').trim()
-    const effectiveApiIdFromSettings = (settings.system.effectiveApiId || '').trim()
+    const effectiveApiIdFromSettings = (settings.telegram.effectiveApiId || settings.system.effectiveApiId || '').trim()
     effectiveApiId.value = ((effectiveApiIdFromSettings !== '0' ? effectiveApiIdFromSettings : '') || (apiId !== '0' ? apiId : '') || profileApiId || '').trim()
-    telegramApiConfigured.value = (!!apiId && apiId !== '0' && !!apiHash) || !!enabledProfile
+    telegramApiConfigured.value = typeof settings.telegram.hasUsableApi === 'boolean'
+      ? settings.telegram.hasUsableApi
+      : ((!!apiId && apiId !== '0' && !!apiHash) || !!enabledProfile)
   } catch {
     telegramApiConfigured.value = true
   } finally {
@@ -535,7 +537,7 @@ async function loadTelegramApiStatus() {
 async function startQrLogin() {
   if (logging.value) return
   if (telegramApiChecked.value && !telegramApiConfigured.value) {
-    ElMessage.warning('请先配置全局 Telegram API')
+    ElMessage.warning('请先检查 Telegram API 配置')
     return
   }
   if (!ensureProxySelected()) return
