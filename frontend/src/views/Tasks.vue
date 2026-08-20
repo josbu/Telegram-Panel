@@ -202,7 +202,7 @@
 
     <el-dialog v-model="createDialog.visible" title="新建任务" width="min(760px, calc(100vw - 24px))" destroy-on-close class="task-dialog">
       <el-alert
-        title="立即执行会创建一条后台执行记录；Cron 计划会在任务中心的计划任务区域持续调度。"
+        title="立即执行会创建一条后台执行记录；Cron 计划会按面板时区持续调度，并自动加入随机延迟避免多个计划任务整点同时启动。"
         type="info"
         :closable="false"
         class="mb-3"
@@ -398,7 +398,7 @@
       destroy-on-close
       class="task-dialog"
     >
-      <el-alert :title="`Cron 按面板时区解析：${timeZoneId || 'UTC'}。保存后会重新计算下次运行时间。`" type="info" :closable="false" class="mb-3" />
+      <el-alert :title="`Cron 按面板时区解析：${timeZoneId || 'UTC'}。保存后会重新计算下次运行时间，并加入随机延迟避免整点并发。`" type="info" :closable="false" class="mb-3" />
       <el-form :label-position="isTaskDialogCompact ? 'top' : 'right'" :label-width="isTaskDialogCompact ? 'auto' : '96px'">
         <el-form-item label="任务名称">
           <el-input v-model="editScheduledDialog.form.name" maxlength="100" show-word-limit />

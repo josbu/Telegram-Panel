@@ -31,7 +31,7 @@
         {
             <MudStack Spacing="2">
                 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
-                    Cron 按面板时区解析：<b>@TimeZone.Current.Id</b>。
+                    Cron 按面板时区解析：<b>@TimeZone.Current.Id</b>；保存后会重新计算下次运行时间并加入随机延迟。
                 </MudAlert>
 
                 <MudTextField @bind-Value="scheduledTaskName"

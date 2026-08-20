@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Configuration;
+using System.Security.Cryptography;
 using TelegramPanel.Core.Services;
 using TelegramPanel.Data.Entities;
 using TelegramPanel.Data.Repositories;
@@ -14,19 +16,30 @@ public sealed class ScheduledTaskService
     private readonly BatchTaskManagementService _batchTaskManagement;
     private readonly PanelTimeZoneService _timeZone;
     private readonly ImageAssetStorageService _assetStorage;
+    private const int DefaultRandomDelaySeconds = 300;
+    private const int MaxRandomDelaySeconds = 3600;
+
+    private readonly int _randomDelaySeconds;
 
     public ScheduledTaskService(
         IScheduledTaskRepository scheduledTaskRepository,
         CronExpressionService cronExpressionService,
         BatchTaskManagementService batchTaskManagement,
         PanelTimeZoneService timeZone,
-        ImageAssetStorageService assetStorage)
+        ImageAssetStorageService assetStorage,
+        IConfiguration configuration)
     {
         _scheduledTaskRepository = scheduledTaskRepository;
         _cronExpressionService = cronExpressionService;
         _batchTaskManagement = batchTaskManagement;
         _timeZone = timeZone;
         _assetStorage = assetStorage;
+        _randomDelaySeconds = ReadBoundedInt(
+            configuration,
+            "ScheduledTasks:RandomDelaySeconds",
+            DefaultRandomDelaySeconds,
+            0,
+            MaxRandomDelaySeconds);
     }
 
     public async Task<IReadOnlyList<ScheduledTask>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -207,7 +220,44 @@ public sealed class ScheduledTaskService
 
     private DateTime? GetNextRunAtUtc(string expression, DateTime fromUtc)
     {
-        return _cronExpressionService.GetNextOccurrenceUtc(expression, fromUtc, _timeZone.Current);
+        var nextRunAtUtc = _cronExpressionService.GetNextOccurrenceUtc(expression, fromUtc, _timeZone.Current);
+        if (!nextRunAtUtc.HasValue || _randomDelaySeconds <= 0)
+            return nextRunAtUtc;
+
+        var jitterSeconds = GetRandomDelaySeconds(expression, nextRunAtUtc.Value);
+        return jitterSeconds <= 0
+            ? nextRunAtUtc
+            : nextRunAtUtc.Value.AddSeconds(jitterSeconds);
+    }
+
+    private int GetRandomDelaySeconds(string expression, DateTime nextRunAtUtc)
+    {
+        var maxDelaySeconds = _randomDelaySeconds;
+        var followingRunAtUtc = _cronExpressionService.GetNextOccurrenceUtc(
+            expression,
+            nextRunAtUtc.AddSeconds(1),
+            _timeZone.Current);
+        if (followingRunAtUtc.HasValue)
+        {
+            var intervalSeconds = (int)Math.Floor((followingRunAtUtc.Value - nextRunAtUtc).TotalSeconds);
+            maxDelaySeconds = Math.Min(maxDelaySeconds, Math.Max(0, intervalSeconds - 1));
+        }
+
+        return maxDelaySeconds <= 0 ? 0 : RandomNumberGenerator.GetInt32(1, maxDelaySeconds + 1);
+    }
+
+    private static int ReadBoundedInt(
+        IConfiguration configuration,
+        string key,
+        int fallback,
+        int min,
+        int max)
+    {
+        if (!int.TryParse(configuration[key], out var value))
+            value = fallback;
+        if (value < min)
+            return min;
+        return value > max ? max : value;
     }
 
     private static string? NormalizeNullable(string? value)
