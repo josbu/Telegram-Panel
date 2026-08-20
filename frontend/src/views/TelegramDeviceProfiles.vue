@@ -74,6 +74,7 @@ const saving = ref(false)
 
 const selectedDeviceProfile = computed(() => deviceProfiles.value.find((profile) => profile.key === defaultDeviceProfileKey.value))
 
+
 function normalizeTelegramSettings(source: TelegramApiSettings) {
   deviceProfiles.value = source.deviceProfiles || []
   defaultDeviceProfileKey.value = source.defaultDeviceProfileKey || deviceProfiles.value[0]?.key || ''
