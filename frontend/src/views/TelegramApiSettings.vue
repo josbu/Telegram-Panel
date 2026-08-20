@@ -13,14 +13,24 @@
         <el-card shadow="never" class="page-card">
           <template #header>Telegram API 配置</template>
           <el-form label-position="top">
-            <el-form-item label="默认 API ID">
-              <el-input v-model="telegram.apiId" />
-              <div class="muted mt-2">Telegram 官方 API 的默认 ApiId；未启用 API 配置池时，新账号登录和导入将使用这里的 ApiId / ApiHash。</div>
+            <el-form-item label="自定义默认 API ID（可选）">
+              <el-input v-model="telegram.apiId" :placeholder="`留空使用内置官方 Android API ${officialApiId}`" />
+              <div class="muted mt-2">只有未启用 API 配置池时才使用；留空表示回退到内置官方 API。</div>
             </el-form-item>
-            <el-form-item label="默认 API Hash">
-              <el-input v-model="telegram.apiHash" />
-              <div class="muted mt-2">兼容旧配置；留空时会回退到启用的 API 配置池或账号已有的 ApiId / ApiHash。</div>
+            <el-form-item label="自定义默认 API Hash（可选）">
+              <el-input v-model="telegram.apiHash" type="password" show-password placeholder="留空使用内置官方 API Hash" />
+              <div class="muted mt-2">不需要手工填写官方 Hash；如需自建 API 或其他客户端 API 再填写。</div>
             </el-form-item>
+            <el-alert
+              class="official-api-alert mb-3"
+              :type="isBuiltInOfficialActive ? 'success' : 'info'"
+              :closable="false"
+              show-icon
+            >
+              <template #title>内置官方 Android API：ApiId {{ officialApiId }}{{ isBuiltInOfficialActive ? '（当前生效）' : '（可回退）' }}</template>
+              <div>ApiHash 已内置，默认不会写入 appsettings.local.json；只有自定义默认 API 和启用的 API 配置池都为空时使用。</div>
+              <div>当前来源：{{ effectiveApiSourceLabel }}</div>
+            </el-alert>
             <el-divider />
             <div class="section-title">API 配置池</div>
             <el-alert type="info" :closable="false" show-icon class="mb-3">
@@ -61,11 +71,12 @@
             </div>
             <el-button plain @click="addApiProfile">添加 API 配置</el-button>
           </el-form>
-          <el-alert type="info" :closable="false" show-icon class="mb-3">
+          <el-alert :type="settings?.telegram.hasUsableApi === false ? 'warning' : 'info'" :closable="false" show-icon class="mb-3">
             <template #title>Telegram API 状态</template>
             <div>写入位置：{{ settings?.localConfigPath || '-' }}</div>
             <div>文件存在：{{ settings?.localConfigExists ? '是' : '否' }}</div>
-            <div>当前生效 ApiId：{{ settings?.system.effectiveApiId || '（未配置）' }}</div>
+            <div>当前来源：{{ effectiveApiSourceLabel }}</div>
+            <div>当前生效 ApiId：{{ effectiveApiId || '（不可用）' }}</div>
           </el-alert>
           <el-button type="primary" :loading="saving.telegram" @click="saveTelegram">保存配置</el-button>
         </el-card>
@@ -73,19 +84,20 @@
 
       <div class="settings-column">
         <el-card shadow="never" class="page-card">
-          <template #header>官方 API 说明</template>
+          <template #header>内置官方 API 说明</template>
           <el-alert type="info" :closable="false" show-icon class="mb-3">
-            <template #title>未配置自定义 API 时，系统默认使用 Telegram 官方 Android API。</template>
-            <div>官方默认：ApiId {{ officialApiId }}；ApiHash 已内置，不需要手工填写。</div>
-            <div>如需其他官方客户端或自建 API，请在上方填写并保存；已有账号仍优先使用账号保存的 ApiId / ApiHash。</div>
+            <template #title>内置 API 是运行时回退，不是 appsettings.local.json 中的一条配置。</template>
+            <div>{{ officialApiName }}：ApiId {{ officialApiId }}；ApiHash 已内置，不需要手工填写。</div>
+            <div>如果当前来源不是内置，说明仍有自定义默认 API 或启用的 API 配置池在覆盖它。</div>
           </el-alert>
           <el-descriptions :column="1" border size="small">
-            <el-descriptions-item label="官方默认 ApiId">{{ officialApiId }}</el-descriptions-item>
-            <el-descriptions-item label="当前默认 ApiId">{{ telegram.apiId || officialApiId }}</el-descriptions-item>
-            <el-descriptions-item label="启用中的 API 配置">{{ telegram.profiles.filter((profile) => profile.enabled !== false).length }}</el-descriptions-item>
+            <el-descriptions-item label="内置官方 ApiId">{{ officialApiId }}</el-descriptions-item>
+            <el-descriptions-item label="当前来源">{{ effectiveApiSourceLabel }}</el-descriptions-item>
+            <el-descriptions-item label="当前生效 ApiId">{{ effectiveApiId || '（不可用）' }}</el-descriptions-item>
+            <el-descriptions-item label="启用中的 API 配置">{{ enabledApiProfiles.length }}</el-descriptions-item>
           </el-descriptions>
           <div class="button-row mt-3">
-            <el-button plain @click="useOfficialApi">恢复官方默认</el-button>
+            <el-button plain @click="useBuiltInOfficialApiFallback">改用内置官方 API</el-button>
           </div>
         </el-card>
 
@@ -95,13 +107,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { panelApi } from '@/api/panel'
 import type { SettingsPayload, TelegramApiSettings, TelegramApiProfile } from '@/api/types'
 
-const officialApiId = '6'
-const officialApiHash = 'eb06d4abfb49dc3eeb1aeb98ae0f581e'
+const fallbackOfficialApiId = '6'
+const fallbackOfficialApiName = 'Telegram 官方 Android API'
 const settings = ref<SettingsPayload | null>(null)
 const telegram = reactive({
   apiId: '',
@@ -112,10 +124,23 @@ const saving = reactive({
   telegram: false,
 })
 
+const officialApiId = computed(() => settings.value?.telegram.officialApiId || fallbackOfficialApiId)
+const officialApiName = computed(() => settings.value?.telegram.officialApiName || fallbackOfficialApiName)
+const enabledApiProfiles = computed(() => telegram.profiles.filter((profile) => profile.enabled !== false))
+const effectiveApiId = computed(() => settings.value?.telegram.effectiveApiId || settings.value?.system.effectiveApiId || '')
+const effectiveApiSourceLabel = computed(() => {
+  const source = settings.value?.telegram.effectiveApiSource
+  if (source === 'built_in_official') return '内置官方 Android API'
+  if (source === 'api_profile') return settings.value?.telegram.effectiveApiName || 'API 配置池'
+  if (source === 'custom_default') return '自定义默认 API'
+  if (source === 'invalid') return '配置不可用'
+  return settings.value ? '未配置' : '加载中'
+})
+const isBuiltInOfficialActive = computed(() => settings.value?.telegram.effectiveApiSource === 'built_in_official')
+
 function normalizeTelegramSettings(source: TelegramApiSettings) {
-  const hasProfiles = (source.profiles?.some((profile) => profile.enabled !== false) || false)
-  telegram.apiId = !source.apiId || source.apiId === '0' ? (hasProfiles ? '' : officialApiId) : source.apiId
-  telegram.apiHash = source.apiHash || (hasProfiles ? '' : officialApiHash)
+  telegram.apiId = !source.apiId || source.apiId === '0' ? '' : source.apiId
+  telegram.apiHash = source.apiHash || ''
   const profiles = source.profiles || []
   telegram.profiles = profiles.map((profile) => ({
     name: profile.name || '',
@@ -151,10 +176,20 @@ async function saveTelegram() {
   }
 }
 
-function useOfficialApi() {
-  telegram.apiId = officialApiId
-  telegram.apiHash = officialApiHash
-  ElMessage.info('已恢复官方默认 API；点击保存配置后生效')
+function hasSavableProfile(profile: TelegramApiProfile) {
+  return !!(profile.apiId?.trim() && profile.apiHash?.trim())
+}
+
+function useBuiltInOfficialApiFallback() {
+  const enabledCount = telegram.profiles.filter((profile) => profile.enabled !== false).length
+  telegram.apiId = ''
+  telegram.apiHash = ''
+  telegram.profiles = telegram.profiles
+    .filter(hasSavableProfile)
+    .map((profile) => ({ ...profile, enabled: false }))
+  ElMessage.info(enabledCount > 0
+    ? '已清空自定义默认 API 并停用 API 配置池；点击保存配置后使用内置官方 API'
+    : '已清空自定义默认 API；点击保存配置后使用内置官方 API')
 }
 
 function addApiProfile() {
@@ -213,6 +248,10 @@ onMounted(load)
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 12px;
+}
+
+.official-api-alert {
+  margin-top: 4px;
 }
 
 @media (max-width: 960px) {

@@ -277,12 +277,14 @@ export const panelApi = {
     loginId?: number
     proxyStrategy: AccountProxyStrategy
     proxyId?: number | null
+    deviceProfileKey?: string | null
   }) =>
     api.post<AccountLoginResponse>('/accounts/login/start', payload, { timeout: 900_000 }).then((r) => r.data),
   startAccountQrLogin: (payload: {
     loginId?: number
     proxyStrategy: AccountProxyStrategy
     proxyId?: number | null
+    deviceProfileKey?: string | null
   }) =>
     api.post<AccountQrLoginResponse>('/accounts/login/qr/start', { ...payload, loginId: payload.loginId || 0 }, { timeout: 900_000 }).then((r) => r.data),
   pollAccountQrLogin: (loginId: number) =>

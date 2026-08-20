@@ -419,6 +419,12 @@ export interface TelegramApiSettings {
   profiles?: TelegramApiProfile[] | null
   deviceProfiles?: TelegramDeviceProfile[] | null
   defaultDeviceProfileKey?: string | null
+  effectiveApiId?: string | null
+  effectiveApiSource?: string | null
+  effectiveApiName?: string | null
+  officialApiId?: string | null
+  officialApiName?: string | null
+  hasUsableApi?: boolean | null
 }
 
 export interface TelegramApiProfile {

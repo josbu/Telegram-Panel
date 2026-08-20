@@ -38,6 +38,13 @@ test('任一登录模式存在会话时都保持出口和模式锁定', () => {
   assert.match(source, /:disabled="logging \|\| hasActiveLoginSession"/)
 })
 
+test('手动登录在首次连接前选择并锁定设备指纹', () => {
+  assert.match(source, /本次登录设备指纹/)
+  assert.match(source, /deviceProfiles = ref<TelegramDeviceProfile\[\]>\(\[\]\)/)
+  assert.match(source, /deviceProfileKey: deviceProfileKey\.value \|\| null/)
+  assert.match(source, /:disabled="proxyRouteLocked"/)
+})
+
 test('重新生成二维码时复用冻结路由而不是先取消登录会话', () => {
   const body = functionBody('startQrLogin', 'pollQrLogin')
 
