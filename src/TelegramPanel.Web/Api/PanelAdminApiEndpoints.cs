@@ -2009,7 +2009,8 @@ public static class PanelAdminApiEndpoints
                     loginId,
                     request.ProxyStrategy,
                     request.ProxyId,
-                    cancellationToken);
+                    cancellationToken,
+                    request.DeviceProfileKey);
             }
         }
         catch (Exception ex) when (IsLoginProxyInputError(ex))
@@ -2047,7 +2048,8 @@ public static class PanelAdminApiEndpoints
                 loginId,
                 phone,
                 proxyState.Resolution,
-                apiCredentials);
+                apiCredentials,
+                proxyState.DeviceProfileKey);
         }
         catch (Exception ex) when (IsLoginProxyInputError(ex))
         {
@@ -2143,7 +2145,8 @@ public static class PanelAdminApiEndpoints
                     loginId,
                     request.ProxyStrategy,
                     request.ProxyId,
-                    cancellationToken);
+                    cancellationToken,
+                    request.DeviceProfileKey);
             }
         }
         catch (Exception ex) when (IsLoginProxyInputError(ex))
@@ -2165,7 +2168,8 @@ public static class PanelAdminApiEndpoints
             result = await accountService.StartQrLoginAsync(
                 loginId,
                 proxyState.Resolution,
-                apiCredentials);
+                apiCredentials,
+                proxyState.DeviceProfileKey);
         }
         catch
         {
@@ -6805,6 +6809,8 @@ public static class PanelAdminApiEndpoints
                     null));
             }
 
+            var deviceProfileKey = loginProxy.GetDeviceProfileKey(loginId);
+
             Account? account = null;
             try
             {
@@ -6813,7 +6819,8 @@ public static class PanelAdminApiEndpoints
                     accountManagement,
                     configuration,
                     twoFactorPasswordToSave,
-                    activate: false);
+                    activate: false,
+                    deviceProfileKey: deviceProfileKey);
                 await loginProxy.CompleteAsync(
                     loginId,
                     account.Id,
@@ -6932,6 +6939,8 @@ public static class PanelAdminApiEndpoints
                     null));
             }
 
+            var deviceProfileKey = loginProxy.GetDeviceProfileKey(result.LoginId);
+
             Account? account = null;
             try
             {
@@ -6940,7 +6949,8 @@ public static class PanelAdminApiEndpoints
                     accountManagement,
                     configuration,
                     twoFactorPasswordToSave,
-                    activate: false);
+                    activate: false,
+                    deviceProfileKey: deviceProfileKey);
                 await loginProxy.CompleteAsync(
                     result.LoginId,
                     account.Id,
@@ -7010,7 +7020,8 @@ public static class PanelAdminApiEndpoints
         AccountManagementService accountManagement,
         IConfiguration configuration,
         string? twoFactorPasswordToSave = null,
-        bool activate = true)
+        bool activate = true,
+        string? deviceProfileKey = null)
     {
         int apiId;
         string apiHash;
@@ -7023,6 +7034,11 @@ public static class PanelAdminApiEndpoints
         {
             throw new InvalidOperationException(apiError);
         }
+        var selectedDeviceProfile = TelegramDeviceProfileCatalog.Find(configuration, deviceProfileKey);
+        if (!string.IsNullOrWhiteSpace(deviceProfileKey) && selectedDeviceProfile == null)
+            throw new InvalidOperationException("登录设备指纹不存在或已停用");
+        var savedDeviceProfileKey = selectedDeviceProfile?.Key ?? TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration);
+
 
         var sessionsPath = configuration["Telegram:SessionsPath"] ?? "sessions";
         var phoneDigits = PhoneNumberFormatter.NormalizeToDigits(accountInfo.Phone);
@@ -7040,8 +7056,7 @@ public static class PanelAdminApiEndpoints
             existing.IsActive = activate;
             existing.ApiId = apiId;
             existing.ApiHash = apiHash;
-            if (string.IsNullOrWhiteSpace(existing.DeviceProfileKey))
-                existing.DeviceProfileKey = TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration);
+            existing.DeviceProfileKey = savedDeviceProfileKey;
             existing.TelegramStatusSummary = "正常";
             existing.TelegramStatusDetails = null;
             existing.TelegramStatusOk = true;
@@ -7063,7 +7078,7 @@ public static class PanelAdminApiEndpoints
             SessionPath = Path.Combine(sessionsPath, $"{phoneDigits}.session"),
             ApiId = apiId,
             ApiHash = apiHash,
-            DeviceProfileKey = TelegramDeviceProfileCatalog.ResolveDefaultKey(configuration),
+            DeviceProfileKey = savedDeviceProfileKey,
             IsActive = activate,
             TwoFactorPassword = normalizedTwoFactorPassword,
             CreatedAt = DateTime.UtcNow,
@@ -8081,11 +8096,13 @@ public sealed record StartAccountLoginRequestDto(
     string? Phone,
     int LoginId = 0,
     string? ProxyStrategy = null,
-    int? ProxyId = null);
+    int? ProxyId = null,
+    string? DeviceProfileKey = null);
 public sealed record StartAccountQrLoginRequestDto(
     int LoginId = 0,
     string? ProxyStrategy = null,
-    int? ProxyId = null);
+    int? ProxyId = null,
+    string? DeviceProfileKey = null);
 public sealed record AccountLoginSessionRequestDto(int LoginId);
 public sealed record AccountLoginCodeRequestDto(int LoginId, string? Code);
 public sealed record AccountLoginPasswordRequestDto(int LoginId, string? Password, bool? SaveTwoFactorPassword = null);

@@ -75,9 +75,9 @@ Socket 可用，且 WARP Compose 覆盖或 `Proxy:Warp:Enabled=true` 已生效�
 前置条件是账号 Session 有效，且面板能读取 `account.getAuthorizations`。成功判据是在账号详情的“在线设备”中，新导出授权的应用、设备型号和系统版本与导出前当前授权一致。失败排查先确认当前设备列表能正常加载，再检查账号代理和 Session；回滚方式是恢复到 v1.31.65，导出将恢复为按 ApiId/Session 稳定选择回退画像，不涉及现有 Session 文件格式迁移。
 ## 导入时选择设备指纹
 
-导入页的“导入后设备指纹”会列出侧栏「Telegram 设置 → 设备指纹」中的启用画像。选择结果会随 Zip、Session 文件和 StringSession 请求提交，并保存到账号的 `DeviceProfileKey`；留空时账号连接使用系统默认画像。手机号登录和二维码登录在首次入库时自动保存当前系统默认画像。
+导入页的“导入后设备指纹”会列出侧栏「设备指纹」中的启用画像。选择结果会随 Zip、Session 文件和 StringSession 请求提交，并保存到账号的 `DeviceProfileKey`；留空时账号连接使用系统默认画像。手机号登录和二维码登录也会在首次连接前提供“本次登录设备指纹”选择，成功入库后保存到账号。
 
-前置条件是已在「Telegram 设置 → 设备指纹」确认可用画像。成功判据是导入结果成功后进入账号详情，仍显示所选画像；清空账号画像并保存后，详情显示“跟随系统默认”。失败排查检查画像 key 是否被停用、数据库迁移是否完成和客户端缓存是否已清理；回滚方式是改回系统默认或恢复到迁移前版本并保留数据库备份。画像变更不会改写现有 Session，下一次创建 Telegram 客户端时生效。
+前置条件是已在侧栏「设备指纹」确认可用画像。成功判据是导入或手动登录结果成功后进入账号详情，仍显示所选画像；清空账号画像并保存后，详情显示“跟随系统默认”。失败排查检查画像 key 是否被停用、数据库迁移是否完成和客户端缓存是否已清理；回滚方式是改回系统默认或恢复到迁移前版本并保留数据库备份。画像变更不会改写现有 Session，下一次创建 Telegram 客户端时生效。
 
 
 ## Zip 逐账号批量代理
@@ -143,7 +143,7 @@ accounts.zip
 
 ## 导入 Session 文件或 StringSession
 
-`.session` 文件支持一次选择多个；StringSession 通过页面文本框导入。这两种方式使用 `GET /api/panel/settings` 返回的有效 Telegram API：未配置自定义 API 且未启用配置池时会回退到内置官方 Android API（ApiId `6`）；如需自建 API 或多 API 分配，可在「Telegram 设置 → Telegram API」配置。导入成功后，账号会保存本次分配到的 `ApiId/ApiHash`，后续不会被全局默认值覆盖。
+`.session` 文件支持一次选择多个；StringSession 通过页面文本框导入。这两种方式使用 `GET /api/panel/settings` 返回的有效 Telegram API：未配置自定义 API 且未启用配置池时会回退到内置官方 Android API（ApiId `6`）；如需自建 API 或多 API 分配，可在侧栏「Telegram API」配置。导入成功后，账号会保存本次分配到的 `ApiId/ApiHash`，后续不会被全局默认值覆盖。
 
 只提供 `.session` 时，系统会尝试从会话读取账号身份；如果 Session 已失效或格式不兼容，
 该条目会导入失败，不会写入一个看似成功但无法连接的账号。

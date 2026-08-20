@@ -60,6 +60,28 @@
         </div>
       </section>
 
+      <section class="login-device-profile" aria-label="手动登录设备指纹">
+        <div class="login-proxy-heading">
+          <span class="material-icons">fingerprint</span>
+          <div>
+            <div class="cell-main">本次登录设备指纹</div>
+            <div class="cell-sub">发送验证码或生成二维码前生效；成功后保存到账号，类似 TokensPro 的设备画像选择</div>
+          </div>
+        </div>
+        <el-select v-model="deviceProfileKey" class="login-device-select" filterable :disabled="proxyRouteLocked">
+          <el-option
+            v-for="profile in deviceProfiles"
+            :key="profile.key"
+            :value="profile.key"
+            :label="`${profile.name} · ${profile.family}`"
+          />
+        </el-select>
+        <div v-if="selectedDeviceProfile" class="login-device-summary">
+          <span class="material-icons">devices</span>
+          <span>{{ selectedDeviceProfile.deviceModel }} · {{ selectedDeviceProfile.systemVersion }} · App {{ selectedDeviceProfile.appVersion }}</span>
+        </div>
+      </section>
+
       <template v-if="loginMode === 'qr'">
         <div class="qr-body">
           <el-alert
@@ -327,8 +349,8 @@ import type {
   AccountProxyStrategy,
   AccountQrLoginResponse,
   OutboundProxy,
+  TelegramDeviceProfile,
 } from '@/api/types'
-
 type LoginStep = 'phone' | 'code' | 'password' | 'done'
 type LoginMode = 'qr' | 'phone'
 
@@ -363,6 +385,8 @@ const saveQrPasswordToSystem = ref(false)
 const proxies = ref<OutboundProxy[]>([])
 const proxyStrategy = ref<AccountProxyStrategy | ''>('')
 const proxyId = ref<number | null>(null)
+const deviceProfiles = ref<TelegramDeviceProfile[]>([])
+const deviceProfileKey = ref('')
 let qrTimer: number | undefined
 
 const modeOptions = [
@@ -383,6 +407,7 @@ const proxySelectionInvalid = computed(() =>
   || (proxyStrategy.value === 'warp_pool' && availableWarpPoolCount.value === 0),
 )
 const proxyRouteLocked = computed(() => logging.value || hasActiveLoginSession.value)
+const selectedDeviceProfile = computed(() => deviceProfiles.value.find((profile) => profile.key === deviceProfileKey.value))
 
 const stepIndex = computed(() => {
   if (currentStep.value === 'phone') return 0
@@ -472,6 +497,7 @@ async function next() {
       const response = await panelApi.startAccountLogin({
         phone: phone.value,
         loginId: loginId.value,
+        deviceProfileKey: deviceProfileKey.value || null,
         ...selectedProxyPayload(),
       })
       await handleLoginResponse(response)
@@ -514,6 +540,10 @@ async function next() {
 async function loadTelegramApiStatus() {
   try {
     const settings = await panelApi.settings()
+    deviceProfiles.value = settings.telegram.deviceProfiles || []
+    if (!deviceProfileKey.value) {
+      deviceProfileKey.value = settings.telegram.defaultDeviceProfileKey || deviceProfiles.value[0]?.key || ''
+    }
     const apiId = (settings.telegram.apiId || '').trim()
     const apiHash = (settings.telegram.apiHash || '').trim()
     const enabledProfile = (settings.telegram.profiles || []).find((profile) => {
@@ -558,6 +588,7 @@ async function startQrLogin() {
 
     const response = await panelApi.startAccountQrLogin({
       loginId: existingLoginId || undefined,
+      deviceProfileKey: deviceProfileKey.value || null,
       ...selectedProxyPayload(),
     })
     await handleQrResponse(response)
@@ -938,7 +969,8 @@ onMounted(async () => {
   min-width: 260px;
 }
 
-.login-proxy-route {
+.login-proxy-route,
+.login-device-profile {
   display: grid;
   gap: 12px;
   margin-bottom: 22px;
@@ -949,7 +981,8 @@ onMounted(async () => {
   background: var(--tp-panel);
 }
 
-.login-proxy-heading {
+.login-proxy-heading,
+.login-device-summary {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -966,8 +999,15 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
-.login-proxy-select {
+.login-proxy-select,
+.login-device-select {
   width: 100%;
+}
+
+.login-device-summary {
+  color: var(--tp-muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .login-proxy-notice {

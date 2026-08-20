@@ -54,7 +54,8 @@ public sealed class ManualLoginProxyRoutingTests
                 sessionPath,
                 "0123456789abcdef0123456789abcdef",
                 null,
-                new AccountProxyResolution(proxy, false)
+                new AccountProxyResolution(proxy, false),
+                null
             })!;
 
             Assert.NotNull(client.TcpHandler);
@@ -86,6 +87,7 @@ public sealed class ManualLoginProxyRoutingTests
                 "0123456789abcdef0123456789abcdef",
                 Path.Combine(Path.GetTempPath(), $"telegram-panel-null-route-{Guid.NewGuid():N}.session"),
                 "0123456789abcdef0123456789abcdef",
+                null,
                 null,
                 null
             }));
@@ -703,6 +705,37 @@ public sealed class ManualLoginProxyRoutingTests
         Assert.Same(original.Resolution, restored?.Resolution);
         Assert.False(store.TryClaimExisting(1702, out _));
         store.ReleaseLoginClaim(1702);
+    }
+
+    [Fact]
+    public async Task 手动登录首次连接会冻结设备指纹Key()
+    {
+        await using var fixture = await Fixture.CreateAsync(new Dictionary<string, string?>
+        {
+            ["Telegram:DefaultDeviceProfileKey"] = "custom-android",
+            ["Telegram:DeviceProfiles:0:Key"] = "custom-android",
+            ["Telegram:DeviceProfiles:0:Name"] = "Custom Android",
+            ["Telegram:DeviceProfiles:0:Family"] = "android",
+            ["Telegram:DeviceProfiles:0:AppVersion"] = "99.1",
+            ["Telegram:DeviceProfiles:0:DeviceModel"] = "Custom Phone",
+            ["Telegram:DeviceProfiles:0:SystemVersion"] = "Android 99",
+            ["Telegram:DeviceProfiles:0:SystemLangCode"] = "zh-CN",
+            ["Telegram:DeviceProfiles:0:LangCode"] = "zh",
+            ["Telegram:DeviceProfiles:0:Enabled"] = "true"
+        });
+
+        var state = await fixture.Coordinator.PrepareAsync(
+            1801,
+            "direct",
+            null,
+            CancellationToken.None,
+            "custom-android");
+
+        Assert.Equal("custom-android", state.DeviceProfileKey);
+        Assert.Equal("custom-android", fixture.Coordinator.GetDeviceProfileKey(1801));
+
+        await fixture.Coordinator.AbandonAsync(1801);
+        Assert.False(fixture.Coordinator.HasState(1801));
     }
 
     private sealed class Fixture : IAsyncDisposable

@@ -57,13 +57,13 @@ Vue 后台使用 `/api/panel` 下的管理接口。开启后台登录时，除�
 ```
 
 `profiles` 省略时保留当前 API 配置池；传空数组表示清空配置池。默认 `apiId/apiHash` 可留空，此时没有启用 API 配置池则使用内置 Telegram 官方 Android API（ApiId `6`，`effectiveApiSource=built_in_official`）；有 API 配置池时按启用项分配。服务端会校验每个 ApiHash 为 32 位十六进制字符串，名称不可重复，`weight` 规范到 `1-1000`。新账号登录和不自带 API 的导入入口使用启用 profile 做最少使用量分配；已有账号继续使用数据库中保存的 `ApiId/ApiHash`。
-### Telegram 设置与设备画像
+### Telegram API 与设备画像
 
-侧栏 `/telegram-api` 对应默认 Telegram API 和 API 配置池；侧栏 `/device-profiles` 对应内置/自定义设备画像和默认画像。两页最终都通过 `POST /api/panel/settings/telegram-api` 保存，设备画像请求沿用现有 `deviceProfiles` 与 `defaultDeviceProfileKey` 字段。
+侧栏 `/telegram-api` 对应默认 Telegram API 和 API 配置池；侧栏 `/device-profiles` 对应内置/自定义设备画像和默认画像。这两个入口作为独立侧栏菜单展示，不再藏在系统设置页。两页最终都通过 `POST /api/panel/settings/telegram-api` 保存，设备画像请求沿用现有 `deviceProfiles` 与 `defaultDeviceProfileKey` 字段。
 
 `GET /api/panel/settings` 返回有效 Telegram API、API 池、启用画像和默认画像 key；`GET /api/panel/settings/device-profiles` 返回同一画像目录的 `{ items, defaultKey }`。
 
-`PUT /api/panel/accounts/{id}` 的请求可携带 `deviceProfileKey`：传画像 key 表示绑定该账号，传空字符串表示清除绑定并跟随系统默认。`GET /api/panel/accounts/{id}` 返回 `deviceProfileKey`。`POST /api/panel/accounts/import/zip`、`POST /api/panel/accounts/import/session-files` 的 multipart 字段名为 `deviceProfileKey`；StringSession JSON 请求同名字段。未知或停用 key 返回 `400`，不会修改账号。
+`PUT /api/panel/accounts/{id}` 的请求可携带 `deviceProfileKey`：传画像 key 表示绑定该账号，传空字符串表示清除绑定并跟随系统默认。`GET /api/panel/accounts/{id}` 返回 `deviceProfileKey`。`POST /api/panel/accounts/import/zip`、`POST /api/panel/accounts/import/session-files` 的 multipart 字段名为 `deviceProfileKey`；StringSession JSON 请求同名字段。`POST /api/panel/accounts/login/start` 与 `POST /api/panel/accounts/login/qr/start` 也接受 `deviceProfileKey`，在发送验证码或生成二维码前应用该画像，并在登录成功后保存到账号。未知或停用 key 返回 `400` 或业务失败响应，不会修改账号。
 
 成功判据是保存后重新读取账号详情仍返回该 key，清空后返回 `null`；画像只影响客户端设备字段，不改变 API 凭据、代理策略或 Session 文件格式。数据库列由 `20260818090000_AddAccountDeviceProfileKey` 迁移创建。
 

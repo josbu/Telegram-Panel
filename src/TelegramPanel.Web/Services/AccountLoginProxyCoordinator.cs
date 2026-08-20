@@ -6,6 +6,7 @@ using TelegramPanel.Core.Models;
 using TelegramPanel.Core.Services;
 using TelegramPanel.Core.Services.Proxy;
 using TelegramPanel.Core.Utils;
+using TelegramPanel.Core.Services.Telegram;
 using TelegramPanel.Data.Entities;
 
 namespace TelegramPanel.Web.Services;
@@ -22,7 +23,8 @@ public sealed record AccountLoginProxyState(
     int? OwnedWarpProxyId,
     ResinLeaseControlSnapshot? ResinLease,
     string? TemporaryResinKey,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string? DeviceProfileKey = null);
 
 /// <summary>
 /// 临时独占一个仍在字典中的冻结路由，释放前过期清理和完成流程都不能取得它。
@@ -65,6 +67,12 @@ public sealed class AccountLoginProxyStateStore : IWarpProxyUsageGuard
 
         lock (_stateGate)
             return _states.ContainsKey(loginId);
+    }
+
+    public bool TryGet(int loginId, out AccountLoginProxyState? state)
+    {
+        lock (_stateGate)
+            return _states.TryGetValue(loginId, out state);
     }
 
     public bool OwnsWarpProxy(int proxyId)
@@ -440,6 +448,9 @@ public sealed class AccountLoginProxyCoordinator
 
     public bool HasState(int loginId) => _store.Contains(loginId);
 
+    public string? GetDeviceProfileKey(int loginId) =>
+        _store.TryGet(loginId, out var state) ? state?.DeviceProfileKey : null;
+
     /// <summary>
     /// 复用已经冻结的登录出口。客户端提交的选择必须与首次选择完全一致。
     /// </summary>
@@ -521,7 +532,8 @@ public sealed class AccountLoginProxyCoordinator
         int loginId,
         string? strategy,
         int? proxyId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? deviceProfileKey = null)
     {
         if (loginId <= 0)
             throw new ArgumentOutOfRangeException(nameof(loginId));
@@ -542,6 +554,11 @@ public sealed class AccountLoginProxyCoordinator
         ResinLeaseControlSnapshot? resinLease = null;
         string? temporaryResinKey = null;
         int? ownedWarpProxyId = null;
+        var selectedDeviceProfile = TelegramDeviceProfileCatalog.Find(_configuration, deviceProfileKey);
+        if (!string.IsNullOrWhiteSpace(deviceProfileKey) && selectedDeviceProfile == null)
+            throw new ArgumentException("登录设备指纹不存在或已停用");
+        var normalizedDeviceProfileKey = selectedDeviceProfile?.Key ?? TelegramDeviceProfileCatalog.ResolveDefaultKey(_configuration);
+
         IDisposable? warpRequestClaim = null;
 
         switch (normalizedStrategy)
@@ -661,7 +678,8 @@ public sealed class AccountLoginProxyCoordinator
             ownedWarpProxyId,
             resinLease,
             temporaryResinKey,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            normalizedDeviceProfileKey);
         try
         {
             if (!_store.TryAdd(state, out var stateError))
