@@ -130,4 +130,48 @@ public sealed class AutoChangeLoginEmailNoticeDetectorTests
         Assert.Null(decision.Match);
         Assert.Contains("强制模式", decision.Message);
     }
+
+    [Fact]
+    public void NormalizeDomains_accepts_multiple_separators_and_legacy_email_input()
+    {
+        var domains = AutoChangeLoginEmailTaskHandler.NormalizeDomains(new[]
+        {
+            "@old.example, new.example",
+            "user@third.example;OLD.example",
+            "mailto:fourth.example"
+        });
+
+        Assert.Equal(new[] { "old.example", "new.example", "third.example", "fourth.example" }, domains);
+    }
+
+    [Fact]
+    public void PickTargetDomain_excludes_previous_login_email_domain_when_possible()
+    {
+        var previousDomain = AutoChangeLoginEmailTaskHandler.ExtractDomainFromLoginEmailPattern("a***@old.example");
+
+        var picked = AutoChangeLoginEmailTaskHandler.PickTargetDomain(
+            new[] { "old.example", "new.example" },
+            previousDomain);
+
+        Assert.Equal("old.example", previousDomain);
+        Assert.Equal("new.example", picked);
+    }
+
+    [Fact]
+    public void PickTargetDomain_keeps_single_domain_for_backward_compatibility()
+    {
+        var picked = AutoChangeLoginEmailTaskHandler.PickTargetDomain(
+            new[] { "old.example" },
+            "old.example");
+
+        Assert.Equal("old.example", picked);
+    }
+
+    [Fact]
+    public void BuildEmailByPhone_normalizes_domain_input()
+    {
+        var email = AutoChangeLoginEmailTaskHandler.BuildEmailByPhone("+86 138 0000 0000", "User@Example.COM.");
+
+        Assert.Equal("8613800000000@example.com", email);
+    }
 }

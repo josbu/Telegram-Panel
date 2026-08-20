@@ -18,6 +18,9 @@ public sealed class AutoChangeLoginEmailTaskConfig
     [JsonPropertyName("domain")]
     public string? Domain { get; set; }
 
+    [JsonPropertyName("domains")]
+    public List<string> Domains { get; set; } = new();
+
     [JsonPropertyName("trigger_days_ago")]
     public int TriggerDaysAgo { get; set; } = 6;
 
@@ -62,6 +65,15 @@ public sealed class AutoChangeLoginEmailTaskItem
 
     [JsonPropertyName("email")]
     public string? Email { get; set; }
+
+    [JsonPropertyName("target_domain")]
+    public string? TargetDomain { get; set; }
+
+    [JsonPropertyName("previous_login_email_pattern")]
+    public string? PreviousLoginEmailPattern { get; set; }
+
+    [JsonPropertyName("previous_login_email_domain")]
+    public string? PreviousLoginEmailDomain { get; set; }
 
     [JsonPropertyName("result")]
     public string Result { get; set; } = AutoChangeLoginEmailTaskResult.Skipped;

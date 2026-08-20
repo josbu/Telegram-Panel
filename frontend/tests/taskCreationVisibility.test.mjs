@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const tasksSource = await readFile(new URL('../src/views/Tasks.vue', import.meta.url), 'utf8')
 const taskConfigFormSource = await readFile(new URL('../src/components/TaskConfigForm.vue', import.meta.url), 'utf8')
+const accountsSource = await readFile(new URL('../src/views/Accounts.vue', import.meta.url), 'utf8')
 const typesSource = await readFile(new URL('../src/api/types.ts', import.meta.url), 'utf8')
 
 test('新建任务展示宿主前端支持的专用表单任务类型', () => {
@@ -58,6 +59,22 @@ test('账号编号输入说明和解析支持逗号与顿号', () => {
   assert.match(taskConfigFormSource, /accountNumbersPlaceholder = '可选：每行一个，或用英文逗号、中文逗号、顿号分隔；如 #1,#2、#3'/)
   assert.match(taskConfigFormSource, /:placeholder="accountNumbersPlaceholder"/)
   assert.match(taskConfigFormSource, /\.split\(\/\[\\s,，、;；\]\+\//)
+})
+
+test('自动更改登录邮箱支持多域名池和原域名避让说明', () => {
+  assert.match(taskConfigFormSource, /label="邮箱域名池"/)
+  assert.match(taskConfigFormSource, /domains,/)
+  assert.match(taskConfigFormSource, /domain: domains\[0\] \|\| null/)
+  assert.match(taskConfigFormSource, /function normalizeEmailDomains\(value: unknown\)/)
+  assert.match(taskConfigFormSource, /多个域名会优先避开账号当前登录邮箱掩码中的原域名/)
+  assert.match(tasksSource, /邮箱域名池: \$\{domainText\}/)
+  assert.match(tasksSource, /previous_login_email_domain/)
+})
+
+test('账号详情展示登录邮箱状态', () => {
+  assert.match(accountsSource, /<el-descriptions-item label="登录邮箱">/)
+  assert.match(accountsSource, /panelApi\.loginEmailStatus\(row\.id\)/)
+  assert.match(accountsSource, /function formatLoginEmailStatus\(status: LoginEmailStatus \| null\)/)
 })
 
 test('待执行或执行中任务编辑前必须经过暂停屏障', () => {
